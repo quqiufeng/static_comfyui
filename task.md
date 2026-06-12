@@ -1,85 +1,63 @@
-# static_comfyui — 开发任务表
+# static_comfyui — ML → ELF 编译运行时
 
-## ComfyUI 代码库规模
+## 架构
 
 ```
-总计: 260 个 Python 文件, 98,533 行
-核心推理引擎: ~30 个文件, ~25,000 行
-```
-
-## 重写原则
-
-所有算子拆解为 DGEMM + 逐元素运算。
-
-## 任务进度
-
-### Phase 1: 张量运算基础设施 ✅
-```
-文件: sd_runtime/array_ops.static.py
-```
-
-### Phase 2: Conv2d + Attention 算子 ✅
-```
-文件: sd_runtime/nn_ops.static.py
+用户 StaticPy 代码 (.static.py)
+    │
+    ├── compiler/translate.py    ← Python AST → Scheme
+    ├── compiler/prelude.scm     ← 运行时基础库
+    └── compiler/stdlib.scm      ← ML 库（按需 dlopen）
+    │
+    ▼  Chez compile-file
+    │
+    .so 原生机器码
+    │
+    ├── runtime/dgemm_wrapper.c  ← GPU/CPU 矩阵乘
+    └── deliver.sh               ← 嵌入 scheme+boot+.so → ELF
+    │
+    ▼
+单文件 ELF（5.2MB，只依赖 libc）
 ```
 
-### Phase 3: UNet 块 (ResBlock, SpatialTransformer) ✅
-```
-文件: sd_runtime/unet_blocks.static.py
-```
+## 已覆盖的 ML C 库
 
-### Phase 4: UNet 完整前向 ✅
-```
-文件: sd_runtime/unet.static.py
-```
+cuBLAS / cuDNN / cuRAND / cuSOLVER / OpenBLAS / LAPACK
+libcurl / libcjson / XGBoost / LightGBM / ONNX Runtime
 
-### Phase 5: 采样器 (DDIM, Euler, CFG) ✅
-```
-文件: sd_runtime/samplers.static.py
-```
+全部运行时 dlopen，有就用，没有就跳过。
 
-### Phase 6: CLIP 文本编码 ✅
-```
-文件: sd_runtime/clip.static.py
-```
+## 完成进度
 
-### Phase 7: VAE 编解码 ⬜
-```
-文件: sd_runtime/vae.static.py
-状态: ⬜ 未开始
-```
+### 工具链 ✅
+- [x] compiler/translate.py — StaticPy → Scheme 翻译器
+- [x] compiler/prelude.scm — 运行时基础库
+- [x] compiler/stdlib.scm — ML 运行时（11 个 C 库按需加载）
+- [x] runtime/dgemm_wrapper.c — 矩阵乘（GPU cuBLAS / CPU 纯 C）
+- [x] build.sh — 一键编译 StaticPy → .so
+- [x] deliver.sh — 一键打包 → 单文件 ELF
 
-### Phase 8: 模型权重加载 ✅
-```
-文件: sd_runtime/model_loader.static.py + export_sd_weights.py
-```
+### SD 推理库 (sd_runtime/) ⬜
+- [x] array_ops.static.py — 逐元素运算 + softmax + norm
+- [x] nn_ops.static.py — Conv2d(im2col+dgemm) + Attention + up/downsample
+- [x] unet_blocks.static.py — ResBlock + SpatialTransformer
+- [x] samplers.static.py — DDIM / Euler / DPM++ / CFG
+- [x] clip.static.py — CLIP tokenizer + transformer
+- [x] model_loader.static.py — 权重加载
+- [x] unet.static.py — UNet scaffold
+- [x] vae.static.py — VAE decoder（conv_in + mid 已验证）
+- [x] main.static.py — 主入口
 
-### Phase 9: ControlNet ⬜
-```
-状态: ⬜ 未开始
-```
+### 已验证
+- [x] ELF 编译打包管线完整（5.2MB，ldd=libc only）
+- [x] conv2d(im2col+dgemm+bias) 正确
+- [x] group_norm / silu / upsample_nearest 正确
+- [x] VAE conv_in(16→512) + mid_blocks(512→512×2) 数值正确
 
-### Phase 10: txt2img 端到端集成 ✅
-```
-文件: sd_runtime/main.static.py
-```
-
-### Phase 11: img2img + HiRes Fix ⬜
-### Phase 12: LoRA 权重注入 ⬜
-### Phase 13: SDXL 支持 ⬜
-### Phase 14: CLI + 工作流 ⬜
-### Phase 15: ELF 打包 (deliver.sh) ⬜
-
----
-
-## 已完成
-```
-Phase 1  - sd_runtime/array_ops.static.py
-Phase 2  - sd_runtime/nn_ops.static.py
-Phase 3  - sd_runtime/unet_blocks.static.py
-Phase 4  - sd_runtime/unet.static.py
-Phase 5  - sd_runtime/samplers.static.py
-Phase 6  - sd_runtime/clip.static.py
-Phase 8  - sd_runtime/model_loader.static.py + export_sd_weights.py
-Phase 10 - sd_runtime/main.static.py
-```
+### 待完成
+- [ ] VAE decoder up blocks（需 encoder skip connections）
+- [ ] UNet 真实权重接入
+- [ ] CLIP 真实权重接入
+- [ ] txt2img 端到端管线
+- [ ] ControlNet / LoRA
+- [ ] img2img / HiRes Fix
