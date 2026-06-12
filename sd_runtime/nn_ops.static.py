@@ -68,30 +68,23 @@ def im2col(x: list[float], n: int, c: int, h: int, w: int,
             hi = hi + 1
         batch = batch + 1
 
-def conv2d(x: list[float], w: list[float], b: list[float],
-           n: int, c_in: int, c_out: int, h: int, w_in: int,
-           k_size: int, stride: int, pad: int) -> list[float]:
-    """Conv2d: x[n,c,h,w] @ w[c_out,c_in,k_size,k_size] → y[n,c_out,h_out,w_out]"""
-    h_out: int = (h + 2 * pad - k_size) // stride + 1
-    w_out: int = (w_in + 2 * pad - k_size) // stride + 1
-    n_cols: int = n * h_out * w_out
-    k_dim: int = c_in * k_size * k_size
-
-    col: list[float] = make_float_array(n_cols * k_dim)
-    im2col(x, n, c_in, h, w_in, k_size, stride, pad, col)
-
-    y: list[float] = make_float_array(n_cols * c_out)
-    dgemm_row_auto(n_cols, c_out, k_dim, 1.0, col, w, 0.0, y)
-
-    # 加偏置
-    i: int = 0
-    while i < n_cols:
-        j: int = 0
-        while j < c_out:
-            float_array_set(y, i * c_out + j, float_array_ref(y, i * c_out + j) + float_array_ref(b, j))
-            j = j + 1
-        i = i + 1
-    return y
+def conv2d(x, w, b, n, c_in, c_out, h, w_in, k_size, stride, pad):
+    _h_out: int = (h + 2*pad - k_size)//stride + 1
+    _w_out: int = (w_in + 2*pad - k_size)//stride + 1
+    _ncol: int = n * _h_out * _w_out
+    _kdim: int = c_in * k_size * k_size
+    _col: list[float] = make_float_array(_ncol * _kdim)
+    im2col(x, n, c_in, h, w_in, k_size, stride, pad, _col)
+    _y: list[float] = make_float_array(_ncol * c_out)
+    dgemm_row_auto(_ncol, c_out, _kdim, 1.0, _col, w, 0.0, _y)
+    _i: int = 0
+    while _i < _ncol:
+        _j: int = 0
+        while _j < c_out:
+            float_array_set(_y, _i*c_out+_j, float_array_ref(_y, _i*c_out+_j) + float_array_ref(b, _j))
+            _j = _j + 1
+        _i = _i + 1
+    return _y
 
 def conv2d_transposed(x: list[float], w: list[float], b: list[float],
                       n: int, c_in: int, c_out: int, h: int, w_in: int,
