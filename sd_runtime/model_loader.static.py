@@ -7,13 +7,12 @@ extern fn fread(buf: ptr, size: int, count: int, fp: ptr) -> int from "libc"
 extern fn fclose(fp: ptr) -> int from "libc"
 
 def load_bin(fn: str, n: int) -> list[float]:
-    """读取 .bin 权重文件到 float 数组"""
-    r: list[float] = make_float_array(n)
-    fp = fopen(fn, "rb")
-    if fp != 0:
-        fread(r, 8, n, fp)
-        fclose(fp)
-    return r
+    _r: list[float] = make_float_array(n)
+    _fp = fopen(fn, "rb")
+    if _fp != 0:
+        fread(_r, 8, n, _fp)
+        fclose(_fp)
+    return _r
 
 def weights_exist(dir: str) -> int:
     """检查权重文件是否存在"""

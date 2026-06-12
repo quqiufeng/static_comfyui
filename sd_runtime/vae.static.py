@@ -1,10 +1,9 @@
-# vae.static.py — Auto-generated VAE Decoder
-# 由权重文件 /tmp/sd_weights/vae/ 自动生成
+# vae.static.py — VAE Decoder (separate function, inline conv2d)
 
 def vae_decoder_forward(latent, weights_dir, n, height, width):
     h_cur: list[float]
-    h: int = height
-    w: int = width
+    hh: int = height
+    ww: int = width
 
     conv_in_bias = load_bin(weights_dir + "/decoder_conv_in_bias.bin", 512)
     conv_in_weight = load_bin(weights_dir + "/decoder_conv_in_weight.bin", 73728)
@@ -145,110 +144,664 @@ def vae_decoder_forward(latent, weights_dir, n, height, width):
     up_3_upsample_conv_bias = load_bin(weights_dir + "/decoder_up_3_upsample_conv_bias.bin", 512)
     up_3_upsample_conv_weight = load_bin(weights_dir + "/decoder_up_3_upsample_conv_weight.bin", 2359296)
 
-    # conv_in: 16 -> 512
-    h_cur = conv2d(latent, conv_in_weight, conv_in_bias, n, 16, 512, h, w, 3, 1, 1)
-
-    # mid blocks
-    h_cur = group_norm(h_cur, mid_block_1_norm1_weight, mid_block_1_norm1_bias, 32, 512, h*w)
-    arr_silu(h_cur, h_cur, n*512*h*w)
-    h_cur = conv2d(h_cur, mid_block_1_conv1_weight, mid_block_1_conv1_bias, n, 512, 512, h, w, 3, 1, 1)
-    h_cur = group_norm(h_cur, mid_block_1_norm2_weight, mid_block_1_norm2_bias, 32, 512, h*w)
-    arr_silu(h_cur, h_cur, n*512*h*w)
-    h_cur = conv2d(h_cur, mid_block_1_conv2_weight, mid_block_1_conv2_bias, n, 512, 512, h, w, 3, 1, 1)
-    h_cur = group_norm(h_cur, mid_block_2_norm1_weight, mid_block_2_norm1_bias, 32, 512, h*w)
-    arr_silu(h_cur, h_cur, n*512*h*w)
-    h_cur = conv2d(h_cur, mid_block_2_conv1_weight, mid_block_2_conv1_bias, n, 512, 512, h, w, 3, 1, 1)
-    h_cur = group_norm(h_cur, mid_block_2_norm2_weight, mid_block_2_norm2_bias, 32, 512, h*w)
-    arr_silu(h_cur, h_cur, n*512*h*w)
-    h_cur = conv2d(h_cur, mid_block_2_conv2_weight, mid_block_2_conv2_bias, n, 512, 512, h, w, 3, 1, 1)
-
-    # up blocks (using actual weight shapes)
-    # up.1 upsample: 256 -> 256
-    # up.2 upsample: 512 -> 512
-    # up.3 upsample: 512 -> 512
-    h_cur = group_norm(h_cur, up_0_block_0_norm1_weight, up_0_block_0_norm1_bias, 32, 256, h*w)
-    arr_silu(h_cur, h_cur, n*256*h*w)
-    h_cur = conv2d(h_cur, up_0_block_0_conv1_weight, up_0_block_0_conv1_bias, n, 256, 256, h, w, 3, 1, 1)
-    h_cur = group_norm(h_cur, up_0_block_0_norm2_weight, up_0_block_0_norm2_bias, 32, 256, h*w)
-    arr_silu(h_cur, h_cur, n*256*h*w)
-    h_cur = conv2d(h_cur, up_0_block_0_conv2_weight, up_0_block_0_conv2_bias, n, 256, 256, h, w, 3, 1, 1)
-    h_cur = group_norm(h_cur, up_0_block_1_norm1_weight, up_0_block_1_norm1_bias, 32, 128, h*w)
-    arr_silu(h_cur, h_cur, n*128*h*w)
-    h_cur = conv2d(h_cur, up_0_block_1_conv1_weight, up_0_block_1_conv1_bias, n, 128, 128, h, w, 3, 1, 1)
-    h_cur = group_norm(h_cur, up_0_block_1_norm2_weight, up_0_block_1_norm2_bias, 32, 128, h*w)
-    arr_silu(h_cur, h_cur, n*128*h*w)
-    h_cur = conv2d(h_cur, up_0_block_1_conv2_weight, up_0_block_1_conv2_bias, n, 128, 128, h, w, 3, 1, 1)
-    h_cur = group_norm(h_cur, up_0_block_2_norm1_weight, up_0_block_2_norm1_bias, 32, 128, h*w)
-    arr_silu(h_cur, h_cur, n*128*h*w)
-    h_cur = conv2d(h_cur, up_0_block_2_conv1_weight, up_0_block_2_conv1_bias, n, 128, 128, h, w, 3, 1, 1)
-    h_cur = group_norm(h_cur, up_0_block_2_norm2_weight, up_0_block_2_norm2_bias, 32, 128, h*w)
-    arr_silu(h_cur, h_cur, n*128*h*w)
-    h_cur = conv2d(h_cur, up_0_block_2_conv2_weight, up_0_block_2_conv2_bias, n, 128, 128, h, w, 3, 1, 1)
-    h_cur = upsample_nearest(h_cur, n, 256, h, w, 2)
-    h = h*2; w = w*2
-    h_cur = conv2d(h_cur, up_1_upsample_conv_weight, up_1_upsample_conv_bias, n, 256, 256, h, w, 3, 1, 1)
-    h_cur = group_norm(h_cur, up_1_block_0_norm1_weight, up_1_block_0_norm1_bias, 32, 512, h*w)
-    arr_silu(h_cur, h_cur, n*512*h*w)
-    h_cur = conv2d(h_cur, up_1_block_0_conv1_weight, up_1_block_0_conv1_bias, n, 512, 512, h, w, 3, 1, 1)
-    h_cur = group_norm(h_cur, up_1_block_0_norm2_weight, up_1_block_0_norm2_bias, 32, 512, h*w)
-    arr_silu(h_cur, h_cur, n*512*h*w)
-    h_cur = conv2d(h_cur, up_1_block_0_conv2_weight, up_1_block_0_conv2_bias, n, 512, 512, h, w, 3, 1, 1)
-    h_cur = group_norm(h_cur, up_1_block_1_norm1_weight, up_1_block_1_norm1_bias, 32, 256, h*w)
-    arr_silu(h_cur, h_cur, n*256*h*w)
-    h_cur = conv2d(h_cur, up_1_block_1_conv1_weight, up_1_block_1_conv1_bias, n, 256, 256, h, w, 3, 1, 1)
-    h_cur = group_norm(h_cur, up_1_block_1_norm2_weight, up_1_block_1_norm2_bias, 32, 256, h*w)
-    arr_silu(h_cur, h_cur, n*256*h*w)
-    h_cur = conv2d(h_cur, up_1_block_1_conv2_weight, up_1_block_1_conv2_bias, n, 256, 256, h, w, 3, 1, 1)
-    h_cur = group_norm(h_cur, up_1_block_2_norm1_weight, up_1_block_2_norm1_bias, 32, 256, h*w)
-    arr_silu(h_cur, h_cur, n*256*h*w)
-    h_cur = conv2d(h_cur, up_1_block_2_conv1_weight, up_1_block_2_conv1_bias, n, 256, 256, h, w, 3, 1, 1)
-    h_cur = group_norm(h_cur, up_1_block_2_norm2_weight, up_1_block_2_norm2_bias, 32, 256, h*w)
-    arr_silu(h_cur, h_cur, n*256*h*w)
-    h_cur = conv2d(h_cur, up_1_block_2_conv2_weight, up_1_block_2_conv2_bias, n, 256, 256, h, w, 3, 1, 1)
-    h_cur = upsample_nearest(h_cur, n, 512, h, w, 2)
-    h = h*2; w = w*2
-    h_cur = conv2d(h_cur, up_2_upsample_conv_weight, up_2_upsample_conv_bias, n, 512, 512, h, w, 3, 1, 1)
-    h_cur = group_norm(h_cur, up_2_block_0_norm1_weight, up_2_block_0_norm1_bias, 32, 512, h*w)
-    arr_silu(h_cur, h_cur, n*512*h*w)
-    h_cur = conv2d(h_cur, up_2_block_0_conv1_weight, up_2_block_0_conv1_bias, n, 512, 512, h, w, 3, 1, 1)
-    h_cur = group_norm(h_cur, up_2_block_0_norm2_weight, up_2_block_0_norm2_bias, 32, 512, h*w)
-    arr_silu(h_cur, h_cur, n*512*h*w)
-    h_cur = conv2d(h_cur, up_2_block_0_conv2_weight, up_2_block_0_conv2_bias, n, 512, 512, h, w, 3, 1, 1)
-    h_cur = group_norm(h_cur, up_2_block_1_norm1_weight, up_2_block_1_norm1_bias, 32, 512, h*w)
-    arr_silu(h_cur, h_cur, n*512*h*w)
-    h_cur = conv2d(h_cur, up_2_block_1_conv1_weight, up_2_block_1_conv1_bias, n, 512, 512, h, w, 3, 1, 1)
-    h_cur = group_norm(h_cur, up_2_block_1_norm2_weight, up_2_block_1_norm2_bias, 32, 512, h*w)
-    arr_silu(h_cur, h_cur, n*512*h*w)
-    h_cur = conv2d(h_cur, up_2_block_1_conv2_weight, up_2_block_1_conv2_bias, n, 512, 512, h, w, 3, 1, 1)
-    h_cur = group_norm(h_cur, up_2_block_2_norm1_weight, up_2_block_2_norm1_bias, 32, 512, h*w)
-    arr_silu(h_cur, h_cur, n*512*h*w)
-    h_cur = conv2d(h_cur, up_2_block_2_conv1_weight, up_2_block_2_conv1_bias, n, 512, 512, h, w, 3, 1, 1)
-    h_cur = group_norm(h_cur, up_2_block_2_norm2_weight, up_2_block_2_norm2_bias, 32, 512, h*w)
-    arr_silu(h_cur, h_cur, n*512*h*w)
-    h_cur = conv2d(h_cur, up_2_block_2_conv2_weight, up_2_block_2_conv2_bias, n, 512, 512, h, w, 3, 1, 1)
-    h_cur = upsample_nearest(h_cur, n, 512, h, w, 2)
-    h = h*2; w = w*2
-    h_cur = conv2d(h_cur, up_3_upsample_conv_weight, up_3_upsample_conv_bias, n, 512, 512, h, w, 3, 1, 1)
-    h_cur = group_norm(h_cur, up_3_block_0_norm1_weight, up_3_block_0_norm1_bias, 32, 512, h*w)
-    arr_silu(h_cur, h_cur, n*512*h*w)
-    h_cur = conv2d(h_cur, up_3_block_0_conv1_weight, up_3_block_0_conv1_bias, n, 512, 512, h, w, 3, 1, 1)
-    h_cur = group_norm(h_cur, up_3_block_0_norm2_weight, up_3_block_0_norm2_bias, 32, 512, h*w)
-    arr_silu(h_cur, h_cur, n*512*h*w)
-    h_cur = conv2d(h_cur, up_3_block_0_conv2_weight, up_3_block_0_conv2_bias, n, 512, 512, h, w, 3, 1, 1)
-    h_cur = group_norm(h_cur, up_3_block_1_norm1_weight, up_3_block_1_norm1_bias, 32, 512, h*w)
-    arr_silu(h_cur, h_cur, n*512*h*w)
-    h_cur = conv2d(h_cur, up_3_block_1_conv1_weight, up_3_block_1_conv1_bias, n, 512, 512, h, w, 3, 1, 1)
-    h_cur = group_norm(h_cur, up_3_block_1_norm2_weight, up_3_block_1_norm2_bias, 32, 512, h*w)
-    arr_silu(h_cur, h_cur, n*512*h*w)
-    h_cur = conv2d(h_cur, up_3_block_1_conv2_weight, up_3_block_1_conv2_bias, n, 512, 512, h, w, 3, 1, 1)
-    h_cur = group_norm(h_cur, up_3_block_2_norm1_weight, up_3_block_2_norm1_bias, 32, 512, h*w)
-    arr_silu(h_cur, h_cur, n*512*h*w)
-    h_cur = conv2d(h_cur, up_3_block_2_conv1_weight, up_3_block_2_conv1_bias, n, 512, 512, h, w, 3, 1, 1)
-    h_cur = group_norm(h_cur, up_3_block_2_norm2_weight, up_3_block_2_norm2_bias, 32, 512, h*w)
-    arr_silu(h_cur, h_cur, n*512*h*w)
-    h_cur = conv2d(h_cur, up_3_block_2_conv2_weight, up_3_block_2_conv2_bias, n, 512, 512, h, w, 3, 1, 1)
-    h_cur = group_norm(h_cur, norm_out_weight, norm_out_bias, 32, 128, h*w)
-    arr_silu(h_cur, h_cur, n*128*h*w)
-    out = conv2d(h_cur, conv_out_weight, conv_out_bias, n, 128, 3, h, w, 3, 1, 1)
-    arr_clip(out, 0.0, 1.0, n*3*h*w)
-    return out
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 16 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    im2col(latent, 1, 16, hh, ww, 3, 1, 1, _col)
+    print("alloc y2..."); _y = make_float_array(_nc * 512)
+    dgemm_row_auto(_nc, 512, _kd, 1.0, _col, conv_in_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 512:
+            float_array_set(_y, __i*512+__j, float_array_ref(_y, __i*512+__j) + float_array_ref(conv_in_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 1")
+    group_norm(h_cur, mid_block_1_norm1_weight, mid_block_1_norm1_bias, 32, 512, hh*ww)
+    print("step 2")
+    arr_silu(h_cur, h_cur, 1*512*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 512 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    print("im2col2..."); print("mid_conv_start..."); im2col(h_cur, 1, 512, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 512)
+    dgemm_row_auto(_nc, 512, _kd, 1.0, _col, mid_block_1_conv1_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 512:
+            float_array_set(_y, __i*512+__j, float_array_ref(_y, __i*512+__j) + float_array_ref(mid_block_1_conv1_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 3")
+    group_norm(h_cur, mid_block_1_norm2_weight, mid_block_1_norm2_bias, 32, 512, hh*ww)
+    print("step 4")
+    arr_silu(h_cur, h_cur, 1*512*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 512 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    print("im2col2..."); im2col(h_cur, 1, 512, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 512)
+    dgemm_row_auto(_nc, 512, _kd, 1.0, _col, mid_block_1_conv2_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 512:
+            float_array_set(_y, __i*512+__j, float_array_ref(_y, __i*512+__j) + float_array_ref(mid_block_1_conv2_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 5")
+    group_norm(h_cur, mid_block_2_norm1_weight, mid_block_2_norm1_bias, 32, 512, hh*ww)
+    print("step 6")
+    arr_silu(h_cur, h_cur, 1*512*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 512 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    print("im2col2..."); im2col(h_cur, 1, 512, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 512)
+    dgemm_row_auto(_nc, 512, _kd, 1.0, _col, mid_block_2_conv1_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 512:
+            float_array_set(_y, __i*512+__j, float_array_ref(_y, __i*512+__j) + float_array_ref(mid_block_2_conv1_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 7")
+    group_norm(h_cur, mid_block_2_norm2_weight, mid_block_2_norm2_bias, 32, 512, hh*ww)
+    print("step 8")
+    arr_silu(h_cur, h_cur, 1*512*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 512 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    print("im2col2..."); im2col(h_cur, 1, 512, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 512)
+    dgemm_row_auto(_nc, 512, _kd, 1.0, _col, mid_block_2_conv2_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 512:
+            float_array_set(_y, __i*512+__j, float_array_ref(_y, __i*512+__j) + float_array_ref(mid_block_2_conv2_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 9")
+    group_norm(h_cur, up_0_block_0_norm1_weight, up_0_block_0_norm1_bias, 32, 256, hh*ww)
+    print("step 10")
+    arr_silu(h_cur, h_cur, 1*256*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 256 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    im2col(h_cur, 1, 256, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 256)
+    dgemm_row_auto(_nc, 256, _kd, 1.0, _col, up_0_block_0_conv1_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 256:
+            float_array_set(_y, __i*256+__j, float_array_ref(_y, __i*256+__j) + float_array_ref(up_0_block_0_conv1_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 11")
+    group_norm(h_cur, up_0_block_0_norm2_weight, up_0_block_0_norm2_bias, 32, 256, hh*ww)
+    print("step 12")
+    arr_silu(h_cur, h_cur, 1*256*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 256 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    im2col(h_cur, 1, 256, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 256)
+    dgemm_row_auto(_nc, 256, _kd, 1.0, _col, up_0_block_0_conv2_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 256:
+            float_array_set(_y, __i*256+__j, float_array_ref(_y, __i*256+__j) + float_array_ref(up_0_block_0_conv2_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 13")
+    group_norm(h_cur, up_0_block_1_norm1_weight, up_0_block_1_norm1_bias, 32, 128, hh*ww)
+    print("step 14")
+    arr_silu(h_cur, h_cur, 1*128*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 128 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    im2col(h_cur, 1, 128, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 128)
+    dgemm_row_auto(_nc, 128, _kd, 1.0, _col, up_0_block_1_conv1_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 128:
+            float_array_set(_y, __i*128+__j, float_array_ref(_y, __i*128+__j) + float_array_ref(up_0_block_1_conv1_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 15")
+    group_norm(h_cur, up_0_block_1_norm2_weight, up_0_block_1_norm2_bias, 32, 128, hh*ww)
+    print("step 16")
+    arr_silu(h_cur, h_cur, 1*128*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 128 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    im2col(h_cur, 1, 128, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 128)
+    dgemm_row_auto(_nc, 128, _kd, 1.0, _col, up_0_block_1_conv2_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 128:
+            float_array_set(_y, __i*128+__j, float_array_ref(_y, __i*128+__j) + float_array_ref(up_0_block_1_conv2_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 17")
+    group_norm(h_cur, up_0_block_2_norm1_weight, up_0_block_2_norm1_bias, 32, 128, hh*ww)
+    print("step 18")
+    arr_silu(h_cur, h_cur, 1*128*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 128 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    im2col(h_cur, 1, 128, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 128)
+    dgemm_row_auto(_nc, 128, _kd, 1.0, _col, up_0_block_2_conv1_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 128:
+            float_array_set(_y, __i*128+__j, float_array_ref(_y, __i*128+__j) + float_array_ref(up_0_block_2_conv1_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 19")
+    group_norm(h_cur, up_0_block_2_norm2_weight, up_0_block_2_norm2_bias, 32, 128, hh*ww)
+    print("step 20")
+    arr_silu(h_cur, h_cur, 1*128*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 128 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    im2col(h_cur, 1, 128, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 128)
+    dgemm_row_auto(_nc, 128, _kd, 1.0, _col, up_0_block_2_conv2_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 128:
+            float_array_set(_y, __i*128+__j, float_array_ref(_y, __i*128+__j) + float_array_ref(up_0_block_2_conv2_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 21")
+    h_cur = upsample_nearest(h_cur, 1, 256, hh, ww, 2)
+    print("step 22")
+    hh = hh*2; ww = ww*2
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 256 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    im2col(h_cur, 1, 256, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 256)
+    dgemm_row_auto(_nc, 256, _kd, 1.0, _col, up_1_upsample_conv_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 256:
+            float_array_set(_y, __i*256+__j, float_array_ref(_y, __i*256+__j) + float_array_ref(up_1_upsample_conv_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 23")
+    group_norm(h_cur, up_1_block_0_norm1_weight, up_1_block_0_norm1_bias, 32, 512, hh*ww)
+    print("step 24")
+    arr_silu(h_cur, h_cur, 1*512*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 512 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    print("im2col2..."); im2col(h_cur, 1, 512, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 512)
+    dgemm_row_auto(_nc, 512, _kd, 1.0, _col, up_1_block_0_conv1_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 512:
+            float_array_set(_y, __i*512+__j, float_array_ref(_y, __i*512+__j) + float_array_ref(up_1_block_0_conv1_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 25")
+    group_norm(h_cur, up_1_block_0_norm2_weight, up_1_block_0_norm2_bias, 32, 512, hh*ww)
+    print("step 26")
+    arr_silu(h_cur, h_cur, 1*512*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 512 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    print("im2col2..."); im2col(h_cur, 1, 512, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 512)
+    dgemm_row_auto(_nc, 512, _kd, 1.0, _col, up_1_block_0_conv2_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 512:
+            float_array_set(_y, __i*512+__j, float_array_ref(_y, __i*512+__j) + float_array_ref(up_1_block_0_conv2_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 27")
+    group_norm(h_cur, up_1_block_1_norm1_weight, up_1_block_1_norm1_bias, 32, 256, hh*ww)
+    print("step 28")
+    arr_silu(h_cur, h_cur, 1*256*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 256 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    im2col(h_cur, 1, 256, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 256)
+    dgemm_row_auto(_nc, 256, _kd, 1.0, _col, up_1_block_1_conv1_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 256:
+            float_array_set(_y, __i*256+__j, float_array_ref(_y, __i*256+__j) + float_array_ref(up_1_block_1_conv1_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 29")
+    group_norm(h_cur, up_1_block_1_norm2_weight, up_1_block_1_norm2_bias, 32, 256, hh*ww)
+    print("step 30")
+    arr_silu(h_cur, h_cur, 1*256*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 256 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    im2col(h_cur, 1, 256, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 256)
+    dgemm_row_auto(_nc, 256, _kd, 1.0, _col, up_1_block_1_conv2_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 256:
+            float_array_set(_y, __i*256+__j, float_array_ref(_y, __i*256+__j) + float_array_ref(up_1_block_1_conv2_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 31")
+    group_norm(h_cur, up_1_block_2_norm1_weight, up_1_block_2_norm1_bias, 32, 256, hh*ww)
+    print("step 32")
+    arr_silu(h_cur, h_cur, 1*256*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 256 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    im2col(h_cur, 1, 256, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 256)
+    dgemm_row_auto(_nc, 256, _kd, 1.0, _col, up_1_block_2_conv1_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 256:
+            float_array_set(_y, __i*256+__j, float_array_ref(_y, __i*256+__j) + float_array_ref(up_1_block_2_conv1_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 33")
+    group_norm(h_cur, up_1_block_2_norm2_weight, up_1_block_2_norm2_bias, 32, 256, hh*ww)
+    print("step 34")
+    arr_silu(h_cur, h_cur, 1*256*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 256 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    im2col(h_cur, 1, 256, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 256)
+    dgemm_row_auto(_nc, 256, _kd, 1.0, _col, up_1_block_2_conv2_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 256:
+            float_array_set(_y, __i*256+__j, float_array_ref(_y, __i*256+__j) + float_array_ref(up_1_block_2_conv2_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 35")
+    h_cur = upsample_nearest(h_cur, 1, 512, hh, ww, 2)
+    print("step 36")
+    hh = hh*2; ww = ww*2
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 512 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    print("im2col2..."); im2col(h_cur, 1, 512, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 512)
+    dgemm_row_auto(_nc, 512, _kd, 1.0, _col, up_2_upsample_conv_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 512:
+            float_array_set(_y, __i*512+__j, float_array_ref(_y, __i*512+__j) + float_array_ref(up_2_upsample_conv_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 37")
+    group_norm(h_cur, up_2_block_0_norm1_weight, up_2_block_0_norm1_bias, 32, 512, hh*ww)
+    print("step 38")
+    arr_silu(h_cur, h_cur, 1*512*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 512 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    print("im2col2..."); im2col(h_cur, 1, 512, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 512)
+    dgemm_row_auto(_nc, 512, _kd, 1.0, _col, up_2_block_0_conv1_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 512:
+            float_array_set(_y, __i*512+__j, float_array_ref(_y, __i*512+__j) + float_array_ref(up_2_block_0_conv1_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 39")
+    group_norm(h_cur, up_2_block_0_norm2_weight, up_2_block_0_norm2_bias, 32, 512, hh*ww)
+    print("step 40")
+    arr_silu(h_cur, h_cur, 1*512*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 512 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    print("im2col2..."); im2col(h_cur, 1, 512, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 512)
+    dgemm_row_auto(_nc, 512, _kd, 1.0, _col, up_2_block_0_conv2_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 512:
+            float_array_set(_y, __i*512+__j, float_array_ref(_y, __i*512+__j) + float_array_ref(up_2_block_0_conv2_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 41")
+    group_norm(h_cur, up_2_block_1_norm1_weight, up_2_block_1_norm1_bias, 32, 512, hh*ww)
+    print("step 42")
+    arr_silu(h_cur, h_cur, 1*512*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 512 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    print("im2col2..."); im2col(h_cur, 1, 512, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 512)
+    dgemm_row_auto(_nc, 512, _kd, 1.0, _col, up_2_block_1_conv1_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 512:
+            float_array_set(_y, __i*512+__j, float_array_ref(_y, __i*512+__j) + float_array_ref(up_2_block_1_conv1_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 43")
+    group_norm(h_cur, up_2_block_1_norm2_weight, up_2_block_1_norm2_bias, 32, 512, hh*ww)
+    print("step 44")
+    arr_silu(h_cur, h_cur, 1*512*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 512 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    print("im2col2..."); im2col(h_cur, 1, 512, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 512)
+    dgemm_row_auto(_nc, 512, _kd, 1.0, _col, up_2_block_1_conv2_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 512:
+            float_array_set(_y, __i*512+__j, float_array_ref(_y, __i*512+__j) + float_array_ref(up_2_block_1_conv2_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 45")
+    group_norm(h_cur, up_2_block_2_norm1_weight, up_2_block_2_norm1_bias, 32, 512, hh*ww)
+    print("step 46")
+    arr_silu(h_cur, h_cur, 1*512*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 512 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    print("im2col2..."); im2col(h_cur, 1, 512, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 512)
+    dgemm_row_auto(_nc, 512, _kd, 1.0, _col, up_2_block_2_conv1_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 512:
+            float_array_set(_y, __i*512+__j, float_array_ref(_y, __i*512+__j) + float_array_ref(up_2_block_2_conv1_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 47")
+    group_norm(h_cur, up_2_block_2_norm2_weight, up_2_block_2_norm2_bias, 32, 512, hh*ww)
+    print("step 48")
+    arr_silu(h_cur, h_cur, 1*512*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 512 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    print("im2col2..."); im2col(h_cur, 1, 512, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 512)
+    dgemm_row_auto(_nc, 512, _kd, 1.0, _col, up_2_block_2_conv2_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 512:
+            float_array_set(_y, __i*512+__j, float_array_ref(_y, __i*512+__j) + float_array_ref(up_2_block_2_conv2_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 49")
+    h_cur = upsample_nearest(h_cur, 1, 512, hh, ww, 2)
+    print("step 50")
+    hh = hh*2; ww = ww*2
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 512 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    print("im2col2..."); im2col(h_cur, 1, 512, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 512)
+    dgemm_row_auto(_nc, 512, _kd, 1.0, _col, up_3_upsample_conv_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 512:
+            float_array_set(_y, __i*512+__j, float_array_ref(_y, __i*512+__j) + float_array_ref(up_3_upsample_conv_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 51")
+    group_norm(h_cur, up_3_block_0_norm1_weight, up_3_block_0_norm1_bias, 32, 512, hh*ww)
+    print("step 52")
+    arr_silu(h_cur, h_cur, 1*512*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 512 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    print("im2col2..."); im2col(h_cur, 1, 512, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 512)
+    dgemm_row_auto(_nc, 512, _kd, 1.0, _col, up_3_block_0_conv1_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 512:
+            float_array_set(_y, __i*512+__j, float_array_ref(_y, __i*512+__j) + float_array_ref(up_3_block_0_conv1_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 53")
+    group_norm(h_cur, up_3_block_0_norm2_weight, up_3_block_0_norm2_bias, 32, 512, hh*ww)
+    print("step 54")
+    arr_silu(h_cur, h_cur, 1*512*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 512 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    print("im2col2..."); im2col(h_cur, 1, 512, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 512)
+    dgemm_row_auto(_nc, 512, _kd, 1.0, _col, up_3_block_0_conv2_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 512:
+            float_array_set(_y, __i*512+__j, float_array_ref(_y, __i*512+__j) + float_array_ref(up_3_block_0_conv2_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 55")
+    group_norm(h_cur, up_3_block_1_norm1_weight, up_3_block_1_norm1_bias, 32, 512, hh*ww)
+    print("step 56")
+    arr_silu(h_cur, h_cur, 1*512*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 512 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    print("im2col2..."); im2col(h_cur, 1, 512, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 512)
+    dgemm_row_auto(_nc, 512, _kd, 1.0, _col, up_3_block_1_conv1_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 512:
+            float_array_set(_y, __i*512+__j, float_array_ref(_y, __i*512+__j) + float_array_ref(up_3_block_1_conv1_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 57")
+    group_norm(h_cur, up_3_block_1_norm2_weight, up_3_block_1_norm2_bias, 32, 512, hh*ww)
+    print("step 58")
+    arr_silu(h_cur, h_cur, 1*512*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 512 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    print("im2col2..."); im2col(h_cur, 1, 512, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 512)
+    dgemm_row_auto(_nc, 512, _kd, 1.0, _col, up_3_block_1_conv2_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 512:
+            float_array_set(_y, __i*512+__j, float_array_ref(_y, __i*512+__j) + float_array_ref(up_3_block_1_conv2_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 59")
+    group_norm(h_cur, up_3_block_2_norm1_weight, up_3_block_2_norm1_bias, 32, 512, hh*ww)
+    print("step 60")
+    arr_silu(h_cur, h_cur, 1*512*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 512 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    print("im2col2..."); im2col(h_cur, 1, 512, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 512)
+    dgemm_row_auto(_nc, 512, _kd, 1.0, _col, up_3_block_2_conv1_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 512:
+            float_array_set(_y, __i*512+__j, float_array_ref(_y, __i*512+__j) + float_array_ref(up_3_block_2_conv1_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 61")
+    group_norm(h_cur, up_3_block_2_norm2_weight, up_3_block_2_norm2_bias, 32, 512, hh*ww)
+    print("step 62")
+    arr_silu(h_cur, h_cur, 1*512*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 512 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    print("im2col2..."); im2col(h_cur, 1, 512, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 512)
+    dgemm_row_auto(_nc, 512, _kd, 1.0, _col, up_3_block_2_conv2_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 512:
+            float_array_set(_y, __i*512+__j, float_array_ref(_y, __i*512+__j) + float_array_ref(up_3_block_2_conv2_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 63")
+    group_norm(h_cur, norm_out_weight, norm_out_bias, 32, 128, hh*ww)
+    print("step 64")
+    arr_silu(h_cur, h_cur, 1*128*hh*ww)
+    _ho = (hh + 2*1 - 3)//1 + 1
+    _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = 1 * _ho * _wo
+    _kd = 128 * 3 * 3
+    print("alloc col2..."); _col = make_float_array(_nc * _kd)
+    im2col(h_cur, 1, 128, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * 3)
+    dgemm_row_auto(_nc, 3, _kd, 1.0, _col, conv_out_weight, 0.0, _y)
+    __i = 0
+    while __i < _nc:
+        __j = 0
+        while __j < 3:
+            float_array_set(_y, __i*3+__j, float_array_ref(_y, __i*3+__j) + float_array_ref(conv_out_bias, __j))
+            __j = __j + 1
+        __i = __i + 1
+    h_cur = _y
+    print("step 65")
+    arr_clip(h_cur, 0.0, 1.0, 1*3*hh*ww)
+    return h_cur
+    # mid blocks only - returning 512ch activation
+    return h_cur
