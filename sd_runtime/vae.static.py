@@ -1,54 +1,204 @@
-# vae.static.py — SD Runtime VAE 编解码
-# Phase 7: VAE encoder (图像→latent) + VAE decoder (latent→图像)
+# vae.static.py — SD Runtime VAE Decoder
+# Phase 7: VAE decoder (latent → 图像)
+# 权重由 ae.safetensors 通过 export_sd_weights.py 导出为 .bin 文件
+# 加载目录: weights_dir/decoder_*.bin
 
-# ─── VAE Decoder ─────────────────────────────────────
-# 结构:
-#   Conv2d(4→512) → ResBlock(512)×2 → Upsample(→2x)
-#   ResBlock(512→256)×2 → Upsample(→2x)
-#   ResBlock(256→128)×2 → Upsample(→2x)
-#   ResBlock(128→64)×2 → Upsample(→2x)
-#   Conv2d(64→3) → 像素值
-
-def vae_decoder_forward(latent: list[float], params,
-                         n: int, c_in: int, h: int, w: int) -> list[float]:
-    """VAE Decoder: latent → 图像 RGB
-    latent: [n, 4, h/8, w/8]
-    输出: [n, 3, h, w] 像素值 (0~1)
+def vae_decoder_forward(latent, weights_dir, n, h, w):
+    """VAE Decoder 前向
+    latent: [n, 16, h, w]  (SDXL VAE latent 16ch)
+    输出: [n, 3, h*8, w*8] 像素值 (0~1)
     """
-    scale_h: int = h  # latent 已经 /8
-    scale_w: int = w
-    # 先用 Conv2d 4→512
-    h_current: list[float] = conv2d(latent, params, params, n, 4, 512, h, w, 3, 1, 1)
-
-    # 4 个上采样阶段
-    chs: list[int] = [512, 256, 128, 64]
-    stage: int = 0
-    while stage < 4:
-        # ResBlock × 2
-        # Upsample: 最近邻 2x
-        h_current = upsample_nearest(h_current, n, chs[stage], scale_h, scale_w, 2)
-        scale_h = scale_h * 2
-        scale_w = scale_w * 2
-        stage = stage + 1
-
-    # 输出 Conv2d: 64 → 3
-    out: list[float] = conv2d(h_current, params, params, n, 64, 3, scale_h, scale_w, 3, 1, 1)
-    # 像素值 clip 到 [0, 1]
-    arr_clip(out, 0.0, 1.0, n * 3 * scale_h * scale_w)
+    # 加载所有权重
+    conv_in_bias = load_bin(weights_dir + "/decoder_conv_in_bias.bin", 512)
+    conv_in_weight = load_bin(weights_dir + "/decoder_conv_in_weight.bin", 512*16*3*3)
+    conv_out_bias = load_bin(weights_dir + "/decoder_conv_out_bias.bin", 3)
+    conv_out_weight = load_bin(weights_dir + "/decoder_conv_out_weight.bin", 64*3*3*3)
+    mid_block_1_norm1_bias = load_bin(weights_dir + "/decoder_mid_block_1_norm1_bias.bin", 512)
+    mid_block_1_norm1_weight = load_bin(weights_dir + "/decoder_mid_block_1_norm1_weight.bin", 512)
+    mid_block_1_conv1_bias = load_bin(weights_dir + "/decoder_mid_block_1_conv1_bias.bin", 512)
+    mid_block_1_conv1_weight = load_bin(weights_dir + "/decoder_mid_block_1_conv1_weight.bin", 512*512*3*3)
+    mid_block_1_norm2_bias = load_bin(weights_dir + "/decoder_mid_block_1_norm2_bias.bin", 512)
+    mid_block_1_norm2_weight = load_bin(weights_dir + "/decoder_mid_block_1_norm2_weight.bin", 512)
+    mid_block_1_conv2_bias = load_bin(weights_dir + "/decoder_mid_block_1_conv2_bias.bin", 512)
+    mid_block_1_conv2_weight = load_bin(weights_dir + "/decoder_mid_block_1_conv2_weight.bin", 512*512*3*3)
+    mid_block_2_norm1_bias = load_bin(weights_dir + "/decoder_mid_block_2_norm1_bias.bin", 512)
+    mid_block_2_norm1_weight = load_bin(weights_dir + "/decoder_mid_block_2_norm1_weight.bin", 512)
+    mid_block_2_conv1_bias = load_bin(weights_dir + "/decoder_mid_block_2_conv1_bias.bin", 512)
+    mid_block_2_conv1_weight = load_bin(weights_dir + "/decoder_mid_block_2_conv1_weight.bin", 512*512*3*3)
+    mid_block_2_norm2_bias = load_bin(weights_dir + "/decoder_mid_block_2_norm2_bias.bin", 512)
+    mid_block_2_norm2_weight = load_bin(weights_dir + "/decoder_mid_block_2_norm2_weight.bin", 512)
+    mid_block_2_conv2_bias = load_bin(weights_dir + "/decoder_mid_block_2_conv2_bias.bin", 512)
+    mid_block_2_conv2_weight = load_bin(weights_dir + "/decoder_mid_block_2_conv2_weight.bin", 512*512*3*3)
+    up_0_block_1_norm1_bias = load_bin(weights_dir + "/decoder_up_0_block_1_norm1_bias.bin", 512)
+    up_0_block_1_norm1_weight = load_bin(weights_dir + "/decoder_up_0_block_1_norm1_weight.bin", 512)
+    up_0_block_1_conv1_bias = load_bin(weights_dir + "/decoder_up_0_block_1_conv1_bias.bin", 512)
+    up_0_block_1_conv1_weight = load_bin(weights_dir + "/decoder_up_0_block_1_conv1_weight.bin", 512*512*3*3)
+    up_0_block_1_norm2_bias = load_bin(weights_dir + "/decoder_up_0_block_1_norm2_bias.bin", 512)
+    up_0_block_1_norm2_weight = load_bin(weights_dir + "/decoder_up_0_block_1_norm2_weight.bin", 512)
+    up_0_block_1_conv2_bias = load_bin(weights_dir + "/decoder_up_0_block_1_conv2_bias.bin", 512)
+    up_0_block_1_conv2_weight = load_bin(weights_dir + "/decoder_up_0_block_1_conv2_weight.bin", 512*512*3*3)
+    up_0_block_2_norm1_bias = load_bin(weights_dir + "/decoder_up_0_block_2_norm1_bias.bin", 512)
+    up_0_block_2_norm1_weight = load_bin(weights_dir + "/decoder_up_0_block_2_norm1_weight.bin", 512)
+    up_0_block_2_conv1_bias = load_bin(weights_dir + "/decoder_up_0_block_2_conv1_bias.bin", 512)
+    up_0_block_2_conv1_weight = load_bin(weights_dir + "/decoder_up_0_block_2_conv1_weight.bin", 512*512*3*3)
+    up_0_block_2_norm2_bias = load_bin(weights_dir + "/decoder_up_0_block_2_norm2_bias.bin", 512)
+    up_0_block_2_norm2_weight = load_bin(weights_dir + "/decoder_up_0_block_2_norm2_weight.bin", 512)
+    up_0_block_2_conv2_bias = load_bin(weights_dir + "/decoder_up_0_block_2_conv2_bias.bin", 512)
+    up_0_block_2_conv2_weight = load_bin(weights_dir + "/decoder_up_0_block_2_conv2_weight.bin", 512*512*3*3)
+    up_0_conv_bias = load_bin(weights_dir + "/decoder_up_0_conv_bias.bin", 256)
+    up_0_conv_weight = load_bin(weights_dir + "/decoder_up_0_conv_weight.bin", 512*256*3*3)
+    up_1_block_1_norm1_bias = load_bin(weights_dir + "/decoder_up_1_block_1_norm1_bias.bin", 256)
+    up_1_block_1_norm1_weight = load_bin(weights_dir + "/decoder_up_1_block_1_norm1_weight.bin", 256)
+    up_1_block_1_conv1_bias = load_bin(weights_dir + "/decoder_up_1_block_1_conv1_bias.bin", 256)
+    up_1_block_1_conv1_weight = load_bin(weights_dir + "/decoder_up_1_block_1_conv1_weight.bin", 256*256*3*3)
+    up_1_block_1_norm2_bias = load_bin(weights_dir + "/decoder_up_1_block_1_norm2_bias.bin", 256)
+    up_1_block_1_norm2_weight = load_bin(weights_dir + "/decoder_up_1_block_1_norm2_weight.bin", 256)
+    up_1_block_1_conv2_bias = load_bin(weights_dir + "/decoder_up_1_block_1_conv2_bias.bin", 256)
+    up_1_block_1_conv2_weight = load_bin(weights_dir + "/decoder_up_1_block_1_conv2_weight.bin", 256*256*3*3)
+    up_1_block_2_norm1_bias = load_bin(weights_dir + "/decoder_up_1_block_2_norm1_bias.bin", 256)
+    up_1_block_2_norm1_weight = load_bin(weights_dir + "/decoder_up_1_block_2_norm1_weight.bin", 256)
+    up_1_block_2_conv1_bias = load_bin(weights_dir + "/decoder_up_1_block_2_conv1_bias.bin", 256)
+    up_1_block_2_conv1_weight = load_bin(weights_dir + "/decoder_up_1_block_2_conv1_weight.bin", 256*256*3*3)
+    up_1_block_2_norm2_bias = load_bin(weights_dir + "/decoder_up_1_block_2_norm2_bias.bin", 256)
+    up_1_block_2_norm2_weight = load_bin(weights_dir + "/decoder_up_1_block_2_norm2_weight.bin", 256)
+    up_1_block_2_conv2_bias = load_bin(weights_dir + "/decoder_up_1_block_2_conv2_bias.bin", 256)
+    up_1_block_2_conv2_weight = load_bin(weights_dir + "/decoder_up_1_block_2_conv2_weight.bin", 256*256*3*3)
+    up_1_conv_bias = load_bin(weights_dir + "/decoder_up_1_conv_bias.bin", 128)
+    up_1_conv_weight = load_bin(weights_dir + "/decoder_up_1_conv_weight.bin", 256*128*3*3)
+    up_2_block_1_norm1_bias = load_bin(weights_dir + "/decoder_up_2_block_1_norm1_bias.bin", 128)
+    up_2_block_1_norm1_weight = load_bin(weights_dir + "/decoder_up_2_block_1_norm1_weight.bin", 128)
+    up_2_block_1_conv1_bias = load_bin(weights_dir + "/decoder_up_2_block_1_conv1_bias.bin", 128)
+    up_2_block_1_conv1_weight = load_bin(weights_dir + "/decoder_up_2_block_1_conv1_weight.bin", 128*128*3*3)
+    up_2_block_1_norm2_bias = load_bin(weights_dir + "/decoder_up_2_block_1_norm2_bias.bin", 128)
+    up_2_block_1_norm2_weight = load_bin(weights_dir + "/decoder_up_2_block_1_norm2_weight.bin", 128)
+    up_2_block_1_conv2_bias = load_bin(weights_dir + "/decoder_up_2_block_1_conv2_bias.bin", 128)
+    up_2_block_1_conv2_weight = load_bin(weights_dir + "/decoder_up_2_block_1_conv2_weight.bin", 128*128*3*3)
+    up_2_block_2_norm1_bias = load_bin(weights_dir + "/decoder_up_2_block_2_norm1_bias.bin", 128)
+    up_2_block_2_norm1_weight = load_bin(weights_dir + "/decoder_up_2_block_2_norm1_weight.bin", 128)
+    up_2_block_2_conv1_bias = load_bin(weights_dir + "/decoder_up_2_block_2_conv1_bias.bin", 128)
+    up_2_block_2_conv1_weight = load_bin(weights_dir + "/decoder_up_2_block_2_conv1_weight.bin", 128*128*3*3)
+    up_2_block_2_norm2_bias = load_bin(weights_dir + "/decoder_up_2_block_2_norm2_bias.bin", 128)
+    up_2_block_2_norm2_weight = load_bin(weights_dir + "/decoder_up_2_block_2_norm2_weight.bin", 128)
+    up_2_block_2_conv2_bias = load_bin(weights_dir + "/decoder_up_2_block_2_conv2_bias.bin", 128)
+    up_2_block_2_conv2_weight = load_bin(weights_dir + "/decoder_up_2_block_2_conv2_weight.bin", 128*128*3*3)
+    up_2_conv_bias = load_bin(weights_dir + "/decoder_up_2_conv_bias.bin", 64)
+    up_2_conv_weight = load_bin(weights_dir + "/decoder_up_2_conv_weight.bin", 128*64*3*3)
+    up_3_block_1_norm1_bias = load_bin(weights_dir + "/decoder_up_3_block_1_norm1_bias.bin", 64)
+    up_3_block_1_norm1_weight = load_bin(weights_dir + "/decoder_up_3_block_1_norm1_weight.bin", 64)
+    up_3_block_1_conv1_bias = load_bin(weights_dir + "/decoder_up_3_block_1_conv1_bias.bin", 64)
+    up_3_block_1_conv1_weight = load_bin(weights_dir + "/decoder_up_3_block_1_conv1_weight.bin", 64*64*3*3)
+    up_3_block_1_norm2_bias = load_bin(weights_dir + "/decoder_up_3_block_1_norm2_bias.bin", 64)
+    up_3_block_1_norm2_weight = load_bin(weights_dir + "/decoder_up_3_block_1_norm2_weight.bin", 64)
+    up_3_block_1_conv2_bias = load_bin(weights_dir + "/decoder_up_3_block_1_conv2_bias.bin", 64)
+    up_3_block_1_conv2_weight = load_bin(weights_dir + "/decoder_up_3_block_1_conv2_weight.bin", 64*64*3*3)
+    up_3_block_2_norm1_bias = load_bin(weights_dir + "/decoder_up_3_block_2_norm1_bias.bin", 64)
+    up_3_block_2_norm1_weight = load_bin(weights_dir + "/decoder_up_3_block_2_norm1_weight.bin", 64)
+    up_3_block_2_conv1_bias = load_bin(weights_dir + "/decoder_up_3_block_2_conv1_bias.bin", 64)
+    up_3_block_2_conv1_weight = load_bin(weights_dir + "/decoder_up_3_block_2_conv1_weight.bin", 64*64*3*3)
+    up_3_block_2_norm2_bias = load_bin(weights_dir + "/decoder_up_3_block_2_norm2_bias.bin", 64)
+    up_3_block_2_norm2_weight = load_bin(weights_dir + "/decoder_up_3_block_2_norm2_weight.bin", 64)
+    up_3_block_2_conv2_bias = load_bin(weights_dir + "/decoder_up_3_block_2_conv2_bias.bin", 64)
+    up_3_block_2_conv2_weight = load_bin(weights_dir + "/decoder_up_3_block_2_conv2_weight.bin", 64*64*3*3)
+    norm_out_bias = load_bin(weights_dir + "/decoder_norm_out_bias.bin", 64)
+    norm_out_weight = load_bin(weights_dir + "/decoder_norm_out_weight.bin", 64)
+    
+    # conv_in: 16 → 512
+    h = conv2d(latent, conv_in_weight, conv_in_bias, n, 16, 512, h, w, 3, 1, 1)
+    
+    # mid blocks
+    h = group_norm(h, mid_block_1_norm1_weight, mid_block_1_norm1_bias, 32, 512, h*w)
+    arr_silu(h, h, n*512*h*w)
+    h = conv2d(h, mid_block_1_conv1_weight, mid_block_1_conv1_bias, n, 512, 512, h, w, 3, 1, 1)
+    h = group_norm(h, mid_block_1_norm2_weight, mid_block_1_norm2_bias, 32, 512, h*w)
+    arr_silu(h, h, n*512*h*w)
+    h = conv2d(h, mid_block_1_conv2_weight, mid_block_1_conv2_bias, n, 512, 512, h, w, 3, 1, 1)
+    
+    h = group_norm(h, mid_block_2_norm1_weight, mid_block_2_norm1_bias, 32, 512, h*w)
+    arr_silu(h, h, n*512*h*w)
+    h = conv2d(h, mid_block_2_conv1_weight, mid_block_2_conv1_bias, n, 512, 512, h, w, 3, 1, 1)
+    h = group_norm(h, mid_block_2_norm2_weight, mid_block_2_norm2_bias, 32, 512, h*w)
+    arr_silu(h, h, n*512*h*w)
+    h = conv2d(h, mid_block_2_conv2_weight, mid_block_2_conv2_bias, n, 512, 512, h, w, 3, 1, 1)
+    
+    # up blocks (4 stages, 512→256→128→64)
+    h = upsample_nearest(h, n, 512, h, w, 2)
+    h = conv2d(h, up_0_conv_weight, up_0_conv_bias, n, 512, 256, h*2, w*2, 3, 1, 1)
+    
+    # up.0 (256ch)
+    h = group_norm(h, up_0_block_1_norm1_weight, up_0_block_1_norm1_bias, 32, 256, h*w)
+    arr_silu(h, h, n*256*h*w)
+    h = conv2d(h, up_0_block_1_conv1_weight, up_0_block_1_conv1_bias, n, 256, 256, h, w, 3, 1, 1)
+    h = group_norm(h, up_0_block_1_norm2_weight, up_0_block_1_norm2_bias, 32, 256, h*w)
+    arr_silu(h, h, n*256*h*w)
+    h = conv2d(h, up_0_block_1_conv2_weight, up_0_block_1_conv2_bias, n, 256, 256, h, w, 3, 1, 1)
+    
+    h = group_norm(h, up_0_block_2_norm1_weight, up_0_block_2_norm1_bias, 32, 256, h*w)
+    arr_silu(h, h, n*256*h*w)
+    h = conv2d(h, up_0_block_2_conv1_weight, up_0_block_2_conv1_bias, n, 256, 256, h, w, 3, 1, 1)
+    h = group_norm(h, up_0_block_2_norm2_weight, up_0_block_2_norm2_bias, 32, 256, h*w)
+    arr_silu(h, h, n*256*h*w)
+    h = conv2d(h, up_0_block_2_conv2_weight, up_0_block_2_conv2_bias, n, 256, 256, h, w, 3, 1, 1)
+    
+    # up.1 (128ch)
+    h = upsample_nearest(h, n, 256, h, w, 2)
+    h = conv2d(h, up_1_conv_weight, up_1_conv_bias, n, 256, 128, h*2, w*2, 3, 1, 1)
+    
+    h = group_norm(h, up_1_block_1_norm1_weight, up_1_block_1_norm1_bias, 32, 128, h*w)
+    arr_silu(h, h, n*128*h*w)
+    h = conv2d(h, up_1_block_1_conv1_weight, up_1_block_1_conv1_bias, n, 128, 128, h, w, 3, 1, 1)
+    h = group_norm(h, up_1_block_1_norm2_weight, up_1_block_1_norm2_bias, 32, 128, h*w)
+    arr_silu(h, h, n*128*h*w)
+    h = conv2d(h, up_1_block_1_conv2_weight, up_1_block_1_conv2_bias, n, 128, 128, h, w, 3, 1, 1)
+    
+    h = group_norm(h, up_1_block_2_norm1_weight, up_1_block_2_norm1_bias, 32, 128, h*w)
+    arr_silu(h, h, n*128*h*w)
+    h = conv2d(h, up_1_block_2_conv1_weight, up_1_block_2_conv1_bias, n, 128, 128, h, w, 3, 1, 1)
+    h = group_norm(h, up_1_block_2_norm2_weight, up_1_block_2_norm2_bias, 32, 128, h*w)
+    arr_silu(h, h, n*128*h*w)
+    h = conv2d(h, up_1_block_2_conv2_weight, up_1_block_2_conv2_bias, n, 128, 128, h, w, 3, 1, 1)
+    
+    # up.2 (64ch)
+    h = upsample_nearest(h, n, 128, h, w, 2)
+    h = conv2d(h, up_2_conv_weight, up_2_conv_bias, n, 128, 64, h*2, w*2, 3, 1, 1)
+    
+    h = group_norm(h, up_2_block_1_norm1_weight, up_2_block_1_norm1_bias, 32, 64, h*w)
+    arr_silu(h, h, n*64*h*w)
+    h = conv2d(h, up_2_block_1_conv1_weight, up_2_block_1_conv1_bias, n, 64, 64, h, w, 3, 1, 1)
+    h = group_norm(h, up_2_block_1_norm2_weight, up_2_block_1_norm2_bias, 32, 64, h*w)
+    arr_silu(h, h, n*64*h*w)
+    h = conv2d(h, up_2_block_1_conv2_weight, up_2_block_1_conv2_bias, n, 64, 64, h, w, 3, 1, 1)
+    
+    h = group_norm(h, up_2_block_2_norm1_weight, up_2_block_2_norm1_bias, 32, 64, h*w)
+    arr_silu(h, h, n*64*h*w)
+    h = conv2d(h, up_2_block_2_conv1_weight, up_2_block_2_conv1_bias, n, 64, 64, h, w, 3, 1, 1)
+    h = group_norm(h, up_2_block_2_norm2_weight, up_2_block_2_norm2_bias, 32, 64, h*w)
+    arr_silu(h, h, n*64*h*w)
+    h = conv2d(h, up_2_block_2_conv2_weight, up_2_block_2_conv2_bias, n, 64, 64, h, w, 3, 1, 1)
+    
+    # up.3 (64ch, no upsample)
+    h = group_norm(h, up_3_block_1_norm1_weight, up_3_block_1_norm1_bias, 32, 64, h*w)
+    arr_silu(h, h, n*64*h*w)
+    h = conv2d(h, up_3_block_1_conv1_weight, up_3_block_1_conv1_bias, n, 64, 64, h, w, 3, 1, 1)
+    h = group_norm(h, up_3_block_1_norm2_weight, up_3_block_1_norm2_bias, 32, 64, h*w)
+    arr_silu(h, h, n*64*h*w)
+    h = conv2d(h, up_3_block_1_conv2_weight, up_3_block_1_conv2_bias, n, 64, 64, h, w, 3, 1, 1)
+    
+    h = group_norm(h, up_3_block_2_norm1_weight, up_3_block_2_norm1_bias, 32, 64, h*w)
+    arr_silu(h, h, n*64*h*w)
+    h = conv2d(h, up_3_block_2_conv1_weight, up_3_block_2_conv1_bias, n, 64, 64, h, w, 3, 1, 1)
+    h = group_norm(h, up_3_block_2_norm2_weight, up_3_block_2_norm2_bias, 32, 64, h*w)
+    arr_silu(h, h, n*64*h*w)
+    h = conv2d(h, up_3_block_2_conv2_weight, up_3_block_2_conv2_bias, n, 64, 64, h, w, 3, 1, 1)
+    
+    # norm_out → conv_out: 64 → 3
+    h = group_norm(h, norm_out_weight, norm_out_bias, 32, 64, h*w)
+    arr_silu(h, h, n*64*h*w)
+    out = conv2d(h, conv_out_weight, conv_out_bias, n, 64, 3, h, w, 3, 1, 1)
+    arr_clip(out, 0.0, 1.0, n*3*h*w)
     return out
 
-def vae_encoder_forward(image: list[float], params,
-                         n: int, h: int, w: int) -> list[float]:
-    """VAE Encoder: 图像 → latent
-    image: [n, 3, h, w] 像素值 (0~1)
-    输出: [n, 4, h/8, w/8]
-    """
-    # 4 个下采样阶段
-    chs: list[int] = [64, 128, 256, 512]
-    h_current: list[float] = make_float_array(n * chs[0] * h * w)
-    arr_fill(h_current, 0.0, n * chs[0] * h * w)
-
-    # 简化：直接返回均值 latent
-    latent: list[float] = make_float_array(n * 4 * h // 8 * w // 8)
+def vae_encoder_forward(image, weights_dir, n, h, w):
+    """VAE Encoder（简化占位）"""
+    latent = make_float_array(n * 4 * h // 8 * w // 8)
     arr_fill(latent, 0.0, n * 4 * h // 8 * w // 8)
     return latent
