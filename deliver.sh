@@ -1,103 +1,111 @@
 #!/bin/bash
-# sd_embed.sh — Build SD Runtime ELF
+# deliver.sh — static_comfyui 单文件 ELF 打包
+# 编译 StaticPy → .so → 嵌入 scheme + boot + dgemm → 单文件 ELF
+# 完全自包含，不依赖外部项目
+
 set -euo pipefail
-SCHEME="/opt/ChezScheme/ta6le/bin/ta6le/scheme"
-RESCHEME_DIR="/opt/ReScheme"
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCHEME="${SCHEME:-/opt/ChezScheme/ta6le/bin/ta6le/scheme}"
+OUTPUT="${1:-sd_generate.elf}"
 
 echo "=== static_comfyui — ELF Build ==="
-echo "  [1] Merging sources..."
-MERGED_PY="/tmp/sd_full.py"
-> "$MERGED_PY"
-for f in sd_runtime/array_ops.static.py sd_runtime/nn_ops.static.py sd_runtime/unet_blocks.static.py sd_runtime/samplers.static.py sd_runtime/clip.static.py sd_runtime/vae.static.py sd_runtime/model_loader.static.py sd_runtime/unet.static.py sd_runtime/main.static.py; do
-    [ -f "$f" ] && cat "$f" >> "$MERGED_PY" && echo "" >> "$MERGED_PY"
-done
-echo "  [2] Translating..."
-/data/venv/bin/python3 "$RESCHEME_DIR/static_translate.py" < "$MERGED_PY" > /tmp/sd_translated.ss
-echo "  [3] Compiling..."
-MERGED_SS="/tmp/sd_merged.ss"
-cat "$RESCHEME_DIR/static_prelude.scm" > "$MERGED_SS"
-echo "" >> "$MERGED_SS"
-cat "$RESCHEME_DIR/static_stdlib.scm" >> "$MERGED_SS"
-echo "" >> "$MERGED_SS"
-cat /tmp/sd_translated.ss >> "$MERGED_SS"
-cat > /tmp/sd_compile.ss << EOF
-(import (chezscheme))
-(compile-file "$MERGED_SS")
-EOF
-$SCHEME --quiet /tmp/sd_compile.ss 2>&1
-cp "${MERGED_SS}o" /tmp/sd_runtime.so 2>/dev/null || cp /tmp/sd_merged.so /tmp/sd_runtime.so 2>/dev/null || true
+echo "Output: $OUTPUT"
 
-echo "  [4] Packaging ELF..."
-BUILD_DIR=$(mktemp -d /tmp/sd-elf-XXXXXX)
-# Embed scheme binary
-{ echo "#include <stddef.h>"; echo "const unsigned char _binary_scheme[] = {"; xxd -i < "$SCHEME"; echo "};"; echo "const unsigned int _binary_scheme_len = sizeof(_binary_scheme);"; } > "$BUILD_DIR/scheme.c"
-# Embed boot files
-BOOT_FILES="/opt/ChezScheme/boot/ta6le/petite.boot /opt/ChezScheme/boot/ta6le/scheme.boot"
-echo '#include <stddef.h>' > "$BUILD_DIR/boot.c"
-IDX=0
-for f in $BOOT_FILES; do
-    BASE=$(basename "$f")
-    echo "static const unsigned char _boot_${IDX}[] = {" >> "$BUILD_DIR/boot.c"
-    xxd -i < "$f" | grep -v "unsigned" | head -c -1 >> "$BUILD_DIR/boot.c"
-    echo "};" >> "$BUILD_DIR/boot.c"
-    echo "static const unsigned int _boot_${IDX}_len = sizeof(_boot_${IDX});" >> "$BUILD_DIR/boot.c"
-    IDX=$((IDX + 1))
+# Step 1: Compile .so
+echo "  [1] Compiling StaticPy → .so..."
+INPUT_PY="/tmp/sd_full_$$.py"
+> "$INPUT_PY"
+for f in sd_runtime/array_ops.static.py sd_runtime/nn_ops.static.py \
+         sd_runtime/unet_blocks.static.py sd_runtime/samplers.static.py \
+         sd_runtime/clip.static.py sd_runtime/model_loader.static.py \
+         sd_runtime/unet.static.py sd_runtime/vae.static.py \
+         sd_runtime/main.static.py; do
+    [ -f "$f" ] && cat "$f" >> "$INPUT_PY" && echo "" >> "$INPUT_PY"
 done
-echo "typedef struct { const char *name; const unsigned char *data; unsigned int len; } _boot_entry;" >> "$BUILD_DIR/boot.c"
-echo "const _boot_entry _boot_table[] = { {\"petite.boot\", _boot_0, _boot_0_len}, {\"scheme.boot\", _boot_1, _boot_1_len}, {NULL, NULL, 0} };" >> "$BUILD_DIR/boot.c"
-# Embed sd_runtime.so
-{ echo "#include <stddef.h>"; echo "const unsigned char _binary_so[] = {"; xxd -i < /tmp/sd_runtime.so | grep -v "unsigned" | head -c -1; echo "};"; echo "const unsigned int _binary_so_len = sizeof(_binary_so);"; } > "$BUILD_DIR/so.c"
-# Embed libdgemm_row.so
-{ echo "#include <stddef.h>"; echo "const unsigned char _binary_dgemm[] = {"; xxd -i < /tmp/libdgemm_row.so | grep -v "unsigned" | head -c -1; echo "};"; echo "const unsigned int _binary_dgemm_len = sizeof(_binary_dgemm);"; } > "$BUILD_DIR/dgemm.c"
-cat > "$BUILD_DIR/launcher.c" << 'LAUNCHER'
+
+bash build.sh "$INPUT_PY" sd_runtime 2>&1
+
+# Step 2: Build C runtime .so
+echo "  [2] Building C runtime..."
+gcc -O2 -shared -fPIC -o /tmp/libdgemm_row.so runtime/dgemm_wrapper.c -ldl
+
+# Step 3: Embed into ELF
+echo "  [3] Packaging ELF..."
+SO_FILE="build_out/sd_runtime.so"
+BOOT_DIR="/opt/ChezScheme/boot/ta6le"
+BUILD_DIR=$(mktemp -d /tmp/sd-elf-XXXXXX)
+
+# Embed scheme binary
+{ echo "#include <stddef.h>"; echo "const unsigned char _bin_scheme[] = {"; 
+  xxd -i < "$SCHEME"; echo "};"; echo "const unsigned int _bin_scheme_len = sizeof(_bin_scheme);"; } > "$BUILD_DIR/s1.c"
+
+# Embed boot files  
+{ echo "#include <stddef.h>"; IDX=0
+  for f in "$BOOT_DIR/petite.boot" "$BOOT_DIR/scheme.boot"; do
+    echo "static const unsigned char _b${IDX}[] = {"; xxd -i < "$f" | grep -v unsigned | head -c -1
+    echo "};"; echo "static const unsigned int _b${IDX}_len = sizeof(_b${IDX});"; IDX=$((IDX+1))
+  done
+  echo "const void* _boots[] = {_b0,_b1}; const unsigned int _boot_lens[] = {_b0_len,_b1_len};"
+  echo "const char* _boot_names[] = {\"petite.boot\",\"scheme.boot\"};"
+} > "$BUILD_DIR/boot.c"
+
+# Embed .so
+{ echo "#include <stddef.h>"; echo "const unsigned char _bin_so[] = {"; 
+  xxd -i < "$SO_FILE" | grep -v unsigned | head -c -1; echo "};"
+  echo "const unsigned int _bin_so_len = sizeof(_bin_so);"; } > "$BUILD_DIR/so.c"
+
+# Embed dgemm .so
+{ echo "#include <stddef.h>"; echo "const unsigned char _bin_dg[] = {";
+  xxd -i < /tmp/libdgemm_row.so | grep -v unsigned | head -c -1; echo "};"
+  echo "const unsigned int _bin_dg_len = sizeof(_bin_dg);"; } > "$BUILD_DIR/dg.c"
+
+# C launcher
+cat > "$BUILD_DIR/main.c" << 'LAUNCHER'
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
-extern const unsigned char _binary_scheme[]; extern const unsigned int _binary_scheme_len;
-extern const unsigned char _binary_so[]; extern const unsigned int _binary_so_len;
-extern const unsigned char _binary_dgemm[]; extern const unsigned int _binary_dgemm_len;
-typedef struct { const char *name; const unsigned char *data; unsigned int len; } _boot_entry;
-extern const _boot_entry _boot_table[];
+extern const unsigned char _bin_scheme[], _bin_so[], _bin_dg[];
+extern const unsigned int _bin_scheme_len, _bin_so_len, _bin_dg_len;
+extern const void* _boots[2]; extern const unsigned int _boot_lens[2];
+extern const char* _boot_names[2];
 
-static void write_file(const char *p, const unsigned char *d, unsigned int l, int m) {
-    char dir[4096]; strncpy(dir, p, sizeof(dir)-1); dir[sizeof(dir)-1]=0;
-    char *sep = strrchr(dir, '/');
-    if (sep) { *sep=0; char *pd=dir; while(*pd){if(*pd=='/'){*pd=0;mkdir(dir,0755);*pd='/';}pd++;} mkdir(dir,0755); }
-    FILE *f = fopen(p,"wb"); if(!f){fprintf(stderr,"Error: cannot write %s\n",p);exit(1);}
-    fwrite(d,1,l,f); fclose(f); if(m) chmod(p,m);
+static void wf(const char *p, const unsigned char *d, unsigned int l, int m) {
+    char dir[4096]; strncpy(dir,p,sizeof(dir)-1); dir[sizeof(dir)-1]=0;
+    char *s = strrchr(dir,'/'); if(s){*s=0;char *pd=dir;while(*pd){if(*pd=='/'){*pd=0;mkdir(dir,0755);*pd='/';}pd++;}mkdir(dir,0755);}
+    FILE *f=fopen(p,"wb"); if(!f){fprintf(stderr,"Error: %s\n",p);exit(1);} fwrite(d,1,l,f); fclose(f); if(m)chmod(p,m);
 }
 int main(int argc, char **argv) {
     const char *base="/stock/.tmp"; mkdir(base,0755);
-    char scheme_path[4096], so_path[4096], lib_dir[4096], boot_dir[4096];
-    snprintf(scheme_path,sizeof(scheme_path),"%s/scheme",base);
-    snprintf(so_path,sizeof(so_path),"%s/runtime.so",base);
-    snprintf(lib_dir,sizeof(lib_dir),"%s/lib",base); mkdir(lib_dir,0755);
-    snprintf(boot_dir,sizeof(boot_dir),"%s/boot",base); mkdir(boot_dir,0755);
-    write_file(scheme_path,_binary_scheme,_binary_scheme_len,0755);
-    write_file(so_path,_binary_so,_binary_so_len,0644);
-    { char dgemm_path[4096]; snprintf(dgemm_path,sizeof(dgemm_path),"%s/libdgemm_row.so",lib_dir);
-      write_file(dgemm_path,_binary_dgemm,_binary_dgemm_len,0755); }
-    { const _boot_entry *e; for(e=_boot_table;e->name!=NULL;e++){
-        char p[4096]; snprintf(p,sizeof(p),"%s/%s",boot_dir,e->name);
-        write_file(p,e->data,e->len,0644);
-    }}
-    char ld[4096]; snprintf(ld,sizeof(ld),"%s",lib_dir);
-    setenv("LD_LIBRARY_PATH",ld,1); setenv("SCHEMEHEAPDIRS",boot_dir,1);
-    fprintf(stderr,"=== static_comfyui ===\n");
-    if(chdir(base)!=0){fprintf(stderr,"Warning: chdir failed\n");}
-    char *args[]={scheme_path,"--quiet",so_path,NULL};
-    execv(scheme_path,args);
+    char sp[4096],sop[4096],lp[4096],bp[4096];
+    snprintf(sp,sizeof(sp),"%s/scheme",base);
+    snprintf(sop,sizeof(sop),"%s/runtime.so",base);
+    snprintf(lp,sizeof(lp),"%s/lib",base); mkdir(lp,0755);
+    snprintf(bp,sizeof(bp),"%s/boot",base); mkdir(bp,0755);
+    wf(sp,_bin_scheme,_bin_scheme_len,0755);
+    wf(sop,_bin_so,_bin_so_len,0644);
+    { char p[4096]; snprintf(p,sizeof(p),"%s/libdgemm.so",lp); wf(p,_bin_dg,_bin_dg_len,0755); }
+    for(int i=0;i<2;i++){char p[4096];snprintf(p,sizeof(p),"%s/%s",bp,_boot_names[i]);wf(p,_boots[i],_boot_lens[i],0644);}
+    char ld[4096]; snprintf(ld,sizeof(ld),"%s",lp);
+    setenv("LD_LIBRARY_PATH",ld,1); setenv("SCHEMEHEAPDIRS",bp,1);
+    fprintf(stderr,"=== static_comfyui ELF ===\n");
+    if(chdir(base)!=0)fprintf(stderr,"Warning: chdir failed\n");
+    char *args[]={sp,"--quiet",sop,NULL};
+    execv(sp,args);
     fprintf(stderr,"Error: exec failed\n"); return 1;
 }
 LAUNCHER
 
-gcc -c -O2 "$BUILD_DIR/scheme.c" -o "$BUILD_DIR/scheme.o"
+gcc -c -O2 "$BUILD_DIR/s1.c" -o "$BUILD_DIR/s1.o"
 gcc -c -O2 "$BUILD_DIR/boot.c" -o "$BUILD_DIR/boot.o"
 gcc -c -O2 "$BUILD_DIR/so.c" -o "$BUILD_DIR/so.o"
-gcc -c -O2 "$BUILD_DIR/dgemm.c" -o "$BUILD_DIR/dgemm.o"
-gcc -c -O2 "$BUILD_DIR/launcher.c" -o "$BUILD_DIR/launcher.o"
-gcc -o "${1:-sd_generate.elf}" "$BUILD_DIR/launcher.o" "$BUILD_DIR/scheme.o" "$BUILD_DIR/boot.o" "$BUILD_DIR/so.o" "$BUILD_DIR/dgemm.o" -ldl -Wl,--export-dynamic
-rm -rf "$BUILD_DIR"
-echo "  [5] Done: ${1:-sd_generate.elf} ($(du -h "${1:-sd_generate.elf}" | cut -f1))"
+gcc -c -O2 "$BUILD_DIR/dg.c" -o "$BUILD_DIR/dg.o"
+gcc -c -O2 "$BUILD_DIR/main.c" -o "$BUILD_DIR/main.o"
+gcc -o "$OUTPUT" "$BUILD_DIR/main.o" "$BUILD_DIR/s1.o" "$BUILD_DIR/boot.o" \
+    "$BUILD_DIR/so.o" "$BUILD_DIR/dg.o" -ldl -Wl,--export-dynamic
+
+rm -rf "$BUILD_DIR" /tmp/sd-elf-* /tmp/sd_full_*.py
+echo "  Done: $OUTPUT ($(du -h "$OUTPUT" | cut -f1))"
+echo "  ldd: $(ldd "$OUTPUT" 2>/dev/null | grep -c '=>' && ldd "$OUTPUT" | head -3)"
