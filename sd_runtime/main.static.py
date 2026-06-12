@@ -1,40 +1,39 @@
-# main.static.py — 最小测试
-
 extern fn dgemm_row_auto(m: int, n: int, k: int, alpha: float,
                          A: ptr, B: ptr, beta: float, C: ptr) -> void from "dgemm_row"
 extern fn fopen(path: str, mode: str) -> ptr from "libc"
 extern fn fread(buf: ptr, size: int, count: int, fp: ptr) -> int from "libc"
+extern fn fwrite(buf: ptr, size: int, count: int, fp: ptr) -> int from "libc"
 extern fn fclose(fp: ptr) -> int from "libc"
 
 def load_bin(fn: str, n: int) -> list[float]:
-    r: list[float] = make_float_array(n)
-    fp = fopen(fn, "rb")
-    if fp != 0:
-        fread(r, 8, n, fp)
-        fclose(fp)
-    return r
+    _r: list[float] = make_float_array(n)
+    _fp = fopen(fn, "rb")
+    if _fp != 0:
+        fread(_r, 8, n, _fp)
+        fclose(_fp)
+    return _r
 
 def main():
-    print("=== minimal test ===")
-    wgt = load_bin("/tmp/sd_weights/vae/decoder_conv_in_weight.bin", 512*16*3*3)
-    bias: list[float] = make_float_array(512)
-    arr_fill(bias, 0.0, 512)
-    x: list[float] = make_float_array(1*16*8*8)
-    arr_fill(x, 0.5, 1*16*8*8)
+    print("=== static_comfyui ===")
+    wdir: str = "/tmp/sd_weights/vae"
+    n: int = 1; h: int = 8; w: int = 8
+    latent: list[float] = make_float_array(n * 16 * h * w)
+    i: int = 0
+    while i < n * 16 * h * w:
+        float_array_set(latent, i, (i * 7 + 3) % 100 / 100.0 - 0.5)
+        i = i + 1
     
-    # inline conv2d
-    _h_out: int = 8; _w_out: int = 8
-    _ncol: int = 64; _kdim: int = 144
-    _col: list[float] = make_float_array(64 * 144)
-    im2col(x, 1, 16, 8, 8, 3, 1, 1, _col)
-    _y: list[float] = make_float_array(64 * 512)
-    dgemm_row_auto(64, 512, 144, 1.0, _col, wgt, 0.0, _y)
-    _i: int = 0
-    while _i < 64:
-        _j: int = 0
-        while _j < 512:
-            float_array_set(_y, _i*512+_j, float_array_ref(_y, _i*512+_j) + float_array_ref(bias, _j))
-            _j = _j + 1
-        _i = _i + 1
-    print("sum="); print(arr_sum(_y, 64*512))
+    print("Running VAE decoder...")
+    image: list[float] = vae_decoder_forward(latent, wdir, n, h, w)
+    oh: int = h * 8; ow: int = w * 8
+    print("Output: 1x3x"); print(oh); print("x"); print(ow)
+    mp: float = arr_sum(image, 1*3*oh*ow) / (1*3*oh*ow)
+    print("Mean pixel: "); print(mp)
+    
+    _fp = fopen("/tmp/vae_output.bin", "wb")
+    if _fp != 0:
+        fwrite(image, 8, 1*3*oh*ow, _fp)
+        fclose(_fp)
+        print("Saved to /tmp/vae_output.bin")
+    print("Done!")
     exit_program(0)
