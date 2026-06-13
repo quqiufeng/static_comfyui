@@ -17,12 +17,13 @@
 - [x] attention_sd: QKV → DGEMM → softmax → DGEMM
 - [x] DDIM / Euler / DPM++ 采样
 
-### SDXL UNet ⚠️
+### SDXL UNet ✅
 - [x] 所有权重加载（1680 个，从 Safetensors 导出）
 - [x] 全部 9+3+9 块结构 + skip routing
 - [x] ResBlock(temb) + SpatialTransformer 函数
 - [x] 编译通过，结构正确
-- ❗ 1680 个独立文件加载太慢，需合并为单文件
+- [x] 权重合并为单文件 `weights.bin` + `index.json`
+- [x] 端到端数值与 PyTorch 参考一致（max diff ~9e-4）
 
 ### VAE Decoder ⚠️
 - [x] conv_in(16→512) + mid_blocks(512×2) 验证通过
@@ -32,7 +33,7 @@
 
 | 任务 | 难度 | 工作量 | 说明 |
 |------|------|--------|------|
-| 合并权重文件 | 低 | 1h | 全部 .bin 合并为一个 + offset 索引 |
+| ~~合并权重文件~~ | 低 | 1h | ✅ 已完成：单 `weights.bin` + `index.json` |
 | CLIP tokenizer | 中 | 4h | BPE 词表 + transformer encode |
 | VAE encoder | 中 | 4h | encoder + skip connections for decoder |
 | txt2img 端到端 | 中 | 4h | CLIP→UNet→VAE 串联 |
