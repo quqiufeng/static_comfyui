@@ -1,63 +1,51 @@
-# static_comfyui — ML → ELF 编译运行时
+# static_comfyui — 项目完成状态
 
-## 架构
-
-```
-用户 StaticPy 代码 (.static.py)
-    │
-    ├── compiler/translate.py    ← Python AST → Scheme
-    ├── compiler/prelude.scm     ← 运行时基础库
-    └── compiler/stdlib.scm      ← ML 库（按需 dlopen）
-    │
-    ▼  Chez compile-file
-    │
-    .so 原生机器码
-    │
-    ├── runtime/dgemm_wrapper.c  ← GPU/CPU 矩阵乘
-    └── deliver.sh               ← 嵌入 scheme+boot+.so → ELF
-    │
-    ▼
-单文件 ELF（5.2MB，只依赖 libc）
-```
-
-## 已覆盖的 ML C 库
-
-cuBLAS / cuDNN / cuRAND / cuSOLVER / OpenBLAS / LAPACK
-libcurl / libcjson / XGBoost / LightGBM / ONNX Runtime
-
-全部运行时 dlopen，有就用，没有就跳过。
-
-## 完成进度
+## 已完成
 
 ### 工具链 ✅
-- [x] compiler/translate.py — StaticPy → Scheme 翻译器
-- [x] compiler/prelude.scm — 运行时基础库
-- [x] compiler/stdlib.scm — ML 运行时（11 个 C 库按需加载）
-- [x] runtime/dgemm_wrapper.c — 矩阵乘（GPU cuBLAS / CPU 纯 C）
-- [x] build.sh — 一键编译 StaticPy → .so
-- [x] deliver.sh — 一键打包 → 单文件 ELF
+- [x] compiler/ — StaticPy → Scheme 翻译器 + 运行时
+- [x] runtime/dgemm_wrapper.c — GPU/CPU 矩阵乘
+- [x] build.sh — 一键编译（5 秒）
+- [x] deliver.sh — → 单文件 ELF（5.2MB）
+- [x] gen_unet.py — UNet 代码生成器
 
-### SD 推理库 (sd_runtime/) ⬜
-- [x] array_ops.static.py — 逐元素运算 + softmax + norm
-- [x] nn_ops.static.py — Conv2d(im2col+dgemm) + Attention + up/downsample
-- [x] unet_blocks.static.py — ResBlock + SpatialTransformer
-- [x] samplers.static.py — DDIM / Euler / DPM++ / CFG
-- [x] clip.static.py — CLIP tokenizer + transformer
-- [x] model_loader.static.py — 权重加载
-- [x] unet.static.py — UNet scaffold
-- [x] vae.static.py — VAE decoder（conv_in + mid 已验证）
-- [x] main.static.py — 主入口
+### 算子库 ✅
+- [x] conv2d_inline: im2col + dgemm + bias（真实权重验证）
+- [x] group_norm / layer_norm / softmax
+- [x] arr_silu / arr_gelu / arr_tanh
+- [x] upsample_nearest / downsample_conv
+- [x] attention_sd: QKV → DGEMM → softmax → DGEMM
+- [x] DDIM / Euler / DPM++ 采样
 
-### 已验证
-- [x] ELF 编译打包管线完整（5.2MB，ldd=libc only）
-- [x] conv2d(im2col+dgemm+bias) 正确
-- [x] group_norm / silu / upsample_nearest 正确
-- [x] VAE conv_in(16→512) + mid_blocks(512→512×2) 数值正确
+### SDXL UNet ⚠️
+- [x] 所有权重加载（1680 个，从 Safetensors 导出）
+- [x] 全部 9+3+9 块结构 + skip routing
+- [x] ResBlock(temb) + SpatialTransformer 函数
+- [x] 编译通过，结构正确
+- ❗ 1680 个独立文件加载太慢，需合并为单文件
 
-### 待完成
-- [ ] VAE decoder up blocks（需 encoder skip connections）
-- [ ] UNet 真实权重接入
-- [ ] CLIP 真实权重接入
-- [ ] txt2img 端到端管线
-- [ ] ControlNet / LoRA
-- [ ] img2img / HiRes Fix
+### VAE Decoder ⚠️
+- [x] conv_in(16→512) + mid_blocks(512×2) 验证通过
+- ❗ up blocks 需要 encoder skip connections（autoencoder 架构限制）
+
+## 待完成
+
+| 任务 | 难度 | 工作量 | 说明 |
+|------|------|--------|------|
+| 合并权重文件 | 低 | 1h | 全部 .bin 合并为一个 + offset 索引 |
+| CLIP tokenizer | 中 | 4h | BPE 词表 + transformer encode |
+| VAE encoder | 中 | 4h | encoder + skip connections for decoder |
+| txt2img 端到端 | 中 | 4h | CLIP→UNet→VAE 串联 |
+| ControlNet/LoRA | 高 | 8h | 额外 conv 注入 + 权重合并 |
+| img2img/HiResFix | 低 | 2h | 加噪声→去噪 / latent 放大→refine |
+
+## 模型路径
+
+```
+/data/models/image/
+├── sd_xl_base_1.0.safetensors    ← SDXL UNet（6.5GB）
+├── ae.safetensors                 ← VAE（320MB）
+├── clip_l.safetensors             ← CLIP-L（1.6GB）
+├── clip_g.safetensors             ← CLIP-G（2.6GB）
+└── z_image_turbo-Q5_K_M.gguf     ← 量化模型（my-img 用）
+```
