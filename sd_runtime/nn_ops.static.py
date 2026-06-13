@@ -318,3 +318,35 @@ def cross_attention(q: list[float], k: list[float], v: list[float],
                     batch: int, tokens_q: int, tokens_k: int, dim: int, heads: int) -> list[float]:
     """Cross-attention: Q 来自 x, K/V 来自 context"""
     return attention_sd(q, k, v, batch, tokens_q, tokens_k, dim, heads)
+
+def conv2d_inline(src, w, b, n, c_in, c_out, hh, ww):
+    "Conv2d wrapper: im2col + dgemm + bias (uses _i,_j locals)"
+    _ho = (hh + 2*1 - 3)//1 + 1; _wo = (ww + 2*1 - 3)//1 + 1
+    _nc = n * _ho * _wo; _kd = c_in * 3 * 3
+    _col = make_float_array(_nc * _kd)
+    im2col(src, n, c_in, hh, ww, 3, 1, 1, _col)
+    _y = make_float_array(_nc * c_out)
+    dgemm_row_auto(_nc, c_out, _kd, 1.0, _col, w, 0.0, _y)
+    _i = 0
+    while _i < _nc:
+        _j = 0
+        while _j < c_out:
+            float_array_set(_y, _i*c_out+_j, float_array_ref(_y, _i*c_out+_j) + float_array_ref(b, _j))
+            _j = _j + 1
+        _i = _i + 1
+    return _y
+
+def add_bias(arr, bias, n_rows, n_cols):
+    _i = 0
+    while _i < n_rows:
+        _j = 0
+        while _j < n_cols:
+            float_array_set(arr, _i*n_cols+_j, float_array_ref(arr, _i*n_cols+_j) + float_array_ref(bias, _j))
+            _j = _j + 1
+        _i = _i + 1
+
+def add_arr(a, b, n):
+    _i = 0
+    while _i < n:
+        float_array_set(a, _i, float_array_ref(a, _i) + float_array_ref(b, _i))
+        _i = _i + 1
