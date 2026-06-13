@@ -219,3 +219,7 @@ __marimo__/
 comfyui_ref/
 *.ss
 *.so
+
+# StaticPy generated executables
+sd_generate*.elf
+*.elf
