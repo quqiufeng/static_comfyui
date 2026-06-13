@@ -299,6 +299,13 @@ void* st_cat_channel(void* a, void* b) {
     return (void*)new_t(result);
 }
 
+void* st_cat_dim(void* a, void* b, int dim) {
+    auto& ta = *(torch::Tensor*)a;
+    auto& tb = *(torch::Tensor*)b;
+    auto result = torch::cat({ta, tb}, dim);
+    return (void*)new_t(result);
+}
+
 void* st_new(int64_t* dims, int ndim) {
     std::vector<int64_t> sizes(dims, dims + ndim);
     return (void*)new_t(torch::empty(sizes, torch::kFloat32));
