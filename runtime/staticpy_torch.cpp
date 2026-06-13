@@ -92,7 +92,7 @@ void* st_linear(void* input, void* weight, void* bias) {
     return (void*)ptr;
 }
 
-void* st_group_norm(void* input, int num_groups, void* weight, void* bias, float eps) {
+void* st_group_norm(void* input, int num_groups, void* weight, void* bias, double eps) {
     auto& inp = *(torch::Tensor*)input;
     c10::optional<torch::Tensor> w, b;
     if (weight) w = *(torch::Tensor*)weight;
@@ -103,7 +103,7 @@ void* st_group_norm(void* input, int num_groups, void* weight, void* bias, float
     return (void*)ptr;
 }
 
-void* st_layer_norm(void* input, void* weight, void* bias, float eps) {
+void* st_layer_norm(void* input, void* weight, void* bias, double eps) {
     auto& inp = *(torch::Tensor*)input;
     c10::optional<torch::Tensor> w, b;
     if (weight) w = *(torch::Tensor*)weight;
@@ -229,19 +229,23 @@ void* st_from_blob(float* data, int64_t* dims, int ndim) {
 }
 
 void* st_from_blob_1d(float* data, int64_t d0) {
-    return (void*)new torch::Tensor(torch::from_blob(data, {d0}, torch::kFloat64).clone());
+    auto opts = torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU);
+    return (void*)new torch::Tensor(torch::from_blob(data, {d0}, opts).clone());
 }
 
 void* st_from_blob_2d(float* data, int64_t d0, int64_t d1) {
-    return (void*)new torch::Tensor(torch::from_blob(data, {d0, d1}, torch::kFloat64).clone());
+    auto opts = torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU);
+    return (void*)new torch::Tensor(torch::from_blob(data, {d0, d1}, opts).clone());
 }
 
 void* st_from_blob_3d(float* data, int64_t d0, int64_t d1, int64_t d2) {
-    return (void*)new torch::Tensor(torch::from_blob(data, {d0, d1, d2}, torch::kFloat64).clone());
+    auto opts = torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU);
+    return (void*)new torch::Tensor(torch::from_blob(data, {d0, d1, d2}, opts).clone());
 }
 
 void* st_from_blob_4d(float* data, int64_t d0, int64_t d1, int64_t d2, int64_t d3) {
-    return (void*)new torch::Tensor(torch::from_blob(data, {d0, d1, d2, d3}, torch::kFloat64).clone());
+    auto opts = torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU);
+    return (void*)new torch::Tensor(torch::from_blob(data, {d0, d1, d2, d3}, opts).clone());
 }
 
 void* st_arange(int start, int end, int step) {

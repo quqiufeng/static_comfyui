@@ -49,12 +49,12 @@ def unet_forward(latent, timestep, context, data, n, hh, ww):
     def rb(p, ci, co):
         # p is a function that generates the dotted name for each weight
         def n(suffix): return f'{p}.{suffix}'
-        print(f'    group_norm_torch(h_cur, {ws(n("in_layers.0.weight"))}, {ws(n("in_layers.0.bias"))}, 32, {ci}, hh*ww)')
+        print(f'    group_norm_torch(h_cur, {ws(n("in_layers.0.weight"))}, {ws(n("in_layers.0.bias"))}, 32, {ci}, hh, ww)')
         print(f'    silu_torch(h_cur, n*{ci}*hh*ww)')
         print(f'    h_cur = conv2d_torch(h_cur, {ws(n("in_layers.2.weight"))}, {ws(n("in_layers.2.bias"))}, n, {ci}, {co}, hh, ww, 3, 1, 1)')
         print(f'    _y = linear_torch(emb, {ws(n("emb_layers.1.weight"))}, {ws(n("emb_layers.1.bias"))}, n, 1280, {co}*2)')
         print(f'    apply_scale_shift(h_cur, _y, n, {co}, hh*ww)')
-        print(f'    group_norm_torch(h_cur, {ws(n("out_layers.0.weight"))}, {ws(n("out_layers.0.bias"))}, 32, {co}, hh*ww)')
+        print(f'    group_norm_torch(h_cur, {ws(n("out_layers.0.weight"))}, {ws(n("out_layers.0.bias"))}, 32, {co}, hh, ww)')
         print(f'    silu_torch(h_cur, n*{co}*hh*ww)')
         print(f'    h_cur = conv2d_torch(h_cur, {ws(n("out_layers.3.weight"))}, {ws(n("out_layers.3.bias"))}, n, {co}, {co}, hh, ww, 3, 1, 1)')
 
