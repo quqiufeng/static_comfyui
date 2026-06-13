@@ -526,7 +526,67 @@ staticpyTorch:
 
 ---
 
-## 七、限制
+## 七、C/C++ 库集成：两种方式
+
+ML Runtime 的设计原则：**任何 C/C++ 库都可以接入，不管 API 复杂度。**
+
+### 方式 1：C 库直接 extern fn（零封装）
+
+```
+C 库（如 cuBLAS、OpenBLAS、libcurl、libcjson）
+    │  函数签名已经是 C：cublasDgemm_v2, cblas_dgemm, curl_easy_init
+    ▼
+extern fn cublasDgemm_v2(...) -> int from "cublas"   ← 一行声明
+    ▼
+StaticPy 代码直接调: cublasDgemm_v2(handle, ...)
+```
+
+适合 API 简单、参数类型标准的 C 库。10 分钟接入。
+
+### 方式 2：C++ 库 → C 包装层 → extern fn
+
+```
+C++ 库（如 libtorch、GGML、OpenCV）
+    │  API 是 C++：torch::conv2d, ggml_mul_mat, cv::imread
+    │  Chez FFI 不识别 C++ 符号（name mangling）
+    ▼
+编写 C 包装层（.cpp → .so）
+    │  extern "C" void* st_conv2d(...) {
+    │      return new torch::Tensor(torch::conv2d(inp, w, b, ...));
+    │  }
+    │  → 编译为 libxxx_wrapper.so，导出纯 C 符号
+    ▼
+extern fn st_conv2d(...) -> ptr from "xxx_wrapper"
+    ▼
+StaticPy 包装为高级 API：torch_conv2d(x, w, b, ...)
+```
+
+适合 API 复杂、有类/命名空间/模板的 C++ 库。每个库写一次 C 包装层（200-500 行），以后不再动。
+
+### 当前 ML Runtime 接入的库
+
+| 库 | 方式 | 包装文件 | 行数 | 调用示例 |
+|----|------|---------|------|---------|
+| **cuBLAS** (GPU 矩阵乘) | 方式 1 | 无（直接 C API） | 0 | `cublasDgemm_v2(...)` |
+| **OpenBLAS** (CPU 矩阵乘) | 方式 1 | 无（直接 C API） | 0 | `cblas_dgemm(...)` |
+| **libcurl** (HTTP) | 方式 1 | 无（直接 C API） | 0 | `curl_easy_perform(...)` |
+| **libcjson** (JSON) | 方式 1 | 无（直接 C API） | 0 | `cJSON_Parse(...)` |
+| **cuDNN** (深度学习原语) | 方式 1 | 无（直接 C API） | 0 | `cudnnConvolutionForward(...)` |
+| **libtorch** (PyTorch) | 方式 2 | `runtime/staticpy_torch.cpp` | ~200 | `torch_conv2d(...)` |
+| **dgemm_wrapper** (GPU/CPU 自动切换) | 方式 2 | `runtime/dgemm_wrapper.c` | ~60 | `dgemm_row_auto(...)` |
+
+### 核心原则
+
+```
+C 库 → 直接调      ← 零开销
+C++ 库 → 薄 C 包装 → 写一次不动   ← 200 行
+```
+
+所有 ML 库都在运行时 `dlopen`，**编译时不需要任何 ML 头文件或库文件**。编译 `staticpy_torch.cpp` 只需要 libtorch 头文件做类型检查，产出 95KB 的 .so，不链接 libtorch。真正加载在运行时完成。
+
+---
+
+## 八、限制
 
 | 功能 | 能改？ | 说明 |
 |------|--------|------|
