@@ -17,36 +17,22 @@ def load_bin(fn: str, n: int) -> list[float]:
 
 def main():
     print("=== static_comfyui ===")
-    weights_dir: str = "/tmp/sd_weights/sdxl"
+    wdir: str = "/tmp/sd_weights/sdxl"
     
-    print("\nTest 1: conv2d_inline with real weights...")
-    _w = load_bin("/tmp/sd_weights/vae/decoder_conv_in_weight.bin", 512*16*3*3)
-    _b = load_bin("/tmp/sd_weights/vae/decoder_conv_in_bias.bin", 512)
-    _x: list[float] = make_float_array(1*16*8*8)
-    arr_fill(_x, 0.5, 1*16*8*8)
-    _y: list[float] = conv2d_inline(_x, _w, _b, 1, 16, 512, 8, 8)
-    print("conv2d_inline sum="); print(arr_sum(_y, 64*512))
+    # 创建随机 latent [1,4,64,64] 和 timestep
+    n: int = 1; hh: int = 64; ww: int = 64
+    latent: list[float] = make_float_array(n * 4 * hh * ww)
+    arr_fill(latent, 0.1, n * 4 * hh * ww)
     
-    print("\nTest 2: Loading SDXL UNet weights...")
-    _fp = fopen(weights_dir + "/index.json", "rb")
-    if _fp != 0:
-        fclose(_fp)
-        _a = load_bin(weights_dir + "/model_diffusion_model_input_blocks_0_0_weight.bin", 4*320*3*3)
-        _b2 = load_bin(weights_dir + "/model_diffusion_model_input_blocks_0_0_bias.bin", 320)
-        print("First weight loaded, val[0]="); print(float_array_ref(_a, 0))
-    else:
-        print("No SDXL weights at "); print(weights_dir)
+    ts: list[float] = make_float_array(n)
+    float_array_set(ts, 0, 50.0)
     
-    print("\nTest 3: group_norm + silu 512ch...")
-    _z: list[float] = make_float_array(1*512*8*8)
-    arr_fill(_z, 0.5, 1*512*8*8)
-    _gw: list[float] = make_float_array(512)
-    _gb: list[float] = make_float_array(512)
-    arr_fill(_gw, 1.0, 512)
-    arr_fill(_gb, 0.0, 512)
-    group_norm(_z, _gw, _gb, 32, 512, 64)
-    arr_silu(_z, _z, 1*512*64)
-    print("group_norm+silu OK, sum="); print(arr_sum(_z, 1*512*64))
+    ctx: list[float] = make_float_array(n * 77 * 2048)
+    arr_fill(ctx, 0.0, n * 77 * 2048)
     
-    print("\nAll tests passed!")
+    print("Running UNet forward...")
+    result: list[float] = unet_forward(latent, ts, ctx, wdir, n, hh, ww)
+    print("UNet output sum="); print(arr_sum(result, n * 4 * hh * ww))
+    
+    print("\nDone!")
     exit_program(0)
