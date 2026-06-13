@@ -350,3 +350,18 @@ def add_arr(a, b, n):
     while _i < n:
         float_array_set(a, _i, float_array_ref(a, _i) + float_array_ref(b, _i))
         _i = _i + 1
+
+def apply_scale_shift(x, ss, n, c, spatial):
+    _b: int = 0
+    while _b < n:
+        _ch: int = 0
+        while _ch < c:
+            _s: float = float_array_ref(ss, _ch)
+            _sh: float = float_array_ref(ss, c + _ch)
+            _i: int = 0
+            while _i < spatial:
+                _idx: int = (_b * c + _ch) * spatial + _i
+                float_array_set(x, _idx, float_array_ref(x, _idx) * _s + _sh)
+                _i = _i + 1
+            _ch = _ch + 1
+        _b = _b + 1
