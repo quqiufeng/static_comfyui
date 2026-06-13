@@ -4,9 +4,18 @@
 语义: int/float = 值类型（Chez fixnum/flonum），非 PyObject*
 """
 import sys
+import os
 import re
 import json
 import ast
+
+# 定位 PyTorch 库目录（用于加载 libstaticpy_torch 依赖）
+TORCH_LIB = None
+try:
+    import torch
+    TORCH_LIB = os.path.join(torch.__path__[0], 'lib')
+except Exception:
+    TORCH_LIB = os.environ.get('TORCH_LIB', '/data/venv/lib/python3.12/site-packages/torch/lib')
 
 # ====== C 类型映射 ======
 TYPE_MAP = {
@@ -30,8 +39,9 @@ MATH_FUNCTIONS = {
 }
 
 PRELUDE_FUNCTIONS = {
-    "make_float_array", "float_array_set", "float_array_ref",
-    "float_array_free",
+    "make_float_array", "float_array_set", "float_array_ref", "float_array_offset",
+    "float_array_free", "make_ptr_array", "ptr_array_set", "ptr_array_ref",
+    "make_int_array", "int_array_set", "int_array_ref",
     "make_dict", "dict_get", "dict_set",
     "file_open", "file_close", "file_read_all", "file_write", "file_exists",
     "http_get", "http_get_simple",
@@ -560,10 +570,10 @@ def generate_extern_ffi():
         elif lib == "onnx_helper" and lib not in loaded_libs:
             lines.append('(load-shared-object "/tmp/libonnx_helper.so")')
         elif lib == "staticpy_torch" and lib not in loaded_libs:
-            lines.append('(load-shared-object "/data/venv/lib/python3.12/site-packages/torch/lib/libc10.so")')
-            lines.append('(load-shared-object "/data/venv/lib/python3.12/site-packages/torch/lib/libtorch_cpu.so")')
-            lines.append('(load-shared-object "/data/venv/lib/python3.12/site-packages/torch/lib/libtorch_cuda.so")')
-            lines.append('(load-shared-object "/data/venv/lib/python3.12/site-packages/torch/lib/libtorch.so")')
+            lines.append(f'(load-shared-object "{TORCH_LIB}/libc10.so")')
+            lines.append(f'(load-shared-object "{TORCH_LIB}/libtorch_cpu.so")')
+            lines.append(f'(load-shared-object "{TORCH_LIB}/libtorch_cuda.so")')
+            lines.append(f'(load-shared-object "{TORCH_LIB}/libc10_cuda.so")')
             lines.append('(load-shared-object "/tmp/libstaticpy_torch.so")')
         elif lib == "dgemm_row" and lib not in loaded_libs:
             lines.append('(load-shared-object "/tmp/libdgemm_row.so")')
