@@ -1,3 +1,5 @@
+# main.static.py — static_comfyui 主入口
+
 extern fn dgemm_row_auto(m: int, n: int, k: int, alpha: float,
                          A: ptr, B: ptr, beta: float, C: ptr) -> void from "dgemm_row"
 extern fn fopen(path: str, mode: str) -> ptr from "libc"
@@ -15,25 +17,36 @@ def load_bin(fn: str, n: int) -> list[float]:
 
 def main():
     print("=== static_comfyui ===")
-    wdir: str = "/tmp/sd_weights/vae"
-    n: int = 1; h: int = 8; w: int = 8
-    latent: list[float] = make_float_array(n * 16 * h * w)
-    i: int = 0
-    while i < n * 16 * h * w:
-        float_array_set(latent, i, (i * 7 + 3) % 100 / 100.0 - 0.5)
-        i = i + 1
+    weights_dir: str = "/tmp/sd_weights/sdxl"
     
-    print("Running VAE decoder...")
-    image: list[float] = vae_decoder_forward(latent, wdir, n, h, w)
-    oh: int = h * 8; ow: int = w * 8
-    print("Output: 1x3x"); print(oh); print("x"); print(ow)
-    mp: float = arr_sum(image, 1*3*oh*ow) / (1*3*oh*ow)
-    print("Mean pixel: "); print(mp)
+    print("\nTest 1: conv2d_inline with real weights...")
+    _w = load_bin("/tmp/sd_weights/vae/decoder_conv_in_weight.bin", 512*16*3*3)
+    _b = load_bin("/tmp/sd_weights/vae/decoder_conv_in_bias.bin", 512)
+    _x: list[float] = make_float_array(1*16*8*8)
+    arr_fill(_x, 0.5, 1*16*8*8)
+    _y: list[float] = conv2d_inline(_x, _w, _b, 1, 16, 512, 8, 8)
+    print("conv2d_inline sum="); print(arr_sum(_y, 64*512))
     
-    _fp = fopen("/tmp/vae_output.bin", "wb")
+    print("\nTest 2: Loading SDXL UNet weights...")
+    _fp = fopen(weights_dir + "/index.json", "rb")
     if _fp != 0:
-        fwrite(image, 8, 1*3*oh*ow, _fp)
         fclose(_fp)
-        print("Saved to /tmp/vae_output.bin")
-    print("Done!")
+        _a = load_bin(weights_dir + "/model_diffusion_model_input_blocks_0_0_weight.bin", 4*320*3*3)
+        _b2 = load_bin(weights_dir + "/model_diffusion_model_input_blocks_0_0_bias.bin", 320)
+        print("First weight loaded, val[0]="); print(float_array_ref(_a, 0))
+    else:
+        print("No SDXL weights at "); print(weights_dir)
+    
+    print("\nTest 3: group_norm + silu 512ch...")
+    _z: list[float] = make_float_array(1*512*8*8)
+    arr_fill(_z, 0.5, 1*512*8*8)
+    _gw: list[float] = make_float_array(512)
+    _gb: list[float] = make_float_array(512)
+    arr_fill(_gw, 1.0, 512)
+    arr_fill(_gb, 0.0, 512)
+    group_norm(_z, _gw, _gb, 32, 512, 64)
+    arr_silu(_z, _z, 1*512*64)
+    print("group_norm+silu OK, sum="); print(arr_sum(_z, 1*512*64))
+    
+    print("\nAll tests passed!")
     exit_program(0)
