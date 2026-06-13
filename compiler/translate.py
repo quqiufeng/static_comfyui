@@ -559,6 +559,14 @@ def generate_extern_ffi():
             lines.append('(load-shared-object "libonnxruntime.so")')
         elif lib == "onnx_helper" and lib not in loaded_libs:
             lines.append('(load-shared-object "/tmp/libonnx_helper.so")')
+        elif lib == "staticpy_torch" and lib not in loaded_libs:
+            lines.append('(load-shared-object "/data/venv/lib/python3.12/site-packages/torch/lib/libc10.so")')
+            lines.append('(load-shared-object "/data/venv/lib/python3.12/site-packages/torch/lib/libtorch_cpu.so")')
+            lines.append('(load-shared-object "/data/venv/lib/python3.12/site-packages/torch/lib/libtorch_cuda.so")')
+            lines.append('(load-shared-object "/data/venv/lib/python3.12/site-packages/torch/lib/libtorch.so")')
+            lines.append('(load-shared-object "/tmp/libstaticpy_torch.so")')
+        elif lib == "dgemm_row" and lib not in loaded_libs:
+            lines.append('(load-shared-object "/tmp/libdgemm_row.so")')
         elif lib == "dgemm_row" and lib not in loaded_libs:
             lines.append('(load-shared-object "/tmp/libdgemm_row.so")')
         loaded_libs.add(lib)
