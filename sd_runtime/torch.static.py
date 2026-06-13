@@ -38,6 +38,17 @@ def torch_data(t: ptr) -> list[float]:
 def torch_free(t: ptr):
     st_tensor_free(t)
 
+# ===== 权重切片（从合并权重文件读取） =====
+
+def w_slice(data: list[float], offset: int, n: int) -> list[float]:
+    """从合并权重数据中切出一段"""
+    _r: list[float] = make_float_array(n)
+    _i: int = 0
+    while _i < n:
+        float_array_set(_r, _i, float_array_ref(data, offset + _i))
+        _i = _i + 1
+    return _r
+
 # ===== GPU 管理 =====
 
 def torch_cuda_available() -> int:
