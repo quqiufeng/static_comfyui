@@ -21,22 +21,31 @@ def main():
         if oo < 0: return f'#MISSING {name}'
         n = 1
         for d in offs.get(name, [0,0,[0]])[2]: n *= d
-        return f'ws(data,{oo},{n})'
+        return f'w_slice(data,{oo},{n})'
 
     # Output all the boilerplate
-    print("""# unet_forward.static.py — 自动生成，所有偏移硬编码
+    print('''# unet_forward.static.py — 自动生成，所有偏移硬编码
 def unet_forward(latent, timestep, context, data, n, hh, ww):
     h_cur: list[float]; _s: list[float] = make_float_array(30)
-    ws = w_slice
 
-    # time embedding
-    emb = timestep_embedding_batch(timestep, 1280, n, 10000.0)
-    emb = linear_torch(emb, ws(data,%s,320*1280), ws(data,%s,320), n, 1280, 1280)
-    arr_silu(emb, emb, n*1280)
-    emb = linear_torch(emb, ws(data,%s,1280*1280), ws(data,%s,1280), n, 1280, 1280)
-""" % (O('time_embed.0.weight'), O('time_embed.0.bias'), O('time_embed.2.weight'), O('time_embed.2.bias')))
-
-    # Helper to emit a ResBlock
+    # time embedding (inlined)
+    _emb = make_float_array(n*1280)
+    _h = 640
+    _i2 = 0
+    while _i2 < _h:
+        _f = exp(_i2 * (-log(10000.0) / _h))
+        _t = float_array_ref(timestep, 0)
+        float_array_set(_emb, _i2, sin(_t * _f))
+        float_array_set(_emb, _h + _i2, cos(_t * _f))
+        _i2 = _i2 + 1
+    emb = _emb''')
+    # linear_torch calls use computed offsets
+    o1 = O('time_embed.0.weight'); o2 = O('time_embed.0.bias')
+    o3 = O('time_embed.2.weight'); o4 = O('time_embed.2.bias')
+    print(f'    emb = linear_torch(emb, w_slice(data,{o1},320*1280), w_slice(data,{o2},320), n, 1280, 1280)')
+    print('    arr_silu(emb, emb, n*1280)')
+    print(f'    emb = linear_torch(emb, w_slice(data,{o3},1280*1280), w_slice(data,{o4},1280), n, 1280, 1280)')
+    print()
     def rb(p, ci, co):
         # p is a function that generates the dotted name for each weight
         def n(suffix): return f'{p}.{suffix}'

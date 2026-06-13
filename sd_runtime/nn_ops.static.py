@@ -37,7 +37,20 @@ def group_norm_torch(x, w, b, n_groups, c, spatial):
         _i = _i + 1
     st_tensor_free(_t); st_tensor_free(_w_t); st_tensor_free(_b_t); st_tensor_free(_r_t)
 
-def silu_torch(x, n):
+def linear_torch(x, w, b, n, in_d, out_d):
+    """Linear via libtorch: x[n,in_d] → y[n,out_d] = x@w^T + b"""
+    _x_t: ptr = st_from_blob_2d(x, n, in_d)
+    _w_t: ptr = st_from_blob_2d(w, out_d, in_d)
+    _b_t: ptr = st_from_blob_1d(b, out_d)
+    _y_t: ptr = st_linear(_x_t, _w_t, _b_t)
+    _d: ptr = st_tensor_data(_y_t)
+    _r: list[float] = make_float_array(n * out_d)
+    _i: int = 0; _n: int = n * out_d
+    while _i < _n:
+        float_array_set(_r, _i, float_array_ref(_d, _i))
+        _i = _i + 1
+    st_tensor_free(_x_t); st_tensor_free(_w_t); st_tensor_free(_b_t); st_tensor_free(_y_t)
+    return _r
     """SiLU via libtorch"""
     _t: ptr = st_from_blob(x, _mkdims(1, 1, n), 3)
     _r_t: ptr = st_silu(_t)
