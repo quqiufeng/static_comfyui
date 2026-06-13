@@ -79,38 +79,29 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         print(f'    _h_cur_orig = st_clone(h_cur)')
         print(f'    h_cur = group_norm_torch(h_cur, {ws(n("in_layers.0.weight"))}, {ws(n("in_layers.0.bias"))}, 32, {ci}, hh, ww)')
         print(f'    h_cur = silu_torch(h_cur)')
-        print(f'    print("{p} gn+silu"); print(st_sum(h_cur))')
         print(f'    h_cur = conv2d_torch(h_cur, {ws(n("in_layers.2.weight"))}, {ws(n("in_layers.2.bias"))}, n, {ci}, {co}, hh, ww, 3, 1, 3//2)')
-        print(f'    print("{p} conv1"); print(st_sum(h_cur))')
         print(f'    _se = silu_torch(emb)')
         print(f'    _y = linear_torch(_se, {ws(n("emb_layers.1.weight"))}, {ws(n("emb_layers.1.bias"))}, n, 1280, {co})')
-        print(f'    print("{p} emb linear"); print(st_sum(_y))')
         # time emb broadcast add: _y is [n, co], h_cur is [n, co, h, w]
         print(f'    h_cur = add_time_emb_tensor(h_cur, _y, n, {co})')
         print(f'    st_tensor_free(_se); st_tensor_free(_y)')
-        print(f'    print("{p} after time add"); print(st_sum(h_cur))')
         print(f'    h_cur = group_norm_torch(h_cur, {ws(n("out_layers.0.weight"))}, {ws(n("out_layers.0.bias"))}, 32, {co}, hh, ww)')
         print(f'    h_cur = silu_torch(h_cur)')
         print(f'    h_cur = conv2d_torch(h_cur, {ws(n("out_layers.3.weight"))}, {ws(n("out_layers.3.bias"))}, n, {co}, {co}, hh, ww, 3, 1, 3//2)')
-        print(f'    print("{p} conv2"); print(st_sum(h_cur))')
         if ci != co:
             print(f'    _sk = conv2d_torch(_h_cur_orig, {ws(p+".skip_connection.weight")}, {ws(p+".skip_connection.bias")}, n, {ci}, {co}, hh, ww, 1, 1, 1//2)')
         else:
             print(f'    _sk = _h_cur_orig')
         print(f'    h_cur = add_tensor(h_cur, _sk)')
         print(f'    st_tensor_free(_sk)')
-        if True:
-            print(f'    print("{p} rb out"); print(st_sum(h_cur))')
 
     def spatial_transformer(p, c, inner_dim, n_heads, d_head, hidden, depth):
         print(f'    # SpatialTransformer {p}')
         print(f'    _x_in = st_clone(h_cur)')
         print(f'    h_cur = group_norm_torch(h_cur, {ws(p+".norm.weight")}, {ws(p+".norm.bias")}, 32, {c}, hh, ww)')
         print(f'    _seq = reshape_nchw_to_nlc(h_cur, n, {c}, hh, ww)')
-        print(f'    print("{p} st after gn+reshape"); print(st_sum(_seq))')
         print(f'    st_tensor_free(h_cur)')
         print(f'    _seq = linear_torch(_seq, {ws(p+".proj_in.weight")}, {ws(p+".proj_in.bias")}, n*hh*ww, {c}, {inner_dim})')
-        print(f'    print("{p} st after proj_in"); print(st_sum(_seq))')
         for d in range(depth):
             pre = f'{p}.transformer_blocks.{d}'
             print(f'    _seq = spatial_transformer_block(_seq, context,')
@@ -128,15 +119,11 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
             print(f'        {ws(pre+".ff.net.0.proj.weight")}, {ws(pre+".ff.net.0.proj.bias")},')
             print(f'        {ws(pre+".ff.net.2.weight")}, {ws(pre+".ff.net.2.bias")},')
             print(f'        n, hh*ww, {inner_dim}, {n_heads}, {hidden})')
-            print(f'    print("{p} st after tb{d}"); print(st_sum(_seq))')
         print(f'    _seq = linear_torch(_seq, {ws(p+".proj_out.weight")}, {ws(p+".proj_out.bias")}, n*hh*ww, {inner_dim}, {c})')
-        print(f'    print("{p} st after proj_out"); print(st_sum(_seq))')
         print(f'    _h_img = reshape_nlc_to_nchw(_seq, n, {c}, hh, ww)')
         print(f'    st_tensor_free(_seq)')
         print(f'    h_cur = add_tensor(_x_in, _h_img)')
         print(f'    st_tensor_free(_x_in); st_tensor_free(_h_img)')
-        if True:
-            print(f'    print("{p} st out"); print(st_sum(h_cur))')
 
     print(f'    h_cur = conv2d_torch(latent, {ws("input_blocks.0.0.weight")}, {ws("input_blocks.0.0.bias")}, n, 4, 320, hh, ww, 3, 1, 3//2)')
     print('    ptr_array_set(_s, 0, h_cur)\n')

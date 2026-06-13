@@ -1722,46 +1722,34 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
     _h_cur_orig = st_clone(h_cur)
     h_cur = group_norm_torch(h_cur, _w_input_blocks_1_0_in_layers_0_weight, _w_input_blocks_1_0_in_layers_0_bias, 32, 320, hh, ww)
     h_cur = silu_torch(h_cur)
-    print("input_blocks.1.0 gn+silu"); print(st_sum(h_cur))
     h_cur = conv2d_torch(h_cur, _w_input_blocks_1_0_in_layers_2_weight, _w_input_blocks_1_0_in_layers_2_bias, n, 320, 320, hh, ww, 3, 1, 3//2)
-    print("input_blocks.1.0 conv1"); print(st_sum(h_cur))
     _se = silu_torch(emb)
     _y = linear_torch(_se, _w_input_blocks_1_0_emb_layers_1_weight, _w_input_blocks_1_0_emb_layers_1_bias, n, 1280, 320)
-    print("input_blocks.1.0 emb linear"); print(st_sum(_y))
     h_cur = add_time_emb_tensor(h_cur, _y, n, 320)
     st_tensor_free(_se); st_tensor_free(_y)
-    print("input_blocks.1.0 after time add"); print(st_sum(h_cur))
     h_cur = group_norm_torch(h_cur, _w_input_blocks_1_0_out_layers_0_weight, _w_input_blocks_1_0_out_layers_0_bias, 32, 320, hh, ww)
     h_cur = silu_torch(h_cur)
     h_cur = conv2d_torch(h_cur, _w_input_blocks_1_0_out_layers_3_weight, _w_input_blocks_1_0_out_layers_3_bias, n, 320, 320, hh, ww, 3, 1, 3//2)
-    print("input_blocks.1.0 conv2"); print(st_sum(h_cur))
     _sk = _h_cur_orig
     h_cur = add_tensor(h_cur, _sk)
     st_tensor_free(_sk)
-    print("input_blocks.1.0 rb out"); print(st_sum(h_cur))
     ptr_array_set(_s, 1, h_cur)
 
     # input_blocks.2
     _h_cur_orig = st_clone(h_cur)
     h_cur = group_norm_torch(h_cur, _w_input_blocks_2_0_in_layers_0_weight, _w_input_blocks_2_0_in_layers_0_bias, 32, 320, hh, ww)
     h_cur = silu_torch(h_cur)
-    print("input_blocks.2.0 gn+silu"); print(st_sum(h_cur))
     h_cur = conv2d_torch(h_cur, _w_input_blocks_2_0_in_layers_2_weight, _w_input_blocks_2_0_in_layers_2_bias, n, 320, 320, hh, ww, 3, 1, 3//2)
-    print("input_blocks.2.0 conv1"); print(st_sum(h_cur))
     _se = silu_torch(emb)
     _y = linear_torch(_se, _w_input_blocks_2_0_emb_layers_1_weight, _w_input_blocks_2_0_emb_layers_1_bias, n, 1280, 320)
-    print("input_blocks.2.0 emb linear"); print(st_sum(_y))
     h_cur = add_time_emb_tensor(h_cur, _y, n, 320)
     st_tensor_free(_se); st_tensor_free(_y)
-    print("input_blocks.2.0 after time add"); print(st_sum(h_cur))
     h_cur = group_norm_torch(h_cur, _w_input_blocks_2_0_out_layers_0_weight, _w_input_blocks_2_0_out_layers_0_bias, 32, 320, hh, ww)
     h_cur = silu_torch(h_cur)
     h_cur = conv2d_torch(h_cur, _w_input_blocks_2_0_out_layers_3_weight, _w_input_blocks_2_0_out_layers_3_bias, n, 320, 320, hh, ww, 3, 1, 3//2)
-    print("input_blocks.2.0 conv2"); print(st_sum(h_cur))
     _sk = _h_cur_orig
     h_cur = add_tensor(h_cur, _sk)
     st_tensor_free(_sk)
-    print("input_blocks.2.0 rb out"); print(st_sum(h_cur))
     ptr_array_set(_s, 2, h_cur)
 
     h_cur = conv2d_torch(h_cur, _w_input_blocks_3_0_op_weight, _w_input_blocks_3_0_op_bias, n, 320, 320, hh, ww, 3, 2, 1)
@@ -1772,43 +1760,23 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
     _h_cur_orig = st_clone(h_cur)
     h_cur = group_norm_torch(h_cur, _w_input_blocks_4_0_in_layers_0_weight, _w_input_blocks_4_0_in_layers_0_bias, 32, 320, hh, ww)
     h_cur = silu_torch(h_cur)
-    print("input_blocks.4.0 gn+silu"); print(st_sum(h_cur))
     h_cur = conv2d_torch(h_cur, _w_input_blocks_4_0_in_layers_2_weight, _w_input_blocks_4_0_in_layers_2_bias, n, 320, 640, hh, ww, 3, 1, 3//2)
-    print("input_blocks.4.0 conv1"); print(st_sum(h_cur))
     _se = silu_torch(emb)
     _y = linear_torch(_se, _w_input_blocks_4_0_emb_layers_1_weight, _w_input_blocks_4_0_emb_layers_1_bias, n, 1280, 640)
-    print("input_blocks.4.0 emb linear"); print(st_sum(_y))
     h_cur = add_time_emb_tensor(h_cur, _y, n, 640)
     st_tensor_free(_se); st_tensor_free(_y)
-    print("input_blocks.4.0 after time add"); print(st_sum(h_cur))
     h_cur = group_norm_torch(h_cur, _w_input_blocks_4_0_out_layers_0_weight, _w_input_blocks_4_0_out_layers_0_bias, 32, 640, hh, ww)
     h_cur = silu_torch(h_cur)
     h_cur = conv2d_torch(h_cur, _w_input_blocks_4_0_out_layers_3_weight, _w_input_blocks_4_0_out_layers_3_bias, n, 640, 640, hh, ww, 3, 1, 3//2)
-    print("input_blocks.4.0 conv2"); print(st_sum(h_cur))
     _sk = conv2d_torch(_h_cur_orig, _w_input_blocks_4_0_skip_connection_weight, _w_input_blocks_4_0_skip_connection_bias, n, 320, 640, hh, ww, 1, 1, 1//2)
     h_cur = add_tensor(h_cur, _sk)
     st_tensor_free(_sk)
-    print("input_blocks.4.0 rb out"); print(st_sum(h_cur))
     # SpatialTransformer input_blocks.4.1
     _x_in = st_clone(h_cur)
-    st_tensor_save(h_cur, "/tmp/elf_gn_true_input.bin")
     h_cur = group_norm_torch(h_cur, _w_input_blocks_4_1_norm_weight, _w_input_blocks_4_1_norm_bias, 32, 640, hh, ww)
-    st_tensor_save(h_cur, "/tmp/elf_gn_input.bin")
-    st_tensor_save(_w_input_blocks_4_1_norm_weight, "/tmp/elf_gn_weight.bin")
-    st_tensor_save(_w_input_blocks_4_1_norm_bias, "/tmp/elf_gn_bias.bin")
-    print("input 4.1 gn weight sum"); print(st_sum(_w_input_blocks_4_1_norm_weight))
-    print("input 4.1 gn bias sum"); print(st_sum(_w_input_blocks_4_1_norm_bias))
     _seq = reshape_nchw_to_nlc(h_cur, n, 640, hh, ww)
-    print("input_blocks.4.1 st after gn+reshape"); print(st_sum(_seq)); st_print_shape(_seq)
-    st_tensor_save(_seq, "/tmp/elf_proj_in_input.bin")
-    st_tensor_save(_w_input_blocks_4_1_proj_in_weight, "/tmp/elf_proj_in_weight.bin")
-    st_tensor_save(_w_input_blocks_4_1_proj_in_bias, "/tmp/elf_proj_in_bias.bin")
     st_tensor_free(h_cur)
-    print("input 4.1 proj_in weight sum"); print(st_sum(_w_input_blocks_4_1_proj_in_weight))
-    print("input 4.1 proj_in bias sum"); print(st_sum(_w_input_blocks_4_1_proj_in_bias))
     _seq = linear_torch(_seq, _w_input_blocks_4_1_proj_in_weight, _w_input_blocks_4_1_proj_in_bias, n*hh*ww, 640, 640)
-    print("input 4.1 proj_in via linear"); print(st_sum(_seq))
-    print("input_blocks.4.1 st after proj_in"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_input_blocks_4_1_transformer_blocks_0_norm1_weight, _w_input_blocks_4_1_transformer_blocks_0_norm1_bias,
         _w_input_blocks_4_1_transformer_blocks_0_norm2_weight, _w_input_blocks_4_1_transformer_blocks_0_norm2_bias,
@@ -1824,7 +1792,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_input_blocks_4_1_transformer_blocks_0_ff_net_0_proj_weight, _w_input_blocks_4_1_transformer_blocks_0_ff_net_0_proj_bias,
         _w_input_blocks_4_1_transformer_blocks_0_ff_net_2_weight, _w_input_blocks_4_1_transformer_blocks_0_ff_net_2_bias,
         n, hh*ww, 640, 10, 2560)
-    print("input_blocks.4.1 st after tb0"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_input_blocks_4_1_transformer_blocks_1_norm1_weight, _w_input_blocks_4_1_transformer_blocks_1_norm1_bias,
         _w_input_blocks_4_1_transformer_blocks_1_norm2_weight, _w_input_blocks_4_1_transformer_blocks_1_norm2_bias,
@@ -1840,45 +1807,34 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_input_blocks_4_1_transformer_blocks_1_ff_net_0_proj_weight, _w_input_blocks_4_1_transformer_blocks_1_ff_net_0_proj_bias,
         _w_input_blocks_4_1_transformer_blocks_1_ff_net_2_weight, _w_input_blocks_4_1_transformer_blocks_1_ff_net_2_bias,
         n, hh*ww, 640, 10, 2560)
-    print("input_blocks.4.1 st after tb1"); print(st_sum(_seq))
     _seq = linear_torch(_seq, _w_input_blocks_4_1_proj_out_weight, _w_input_blocks_4_1_proj_out_bias, n*hh*ww, 640, 640)
-    print("input_blocks.4.1 st after proj_out"); print(st_sum(_seq))
     _h_img = reshape_nlc_to_nchw(_seq, n, 640, hh, ww)
     st_tensor_free(_seq)
     h_cur = add_tensor(_x_in, _h_img)
     st_tensor_free(_x_in); st_tensor_free(_h_img)
-    print("input_blocks.4.1 st out"); print(st_sum(h_cur))
     ptr_array_set(_s, 4, h_cur)
 
     # input_blocks.5
     _h_cur_orig = st_clone(h_cur)
     h_cur = group_norm_torch(h_cur, _w_input_blocks_5_0_in_layers_0_weight, _w_input_blocks_5_0_in_layers_0_bias, 32, 640, hh, ww)
     h_cur = silu_torch(h_cur)
-    print("input_blocks.5.0 gn+silu"); print(st_sum(h_cur))
     h_cur = conv2d_torch(h_cur, _w_input_blocks_5_0_in_layers_2_weight, _w_input_blocks_5_0_in_layers_2_bias, n, 640, 640, hh, ww, 3, 1, 3//2)
-    print("input_blocks.5.0 conv1"); print(st_sum(h_cur))
     _se = silu_torch(emb)
     _y = linear_torch(_se, _w_input_blocks_5_0_emb_layers_1_weight, _w_input_blocks_5_0_emb_layers_1_bias, n, 1280, 640)
-    print("input_blocks.5.0 emb linear"); print(st_sum(_y))
     h_cur = add_time_emb_tensor(h_cur, _y, n, 640)
     st_tensor_free(_se); st_tensor_free(_y)
-    print("input_blocks.5.0 after time add"); print(st_sum(h_cur))
     h_cur = group_norm_torch(h_cur, _w_input_blocks_5_0_out_layers_0_weight, _w_input_blocks_5_0_out_layers_0_bias, 32, 640, hh, ww)
     h_cur = silu_torch(h_cur)
     h_cur = conv2d_torch(h_cur, _w_input_blocks_5_0_out_layers_3_weight, _w_input_blocks_5_0_out_layers_3_bias, n, 640, 640, hh, ww, 3, 1, 3//2)
-    print("input_blocks.5.0 conv2"); print(st_sum(h_cur))
     _sk = _h_cur_orig
     h_cur = add_tensor(h_cur, _sk)
     st_tensor_free(_sk)
-    print("input_blocks.5.0 rb out"); print(st_sum(h_cur))
     # SpatialTransformer input_blocks.5.1
     _x_in = st_clone(h_cur)
     h_cur = group_norm_torch(h_cur, _w_input_blocks_5_1_norm_weight, _w_input_blocks_5_1_norm_bias, 32, 640, hh, ww)
     _seq = reshape_nchw_to_nlc(h_cur, n, 640, hh, ww)
-    print("input_blocks.5.1 st after gn+reshape"); print(st_sum(_seq))
     st_tensor_free(h_cur)
     _seq = linear_torch(_seq, _w_input_blocks_5_1_proj_in_weight, _w_input_blocks_5_1_proj_in_bias, n*hh*ww, 640, 640)
-    print("input_blocks.5.1 st after proj_in"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_input_blocks_5_1_transformer_blocks_0_norm1_weight, _w_input_blocks_5_1_transformer_blocks_0_norm1_bias,
         _w_input_blocks_5_1_transformer_blocks_0_norm2_weight, _w_input_blocks_5_1_transformer_blocks_0_norm2_bias,
@@ -1894,7 +1850,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_input_blocks_5_1_transformer_blocks_0_ff_net_0_proj_weight, _w_input_blocks_5_1_transformer_blocks_0_ff_net_0_proj_bias,
         _w_input_blocks_5_1_transformer_blocks_0_ff_net_2_weight, _w_input_blocks_5_1_transformer_blocks_0_ff_net_2_bias,
         n, hh*ww, 640, 10, 2560)
-    print("input_blocks.5.1 st after tb0"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_input_blocks_5_1_transformer_blocks_1_norm1_weight, _w_input_blocks_5_1_transformer_blocks_1_norm1_bias,
         _w_input_blocks_5_1_transformer_blocks_1_norm2_weight, _w_input_blocks_5_1_transformer_blocks_1_norm2_bias,
@@ -1910,14 +1865,11 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_input_blocks_5_1_transformer_blocks_1_ff_net_0_proj_weight, _w_input_blocks_5_1_transformer_blocks_1_ff_net_0_proj_bias,
         _w_input_blocks_5_1_transformer_blocks_1_ff_net_2_weight, _w_input_blocks_5_1_transformer_blocks_1_ff_net_2_bias,
         n, hh*ww, 640, 10, 2560)
-    print("input_blocks.5.1 st after tb1"); print(st_sum(_seq))
     _seq = linear_torch(_seq, _w_input_blocks_5_1_proj_out_weight, _w_input_blocks_5_1_proj_out_bias, n*hh*ww, 640, 640)
-    print("input_blocks.5.1 st after proj_out"); print(st_sum(_seq))
     _h_img = reshape_nlc_to_nchw(_seq, n, 640, hh, ww)
     st_tensor_free(_seq)
     h_cur = add_tensor(_x_in, _h_img)
     st_tensor_free(_x_in); st_tensor_free(_h_img)
-    print("input_blocks.5.1 st out"); print(st_sum(h_cur))
     ptr_array_set(_s, 5, h_cur)
 
     h_cur = conv2d_torch(h_cur, _w_input_blocks_6_0_op_weight, _w_input_blocks_6_0_op_bias, n, 640, 640, hh, ww, 3, 2, 1)
@@ -1928,31 +1880,23 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
     _h_cur_orig = st_clone(h_cur)
     h_cur = group_norm_torch(h_cur, _w_input_blocks_7_0_in_layers_0_weight, _w_input_blocks_7_0_in_layers_0_bias, 32, 640, hh, ww)
     h_cur = silu_torch(h_cur)
-    print("input_blocks.7.0 gn+silu"); print(st_sum(h_cur))
     h_cur = conv2d_torch(h_cur, _w_input_blocks_7_0_in_layers_2_weight, _w_input_blocks_7_0_in_layers_2_bias, n, 640, 1280, hh, ww, 3, 1, 3//2)
-    print("input_blocks.7.0 conv1"); print(st_sum(h_cur))
     _se = silu_torch(emb)
     _y = linear_torch(_se, _w_input_blocks_7_0_emb_layers_1_weight, _w_input_blocks_7_0_emb_layers_1_bias, n, 1280, 1280)
-    print("input_blocks.7.0 emb linear"); print(st_sum(_y))
     h_cur = add_time_emb_tensor(h_cur, _y, n, 1280)
     st_tensor_free(_se); st_tensor_free(_y)
-    print("input_blocks.7.0 after time add"); print(st_sum(h_cur))
     h_cur = group_norm_torch(h_cur, _w_input_blocks_7_0_out_layers_0_weight, _w_input_blocks_7_0_out_layers_0_bias, 32, 1280, hh, ww)
     h_cur = silu_torch(h_cur)
     h_cur = conv2d_torch(h_cur, _w_input_blocks_7_0_out_layers_3_weight, _w_input_blocks_7_0_out_layers_3_bias, n, 1280, 1280, hh, ww, 3, 1, 3//2)
-    print("input_blocks.7.0 conv2"); print(st_sum(h_cur))
     _sk = conv2d_torch(_h_cur_orig, _w_input_blocks_7_0_skip_connection_weight, _w_input_blocks_7_0_skip_connection_bias, n, 640, 1280, hh, ww, 1, 1, 1//2)
     h_cur = add_tensor(h_cur, _sk)
     st_tensor_free(_sk)
-    print("input_blocks.7.0 rb out"); print(st_sum(h_cur))
     # SpatialTransformer input_blocks.7.1
     _x_in = st_clone(h_cur)
     h_cur = group_norm_torch(h_cur, _w_input_blocks_7_1_norm_weight, _w_input_blocks_7_1_norm_bias, 32, 1280, hh, ww)
     _seq = reshape_nchw_to_nlc(h_cur, n, 1280, hh, ww)
-    print("input_blocks.7.1 st after gn+reshape"); print(st_sum(_seq))
     st_tensor_free(h_cur)
     _seq = linear_torch(_seq, _w_input_blocks_7_1_proj_in_weight, _w_input_blocks_7_1_proj_in_bias, n*hh*ww, 1280, 1280)
-    print("input_blocks.7.1 st after proj_in"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_input_blocks_7_1_transformer_blocks_0_norm1_weight, _w_input_blocks_7_1_transformer_blocks_0_norm1_bias,
         _w_input_blocks_7_1_transformer_blocks_0_norm2_weight, _w_input_blocks_7_1_transformer_blocks_0_norm2_bias,
@@ -1968,7 +1912,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_input_blocks_7_1_transformer_blocks_0_ff_net_0_proj_weight, _w_input_blocks_7_1_transformer_blocks_0_ff_net_0_proj_bias,
         _w_input_blocks_7_1_transformer_blocks_0_ff_net_2_weight, _w_input_blocks_7_1_transformer_blocks_0_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("input_blocks.7.1 st after tb0"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_input_blocks_7_1_transformer_blocks_1_norm1_weight, _w_input_blocks_7_1_transformer_blocks_1_norm1_bias,
         _w_input_blocks_7_1_transformer_blocks_1_norm2_weight, _w_input_blocks_7_1_transformer_blocks_1_norm2_bias,
@@ -1984,7 +1927,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_input_blocks_7_1_transformer_blocks_1_ff_net_0_proj_weight, _w_input_blocks_7_1_transformer_blocks_1_ff_net_0_proj_bias,
         _w_input_blocks_7_1_transformer_blocks_1_ff_net_2_weight, _w_input_blocks_7_1_transformer_blocks_1_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("input_blocks.7.1 st after tb1"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_input_blocks_7_1_transformer_blocks_2_norm1_weight, _w_input_blocks_7_1_transformer_blocks_2_norm1_bias,
         _w_input_blocks_7_1_transformer_blocks_2_norm2_weight, _w_input_blocks_7_1_transformer_blocks_2_norm2_bias,
@@ -2000,7 +1942,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_input_blocks_7_1_transformer_blocks_2_ff_net_0_proj_weight, _w_input_blocks_7_1_transformer_blocks_2_ff_net_0_proj_bias,
         _w_input_blocks_7_1_transformer_blocks_2_ff_net_2_weight, _w_input_blocks_7_1_transformer_blocks_2_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("input_blocks.7.1 st after tb2"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_input_blocks_7_1_transformer_blocks_3_norm1_weight, _w_input_blocks_7_1_transformer_blocks_3_norm1_bias,
         _w_input_blocks_7_1_transformer_blocks_3_norm2_weight, _w_input_blocks_7_1_transformer_blocks_3_norm2_bias,
@@ -2016,7 +1957,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_input_blocks_7_1_transformer_blocks_3_ff_net_0_proj_weight, _w_input_blocks_7_1_transformer_blocks_3_ff_net_0_proj_bias,
         _w_input_blocks_7_1_transformer_blocks_3_ff_net_2_weight, _w_input_blocks_7_1_transformer_blocks_3_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("input_blocks.7.1 st after tb3"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_input_blocks_7_1_transformer_blocks_4_norm1_weight, _w_input_blocks_7_1_transformer_blocks_4_norm1_bias,
         _w_input_blocks_7_1_transformer_blocks_4_norm2_weight, _w_input_blocks_7_1_transformer_blocks_4_norm2_bias,
@@ -2032,7 +1972,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_input_blocks_7_1_transformer_blocks_4_ff_net_0_proj_weight, _w_input_blocks_7_1_transformer_blocks_4_ff_net_0_proj_bias,
         _w_input_blocks_7_1_transformer_blocks_4_ff_net_2_weight, _w_input_blocks_7_1_transformer_blocks_4_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("input_blocks.7.1 st after tb4"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_input_blocks_7_1_transformer_blocks_5_norm1_weight, _w_input_blocks_7_1_transformer_blocks_5_norm1_bias,
         _w_input_blocks_7_1_transformer_blocks_5_norm2_weight, _w_input_blocks_7_1_transformer_blocks_5_norm2_bias,
@@ -2048,7 +1987,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_input_blocks_7_1_transformer_blocks_5_ff_net_0_proj_weight, _w_input_blocks_7_1_transformer_blocks_5_ff_net_0_proj_bias,
         _w_input_blocks_7_1_transformer_blocks_5_ff_net_2_weight, _w_input_blocks_7_1_transformer_blocks_5_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("input_blocks.7.1 st after tb5"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_input_blocks_7_1_transformer_blocks_6_norm1_weight, _w_input_blocks_7_1_transformer_blocks_6_norm1_bias,
         _w_input_blocks_7_1_transformer_blocks_6_norm2_weight, _w_input_blocks_7_1_transformer_blocks_6_norm2_bias,
@@ -2064,7 +2002,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_input_blocks_7_1_transformer_blocks_6_ff_net_0_proj_weight, _w_input_blocks_7_1_transformer_blocks_6_ff_net_0_proj_bias,
         _w_input_blocks_7_1_transformer_blocks_6_ff_net_2_weight, _w_input_blocks_7_1_transformer_blocks_6_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("input_blocks.7.1 st after tb6"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_input_blocks_7_1_transformer_blocks_7_norm1_weight, _w_input_blocks_7_1_transformer_blocks_7_norm1_bias,
         _w_input_blocks_7_1_transformer_blocks_7_norm2_weight, _w_input_blocks_7_1_transformer_blocks_7_norm2_bias,
@@ -2080,7 +2017,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_input_blocks_7_1_transformer_blocks_7_ff_net_0_proj_weight, _w_input_blocks_7_1_transformer_blocks_7_ff_net_0_proj_bias,
         _w_input_blocks_7_1_transformer_blocks_7_ff_net_2_weight, _w_input_blocks_7_1_transformer_blocks_7_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("input_blocks.7.1 st after tb7"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_input_blocks_7_1_transformer_blocks_8_norm1_weight, _w_input_blocks_7_1_transformer_blocks_8_norm1_bias,
         _w_input_blocks_7_1_transformer_blocks_8_norm2_weight, _w_input_blocks_7_1_transformer_blocks_8_norm2_bias,
@@ -2096,7 +2032,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_input_blocks_7_1_transformer_blocks_8_ff_net_0_proj_weight, _w_input_blocks_7_1_transformer_blocks_8_ff_net_0_proj_bias,
         _w_input_blocks_7_1_transformer_blocks_8_ff_net_2_weight, _w_input_blocks_7_1_transformer_blocks_8_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("input_blocks.7.1 st after tb8"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_input_blocks_7_1_transformer_blocks_9_norm1_weight, _w_input_blocks_7_1_transformer_blocks_9_norm1_bias,
         _w_input_blocks_7_1_transformer_blocks_9_norm2_weight, _w_input_blocks_7_1_transformer_blocks_9_norm2_bias,
@@ -2112,45 +2047,34 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_input_blocks_7_1_transformer_blocks_9_ff_net_0_proj_weight, _w_input_blocks_7_1_transformer_blocks_9_ff_net_0_proj_bias,
         _w_input_blocks_7_1_transformer_blocks_9_ff_net_2_weight, _w_input_blocks_7_1_transformer_blocks_9_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("input_blocks.7.1 st after tb9"); print(st_sum(_seq))
     _seq = linear_torch(_seq, _w_input_blocks_7_1_proj_out_weight, _w_input_blocks_7_1_proj_out_bias, n*hh*ww, 1280, 1280)
-    print("input_blocks.7.1 st after proj_out"); print(st_sum(_seq))
     _h_img = reshape_nlc_to_nchw(_seq, n, 1280, hh, ww)
     st_tensor_free(_seq)
     h_cur = add_tensor(_x_in, _h_img)
     st_tensor_free(_x_in); st_tensor_free(_h_img)
-    print("input_blocks.7.1 st out"); print(st_sum(h_cur))
     ptr_array_set(_s, 7, h_cur)
 
     # input_blocks.8
     _h_cur_orig = st_clone(h_cur)
     h_cur = group_norm_torch(h_cur, _w_input_blocks_8_0_in_layers_0_weight, _w_input_blocks_8_0_in_layers_0_bias, 32, 1280, hh, ww)
     h_cur = silu_torch(h_cur)
-    print("input_blocks.8.0 gn+silu"); print(st_sum(h_cur))
     h_cur = conv2d_torch(h_cur, _w_input_blocks_8_0_in_layers_2_weight, _w_input_blocks_8_0_in_layers_2_bias, n, 1280, 1280, hh, ww, 3, 1, 3//2)
-    print("input_blocks.8.0 conv1"); print(st_sum(h_cur))
     _se = silu_torch(emb)
     _y = linear_torch(_se, _w_input_blocks_8_0_emb_layers_1_weight, _w_input_blocks_8_0_emb_layers_1_bias, n, 1280, 1280)
-    print("input_blocks.8.0 emb linear"); print(st_sum(_y))
     h_cur = add_time_emb_tensor(h_cur, _y, n, 1280)
     st_tensor_free(_se); st_tensor_free(_y)
-    print("input_blocks.8.0 after time add"); print(st_sum(h_cur))
     h_cur = group_norm_torch(h_cur, _w_input_blocks_8_0_out_layers_0_weight, _w_input_blocks_8_0_out_layers_0_bias, 32, 1280, hh, ww)
     h_cur = silu_torch(h_cur)
     h_cur = conv2d_torch(h_cur, _w_input_blocks_8_0_out_layers_3_weight, _w_input_blocks_8_0_out_layers_3_bias, n, 1280, 1280, hh, ww, 3, 1, 3//2)
-    print("input_blocks.8.0 conv2"); print(st_sum(h_cur))
     _sk = _h_cur_orig
     h_cur = add_tensor(h_cur, _sk)
     st_tensor_free(_sk)
-    print("input_blocks.8.0 rb out"); print(st_sum(h_cur))
     # SpatialTransformer input_blocks.8.1
     _x_in = st_clone(h_cur)
     h_cur = group_norm_torch(h_cur, _w_input_blocks_8_1_norm_weight, _w_input_blocks_8_1_norm_bias, 32, 1280, hh, ww)
     _seq = reshape_nchw_to_nlc(h_cur, n, 1280, hh, ww)
-    print("input_blocks.8.1 st after gn+reshape"); print(st_sum(_seq))
     st_tensor_free(h_cur)
     _seq = linear_torch(_seq, _w_input_blocks_8_1_proj_in_weight, _w_input_blocks_8_1_proj_in_bias, n*hh*ww, 1280, 1280)
-    print("input_blocks.8.1 st after proj_in"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_input_blocks_8_1_transformer_blocks_0_norm1_weight, _w_input_blocks_8_1_transformer_blocks_0_norm1_bias,
         _w_input_blocks_8_1_transformer_blocks_0_norm2_weight, _w_input_blocks_8_1_transformer_blocks_0_norm2_bias,
@@ -2166,7 +2090,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_input_blocks_8_1_transformer_blocks_0_ff_net_0_proj_weight, _w_input_blocks_8_1_transformer_blocks_0_ff_net_0_proj_bias,
         _w_input_blocks_8_1_transformer_blocks_0_ff_net_2_weight, _w_input_blocks_8_1_transformer_blocks_0_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("input_blocks.8.1 st after tb0"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_input_blocks_8_1_transformer_blocks_1_norm1_weight, _w_input_blocks_8_1_transformer_blocks_1_norm1_bias,
         _w_input_blocks_8_1_transformer_blocks_1_norm2_weight, _w_input_blocks_8_1_transformer_blocks_1_norm2_bias,
@@ -2182,7 +2105,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_input_blocks_8_1_transformer_blocks_1_ff_net_0_proj_weight, _w_input_blocks_8_1_transformer_blocks_1_ff_net_0_proj_bias,
         _w_input_blocks_8_1_transformer_blocks_1_ff_net_2_weight, _w_input_blocks_8_1_transformer_blocks_1_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("input_blocks.8.1 st after tb1"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_input_blocks_8_1_transformer_blocks_2_norm1_weight, _w_input_blocks_8_1_transformer_blocks_2_norm1_bias,
         _w_input_blocks_8_1_transformer_blocks_2_norm2_weight, _w_input_blocks_8_1_transformer_blocks_2_norm2_bias,
@@ -2198,7 +2120,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_input_blocks_8_1_transformer_blocks_2_ff_net_0_proj_weight, _w_input_blocks_8_1_transformer_blocks_2_ff_net_0_proj_bias,
         _w_input_blocks_8_1_transformer_blocks_2_ff_net_2_weight, _w_input_blocks_8_1_transformer_blocks_2_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("input_blocks.8.1 st after tb2"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_input_blocks_8_1_transformer_blocks_3_norm1_weight, _w_input_blocks_8_1_transformer_blocks_3_norm1_bias,
         _w_input_blocks_8_1_transformer_blocks_3_norm2_weight, _w_input_blocks_8_1_transformer_blocks_3_norm2_bias,
@@ -2214,7 +2135,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_input_blocks_8_1_transformer_blocks_3_ff_net_0_proj_weight, _w_input_blocks_8_1_transformer_blocks_3_ff_net_0_proj_bias,
         _w_input_blocks_8_1_transformer_blocks_3_ff_net_2_weight, _w_input_blocks_8_1_transformer_blocks_3_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("input_blocks.8.1 st after tb3"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_input_blocks_8_1_transformer_blocks_4_norm1_weight, _w_input_blocks_8_1_transformer_blocks_4_norm1_bias,
         _w_input_blocks_8_1_transformer_blocks_4_norm2_weight, _w_input_blocks_8_1_transformer_blocks_4_norm2_bias,
@@ -2230,7 +2150,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_input_blocks_8_1_transformer_blocks_4_ff_net_0_proj_weight, _w_input_blocks_8_1_transformer_blocks_4_ff_net_0_proj_bias,
         _w_input_blocks_8_1_transformer_blocks_4_ff_net_2_weight, _w_input_blocks_8_1_transformer_blocks_4_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("input_blocks.8.1 st after tb4"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_input_blocks_8_1_transformer_blocks_5_norm1_weight, _w_input_blocks_8_1_transformer_blocks_5_norm1_bias,
         _w_input_blocks_8_1_transformer_blocks_5_norm2_weight, _w_input_blocks_8_1_transformer_blocks_5_norm2_bias,
@@ -2246,7 +2165,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_input_blocks_8_1_transformer_blocks_5_ff_net_0_proj_weight, _w_input_blocks_8_1_transformer_blocks_5_ff_net_0_proj_bias,
         _w_input_blocks_8_1_transformer_blocks_5_ff_net_2_weight, _w_input_blocks_8_1_transformer_blocks_5_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("input_blocks.8.1 st after tb5"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_input_blocks_8_1_transformer_blocks_6_norm1_weight, _w_input_blocks_8_1_transformer_blocks_6_norm1_bias,
         _w_input_blocks_8_1_transformer_blocks_6_norm2_weight, _w_input_blocks_8_1_transformer_blocks_6_norm2_bias,
@@ -2262,7 +2180,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_input_blocks_8_1_transformer_blocks_6_ff_net_0_proj_weight, _w_input_blocks_8_1_transformer_blocks_6_ff_net_0_proj_bias,
         _w_input_blocks_8_1_transformer_blocks_6_ff_net_2_weight, _w_input_blocks_8_1_transformer_blocks_6_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("input_blocks.8.1 st after tb6"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_input_blocks_8_1_transformer_blocks_7_norm1_weight, _w_input_blocks_8_1_transformer_blocks_7_norm1_bias,
         _w_input_blocks_8_1_transformer_blocks_7_norm2_weight, _w_input_blocks_8_1_transformer_blocks_7_norm2_bias,
@@ -2278,7 +2195,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_input_blocks_8_1_transformer_blocks_7_ff_net_0_proj_weight, _w_input_blocks_8_1_transformer_blocks_7_ff_net_0_proj_bias,
         _w_input_blocks_8_1_transformer_blocks_7_ff_net_2_weight, _w_input_blocks_8_1_transformer_blocks_7_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("input_blocks.8.1 st after tb7"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_input_blocks_8_1_transformer_blocks_8_norm1_weight, _w_input_blocks_8_1_transformer_blocks_8_norm1_bias,
         _w_input_blocks_8_1_transformer_blocks_8_norm2_weight, _w_input_blocks_8_1_transformer_blocks_8_norm2_bias,
@@ -2294,7 +2210,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_input_blocks_8_1_transformer_blocks_8_ff_net_0_proj_weight, _w_input_blocks_8_1_transformer_blocks_8_ff_net_0_proj_bias,
         _w_input_blocks_8_1_transformer_blocks_8_ff_net_2_weight, _w_input_blocks_8_1_transformer_blocks_8_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("input_blocks.8.1 st after tb8"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_input_blocks_8_1_transformer_blocks_9_norm1_weight, _w_input_blocks_8_1_transformer_blocks_9_norm1_bias,
         _w_input_blocks_8_1_transformer_blocks_9_norm2_weight, _w_input_blocks_8_1_transformer_blocks_9_norm2_bias,
@@ -2310,45 +2225,34 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_input_blocks_8_1_transformer_blocks_9_ff_net_0_proj_weight, _w_input_blocks_8_1_transformer_blocks_9_ff_net_0_proj_bias,
         _w_input_blocks_8_1_transformer_blocks_9_ff_net_2_weight, _w_input_blocks_8_1_transformer_blocks_9_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("input_blocks.8.1 st after tb9"); print(st_sum(_seq))
     _seq = linear_torch(_seq, _w_input_blocks_8_1_proj_out_weight, _w_input_blocks_8_1_proj_out_bias, n*hh*ww, 1280, 1280)
-    print("input_blocks.8.1 st after proj_out"); print(st_sum(_seq))
     _h_img = reshape_nlc_to_nchw(_seq, n, 1280, hh, ww)
     st_tensor_free(_seq)
     h_cur = add_tensor(_x_in, _h_img)
     st_tensor_free(_x_in); st_tensor_free(_h_img)
-    print("input_blocks.8.1 st out"); print(st_sum(h_cur))
     ptr_array_set(_s, 8, h_cur)
 
     # middle_block
     _h_cur_orig = st_clone(h_cur)
     h_cur = group_norm_torch(h_cur, _w_middle_block_0_in_layers_0_weight, _w_middle_block_0_in_layers_0_bias, 32, 1280, hh, ww)
     h_cur = silu_torch(h_cur)
-    print("middle_block.0 gn+silu"); print(st_sum(h_cur))
     h_cur = conv2d_torch(h_cur, _w_middle_block_0_in_layers_2_weight, _w_middle_block_0_in_layers_2_bias, n, 1280, 1280, hh, ww, 3, 1, 3//2)
-    print("middle_block.0 conv1"); print(st_sum(h_cur))
     _se = silu_torch(emb)
     _y = linear_torch(_se, _w_middle_block_0_emb_layers_1_weight, _w_middle_block_0_emb_layers_1_bias, n, 1280, 1280)
-    print("middle_block.0 emb linear"); print(st_sum(_y))
     h_cur = add_time_emb_tensor(h_cur, _y, n, 1280)
     st_tensor_free(_se); st_tensor_free(_y)
-    print("middle_block.0 after time add"); print(st_sum(h_cur))
     h_cur = group_norm_torch(h_cur, _w_middle_block_0_out_layers_0_weight, _w_middle_block_0_out_layers_0_bias, 32, 1280, hh, ww)
     h_cur = silu_torch(h_cur)
     h_cur = conv2d_torch(h_cur, _w_middle_block_0_out_layers_3_weight, _w_middle_block_0_out_layers_3_bias, n, 1280, 1280, hh, ww, 3, 1, 3//2)
-    print("middle_block.0 conv2"); print(st_sum(h_cur))
     _sk = _h_cur_orig
     h_cur = add_tensor(h_cur, _sk)
     st_tensor_free(_sk)
-    print("middle_block.0 rb out"); print(st_sum(h_cur))
     # SpatialTransformer middle_block.1
     _x_in = st_clone(h_cur)
     h_cur = group_norm_torch(h_cur, _w_middle_block_1_norm_weight, _w_middle_block_1_norm_bias, 32, 1280, hh, ww)
     _seq = reshape_nchw_to_nlc(h_cur, n, 1280, hh, ww)
-    print("middle_block.1 st after gn+reshape"); print(st_sum(_seq))
     st_tensor_free(h_cur)
     _seq = linear_torch(_seq, _w_middle_block_1_proj_in_weight, _w_middle_block_1_proj_in_bias, n*hh*ww, 1280, 1280)
-    print("middle_block.1 st after proj_in"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_middle_block_1_transformer_blocks_0_norm1_weight, _w_middle_block_1_transformer_blocks_0_norm1_bias,
         _w_middle_block_1_transformer_blocks_0_norm2_weight, _w_middle_block_1_transformer_blocks_0_norm2_bias,
@@ -2364,7 +2268,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_middle_block_1_transformer_blocks_0_ff_net_0_proj_weight, _w_middle_block_1_transformer_blocks_0_ff_net_0_proj_bias,
         _w_middle_block_1_transformer_blocks_0_ff_net_2_weight, _w_middle_block_1_transformer_blocks_0_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("middle_block.1 st after tb0"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_middle_block_1_transformer_blocks_1_norm1_weight, _w_middle_block_1_transformer_blocks_1_norm1_bias,
         _w_middle_block_1_transformer_blocks_1_norm2_weight, _w_middle_block_1_transformer_blocks_1_norm2_bias,
@@ -2380,7 +2283,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_middle_block_1_transformer_blocks_1_ff_net_0_proj_weight, _w_middle_block_1_transformer_blocks_1_ff_net_0_proj_bias,
         _w_middle_block_1_transformer_blocks_1_ff_net_2_weight, _w_middle_block_1_transformer_blocks_1_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("middle_block.1 st after tb1"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_middle_block_1_transformer_blocks_2_norm1_weight, _w_middle_block_1_transformer_blocks_2_norm1_bias,
         _w_middle_block_1_transformer_blocks_2_norm2_weight, _w_middle_block_1_transformer_blocks_2_norm2_bias,
@@ -2396,7 +2298,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_middle_block_1_transformer_blocks_2_ff_net_0_proj_weight, _w_middle_block_1_transformer_blocks_2_ff_net_0_proj_bias,
         _w_middle_block_1_transformer_blocks_2_ff_net_2_weight, _w_middle_block_1_transformer_blocks_2_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("middle_block.1 st after tb2"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_middle_block_1_transformer_blocks_3_norm1_weight, _w_middle_block_1_transformer_blocks_3_norm1_bias,
         _w_middle_block_1_transformer_blocks_3_norm2_weight, _w_middle_block_1_transformer_blocks_3_norm2_bias,
@@ -2412,7 +2313,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_middle_block_1_transformer_blocks_3_ff_net_0_proj_weight, _w_middle_block_1_transformer_blocks_3_ff_net_0_proj_bias,
         _w_middle_block_1_transformer_blocks_3_ff_net_2_weight, _w_middle_block_1_transformer_blocks_3_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("middle_block.1 st after tb3"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_middle_block_1_transformer_blocks_4_norm1_weight, _w_middle_block_1_transformer_blocks_4_norm1_bias,
         _w_middle_block_1_transformer_blocks_4_norm2_weight, _w_middle_block_1_transformer_blocks_4_norm2_bias,
@@ -2428,7 +2328,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_middle_block_1_transformer_blocks_4_ff_net_0_proj_weight, _w_middle_block_1_transformer_blocks_4_ff_net_0_proj_bias,
         _w_middle_block_1_transformer_blocks_4_ff_net_2_weight, _w_middle_block_1_transformer_blocks_4_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("middle_block.1 st after tb4"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_middle_block_1_transformer_blocks_5_norm1_weight, _w_middle_block_1_transformer_blocks_5_norm1_bias,
         _w_middle_block_1_transformer_blocks_5_norm2_weight, _w_middle_block_1_transformer_blocks_5_norm2_bias,
@@ -2444,7 +2343,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_middle_block_1_transformer_blocks_5_ff_net_0_proj_weight, _w_middle_block_1_transformer_blocks_5_ff_net_0_proj_bias,
         _w_middle_block_1_transformer_blocks_5_ff_net_2_weight, _w_middle_block_1_transformer_blocks_5_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("middle_block.1 st after tb5"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_middle_block_1_transformer_blocks_6_norm1_weight, _w_middle_block_1_transformer_blocks_6_norm1_bias,
         _w_middle_block_1_transformer_blocks_6_norm2_weight, _w_middle_block_1_transformer_blocks_6_norm2_bias,
@@ -2460,7 +2358,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_middle_block_1_transformer_blocks_6_ff_net_0_proj_weight, _w_middle_block_1_transformer_blocks_6_ff_net_0_proj_bias,
         _w_middle_block_1_transformer_blocks_6_ff_net_2_weight, _w_middle_block_1_transformer_blocks_6_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("middle_block.1 st after tb6"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_middle_block_1_transformer_blocks_7_norm1_weight, _w_middle_block_1_transformer_blocks_7_norm1_bias,
         _w_middle_block_1_transformer_blocks_7_norm2_weight, _w_middle_block_1_transformer_blocks_7_norm2_bias,
@@ -2476,7 +2373,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_middle_block_1_transformer_blocks_7_ff_net_0_proj_weight, _w_middle_block_1_transformer_blocks_7_ff_net_0_proj_bias,
         _w_middle_block_1_transformer_blocks_7_ff_net_2_weight, _w_middle_block_1_transformer_blocks_7_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("middle_block.1 st after tb7"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_middle_block_1_transformer_blocks_8_norm1_weight, _w_middle_block_1_transformer_blocks_8_norm1_bias,
         _w_middle_block_1_transformer_blocks_8_norm2_weight, _w_middle_block_1_transformer_blocks_8_norm2_bias,
@@ -2492,7 +2388,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_middle_block_1_transformer_blocks_8_ff_net_0_proj_weight, _w_middle_block_1_transformer_blocks_8_ff_net_0_proj_bias,
         _w_middle_block_1_transformer_blocks_8_ff_net_2_weight, _w_middle_block_1_transformer_blocks_8_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("middle_block.1 st after tb8"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_middle_block_1_transformer_blocks_9_norm1_weight, _w_middle_block_1_transformer_blocks_9_norm1_bias,
         _w_middle_block_1_transformer_blocks_9_norm2_weight, _w_middle_block_1_transformer_blocks_9_norm2_bias,
@@ -2508,34 +2403,25 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_middle_block_1_transformer_blocks_9_ff_net_0_proj_weight, _w_middle_block_1_transformer_blocks_9_ff_net_0_proj_bias,
         _w_middle_block_1_transformer_blocks_9_ff_net_2_weight, _w_middle_block_1_transformer_blocks_9_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("middle_block.1 st after tb9"); print(st_sum(_seq))
     _seq = linear_torch(_seq, _w_middle_block_1_proj_out_weight, _w_middle_block_1_proj_out_bias, n*hh*ww, 1280, 1280)
-    print("middle_block.1 st after proj_out"); print(st_sum(_seq))
     _h_img = reshape_nlc_to_nchw(_seq, n, 1280, hh, ww)
     st_tensor_free(_seq)
     h_cur = add_tensor(_x_in, _h_img)
     st_tensor_free(_x_in); st_tensor_free(_h_img)
-    print("middle_block.1 st out"); print(st_sum(h_cur))
     _h_cur_orig = st_clone(h_cur)
     h_cur = group_norm_torch(h_cur, _w_middle_block_2_in_layers_0_weight, _w_middle_block_2_in_layers_0_bias, 32, 1280, hh, ww)
     h_cur = silu_torch(h_cur)
-    print("middle_block.2 gn+silu"); print(st_sum(h_cur))
     h_cur = conv2d_torch(h_cur, _w_middle_block_2_in_layers_2_weight, _w_middle_block_2_in_layers_2_bias, n, 1280, 1280, hh, ww, 3, 1, 3//2)
-    print("middle_block.2 conv1"); print(st_sum(h_cur))
     _se = silu_torch(emb)
     _y = linear_torch(_se, _w_middle_block_2_emb_layers_1_weight, _w_middle_block_2_emb_layers_1_bias, n, 1280, 1280)
-    print("middle_block.2 emb linear"); print(st_sum(_y))
     h_cur = add_time_emb_tensor(h_cur, _y, n, 1280)
     st_tensor_free(_se); st_tensor_free(_y)
-    print("middle_block.2 after time add"); print(st_sum(h_cur))
     h_cur = group_norm_torch(h_cur, _w_middle_block_2_out_layers_0_weight, _w_middle_block_2_out_layers_0_bias, 32, 1280, hh, ww)
     h_cur = silu_torch(h_cur)
     h_cur = conv2d_torch(h_cur, _w_middle_block_2_out_layers_3_weight, _w_middle_block_2_out_layers_3_bias, n, 1280, 1280, hh, ww, 3, 1, 3//2)
-    print("middle_block.2 conv2"); print(st_sum(h_cur))
     _sk = _h_cur_orig
     h_cur = add_tensor(h_cur, _sk)
     st_tensor_free(_sk)
-    print("middle_block.2 rb out"); print(st_sum(h_cur))
 
     # output_blocks.0
     _cur = h_cur
@@ -2545,31 +2431,23 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
     _h_cur_orig = st_clone(h_cur)
     h_cur = group_norm_torch(h_cur, _w_output_blocks_0_0_in_layers_0_weight, _w_output_blocks_0_0_in_layers_0_bias, 32, 2560, hh, ww)
     h_cur = silu_torch(h_cur)
-    print("output_blocks.0.0 gn+silu"); print(st_sum(h_cur))
     h_cur = conv2d_torch(h_cur, _w_output_blocks_0_0_in_layers_2_weight, _w_output_blocks_0_0_in_layers_2_bias, n, 2560, 1280, hh, ww, 3, 1, 3//2)
-    print("output_blocks.0.0 conv1"); print(st_sum(h_cur))
     _se = silu_torch(emb)
     _y = linear_torch(_se, _w_output_blocks_0_0_emb_layers_1_weight, _w_output_blocks_0_0_emb_layers_1_bias, n, 1280, 1280)
-    print("output_blocks.0.0 emb linear"); print(st_sum(_y))
     h_cur = add_time_emb_tensor(h_cur, _y, n, 1280)
     st_tensor_free(_se); st_tensor_free(_y)
-    print("output_blocks.0.0 after time add"); print(st_sum(h_cur))
     h_cur = group_norm_torch(h_cur, _w_output_blocks_0_0_out_layers_0_weight, _w_output_blocks_0_0_out_layers_0_bias, 32, 1280, hh, ww)
     h_cur = silu_torch(h_cur)
     h_cur = conv2d_torch(h_cur, _w_output_blocks_0_0_out_layers_3_weight, _w_output_blocks_0_0_out_layers_3_bias, n, 1280, 1280, hh, ww, 3, 1, 3//2)
-    print("output_blocks.0.0 conv2"); print(st_sum(h_cur))
     _sk = conv2d_torch(_h_cur_orig, _w_output_blocks_0_0_skip_connection_weight, _w_output_blocks_0_0_skip_connection_bias, n, 2560, 1280, hh, ww, 1, 1, 1//2)
     h_cur = add_tensor(h_cur, _sk)
     st_tensor_free(_sk)
-    print("output_blocks.0.0 rb out"); print(st_sum(h_cur))
     # SpatialTransformer output_blocks.0.1
     _x_in = st_clone(h_cur)
     h_cur = group_norm_torch(h_cur, _w_output_blocks_0_1_norm_weight, _w_output_blocks_0_1_norm_bias, 32, 1280, hh, ww)
     _seq = reshape_nchw_to_nlc(h_cur, n, 1280, hh, ww)
-    print("output_blocks.0.1 st after gn+reshape"); print(st_sum(_seq))
     st_tensor_free(h_cur)
     _seq = linear_torch(_seq, _w_output_blocks_0_1_proj_in_weight, _w_output_blocks_0_1_proj_in_bias, n*hh*ww, 1280, 1280)
-    print("output_blocks.0.1 st after proj_in"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_0_1_transformer_blocks_0_norm1_weight, _w_output_blocks_0_1_transformer_blocks_0_norm1_bias,
         _w_output_blocks_0_1_transformer_blocks_0_norm2_weight, _w_output_blocks_0_1_transformer_blocks_0_norm2_bias,
@@ -2585,7 +2463,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_0_1_transformer_blocks_0_ff_net_0_proj_weight, _w_output_blocks_0_1_transformer_blocks_0_ff_net_0_proj_bias,
         _w_output_blocks_0_1_transformer_blocks_0_ff_net_2_weight, _w_output_blocks_0_1_transformer_blocks_0_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.0.1 st after tb0"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_0_1_transformer_blocks_1_norm1_weight, _w_output_blocks_0_1_transformer_blocks_1_norm1_bias,
         _w_output_blocks_0_1_transformer_blocks_1_norm2_weight, _w_output_blocks_0_1_transformer_blocks_1_norm2_bias,
@@ -2601,7 +2478,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_0_1_transformer_blocks_1_ff_net_0_proj_weight, _w_output_blocks_0_1_transformer_blocks_1_ff_net_0_proj_bias,
         _w_output_blocks_0_1_transformer_blocks_1_ff_net_2_weight, _w_output_blocks_0_1_transformer_blocks_1_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.0.1 st after tb1"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_0_1_transformer_blocks_2_norm1_weight, _w_output_blocks_0_1_transformer_blocks_2_norm1_bias,
         _w_output_blocks_0_1_transformer_blocks_2_norm2_weight, _w_output_blocks_0_1_transformer_blocks_2_norm2_bias,
@@ -2617,7 +2493,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_0_1_transformer_blocks_2_ff_net_0_proj_weight, _w_output_blocks_0_1_transformer_blocks_2_ff_net_0_proj_bias,
         _w_output_blocks_0_1_transformer_blocks_2_ff_net_2_weight, _w_output_blocks_0_1_transformer_blocks_2_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.0.1 st after tb2"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_0_1_transformer_blocks_3_norm1_weight, _w_output_blocks_0_1_transformer_blocks_3_norm1_bias,
         _w_output_blocks_0_1_transformer_blocks_3_norm2_weight, _w_output_blocks_0_1_transformer_blocks_3_norm2_bias,
@@ -2633,7 +2508,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_0_1_transformer_blocks_3_ff_net_0_proj_weight, _w_output_blocks_0_1_transformer_blocks_3_ff_net_0_proj_bias,
         _w_output_blocks_0_1_transformer_blocks_3_ff_net_2_weight, _w_output_blocks_0_1_transformer_blocks_3_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.0.1 st after tb3"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_0_1_transformer_blocks_4_norm1_weight, _w_output_blocks_0_1_transformer_blocks_4_norm1_bias,
         _w_output_blocks_0_1_transformer_blocks_4_norm2_weight, _w_output_blocks_0_1_transformer_blocks_4_norm2_bias,
@@ -2649,7 +2523,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_0_1_transformer_blocks_4_ff_net_0_proj_weight, _w_output_blocks_0_1_transformer_blocks_4_ff_net_0_proj_bias,
         _w_output_blocks_0_1_transformer_blocks_4_ff_net_2_weight, _w_output_blocks_0_1_transformer_blocks_4_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.0.1 st after tb4"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_0_1_transformer_blocks_5_norm1_weight, _w_output_blocks_0_1_transformer_blocks_5_norm1_bias,
         _w_output_blocks_0_1_transformer_blocks_5_norm2_weight, _w_output_blocks_0_1_transformer_blocks_5_norm2_bias,
@@ -2665,7 +2538,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_0_1_transformer_blocks_5_ff_net_0_proj_weight, _w_output_blocks_0_1_transformer_blocks_5_ff_net_0_proj_bias,
         _w_output_blocks_0_1_transformer_blocks_5_ff_net_2_weight, _w_output_blocks_0_1_transformer_blocks_5_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.0.1 st after tb5"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_0_1_transformer_blocks_6_norm1_weight, _w_output_blocks_0_1_transformer_blocks_6_norm1_bias,
         _w_output_blocks_0_1_transformer_blocks_6_norm2_weight, _w_output_blocks_0_1_transformer_blocks_6_norm2_bias,
@@ -2681,7 +2553,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_0_1_transformer_blocks_6_ff_net_0_proj_weight, _w_output_blocks_0_1_transformer_blocks_6_ff_net_0_proj_bias,
         _w_output_blocks_0_1_transformer_blocks_6_ff_net_2_weight, _w_output_blocks_0_1_transformer_blocks_6_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.0.1 st after tb6"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_0_1_transformer_blocks_7_norm1_weight, _w_output_blocks_0_1_transformer_blocks_7_norm1_bias,
         _w_output_blocks_0_1_transformer_blocks_7_norm2_weight, _w_output_blocks_0_1_transformer_blocks_7_norm2_bias,
@@ -2697,7 +2568,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_0_1_transformer_blocks_7_ff_net_0_proj_weight, _w_output_blocks_0_1_transformer_blocks_7_ff_net_0_proj_bias,
         _w_output_blocks_0_1_transformer_blocks_7_ff_net_2_weight, _w_output_blocks_0_1_transformer_blocks_7_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.0.1 st after tb7"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_0_1_transformer_blocks_8_norm1_weight, _w_output_blocks_0_1_transformer_blocks_8_norm1_bias,
         _w_output_blocks_0_1_transformer_blocks_8_norm2_weight, _w_output_blocks_0_1_transformer_blocks_8_norm2_bias,
@@ -2713,7 +2583,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_0_1_transformer_blocks_8_ff_net_0_proj_weight, _w_output_blocks_0_1_transformer_blocks_8_ff_net_0_proj_bias,
         _w_output_blocks_0_1_transformer_blocks_8_ff_net_2_weight, _w_output_blocks_0_1_transformer_blocks_8_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.0.1 st after tb8"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_0_1_transformer_blocks_9_norm1_weight, _w_output_blocks_0_1_transformer_blocks_9_norm1_bias,
         _w_output_blocks_0_1_transformer_blocks_9_norm2_weight, _w_output_blocks_0_1_transformer_blocks_9_norm2_bias,
@@ -2729,14 +2598,11 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_0_1_transformer_blocks_9_ff_net_0_proj_weight, _w_output_blocks_0_1_transformer_blocks_9_ff_net_0_proj_bias,
         _w_output_blocks_0_1_transformer_blocks_9_ff_net_2_weight, _w_output_blocks_0_1_transformer_blocks_9_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.0.1 st after tb9"); print(st_sum(_seq))
     _seq = linear_torch(_seq, _w_output_blocks_0_1_proj_out_weight, _w_output_blocks_0_1_proj_out_bias, n*hh*ww, 1280, 1280)
-    print("output_blocks.0.1 st after proj_out"); print(st_sum(_seq))
     _h_img = reshape_nlc_to_nchw(_seq, n, 1280, hh, ww)
     st_tensor_free(_seq)
     h_cur = add_tensor(_x_in, _h_img)
     st_tensor_free(_x_in); st_tensor_free(_h_img)
-    print("output_blocks.0.1 st out"); print(st_sum(h_cur))
 
     # output_blocks.1
     _cur = h_cur
@@ -2746,31 +2612,23 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
     _h_cur_orig = st_clone(h_cur)
     h_cur = group_norm_torch(h_cur, _w_output_blocks_1_0_in_layers_0_weight, _w_output_blocks_1_0_in_layers_0_bias, 32, 2560, hh, ww)
     h_cur = silu_torch(h_cur)
-    print("output_blocks.1.0 gn+silu"); print(st_sum(h_cur))
     h_cur = conv2d_torch(h_cur, _w_output_blocks_1_0_in_layers_2_weight, _w_output_blocks_1_0_in_layers_2_bias, n, 2560, 1280, hh, ww, 3, 1, 3//2)
-    print("output_blocks.1.0 conv1"); print(st_sum(h_cur))
     _se = silu_torch(emb)
     _y = linear_torch(_se, _w_output_blocks_1_0_emb_layers_1_weight, _w_output_blocks_1_0_emb_layers_1_bias, n, 1280, 1280)
-    print("output_blocks.1.0 emb linear"); print(st_sum(_y))
     h_cur = add_time_emb_tensor(h_cur, _y, n, 1280)
     st_tensor_free(_se); st_tensor_free(_y)
-    print("output_blocks.1.0 after time add"); print(st_sum(h_cur))
     h_cur = group_norm_torch(h_cur, _w_output_blocks_1_0_out_layers_0_weight, _w_output_blocks_1_0_out_layers_0_bias, 32, 1280, hh, ww)
     h_cur = silu_torch(h_cur)
     h_cur = conv2d_torch(h_cur, _w_output_blocks_1_0_out_layers_3_weight, _w_output_blocks_1_0_out_layers_3_bias, n, 1280, 1280, hh, ww, 3, 1, 3//2)
-    print("output_blocks.1.0 conv2"); print(st_sum(h_cur))
     _sk = conv2d_torch(_h_cur_orig, _w_output_blocks_1_0_skip_connection_weight, _w_output_blocks_1_0_skip_connection_bias, n, 2560, 1280, hh, ww, 1, 1, 1//2)
     h_cur = add_tensor(h_cur, _sk)
     st_tensor_free(_sk)
-    print("output_blocks.1.0 rb out"); print(st_sum(h_cur))
     # SpatialTransformer output_blocks.1.1
     _x_in = st_clone(h_cur)
     h_cur = group_norm_torch(h_cur, _w_output_blocks_1_1_norm_weight, _w_output_blocks_1_1_norm_bias, 32, 1280, hh, ww)
     _seq = reshape_nchw_to_nlc(h_cur, n, 1280, hh, ww)
-    print("output_blocks.1.1 st after gn+reshape"); print(st_sum(_seq))
     st_tensor_free(h_cur)
     _seq = linear_torch(_seq, _w_output_blocks_1_1_proj_in_weight, _w_output_blocks_1_1_proj_in_bias, n*hh*ww, 1280, 1280)
-    print("output_blocks.1.1 st after proj_in"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_1_1_transformer_blocks_0_norm1_weight, _w_output_blocks_1_1_transformer_blocks_0_norm1_bias,
         _w_output_blocks_1_1_transformer_blocks_0_norm2_weight, _w_output_blocks_1_1_transformer_blocks_0_norm2_bias,
@@ -2786,7 +2644,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_1_1_transformer_blocks_0_ff_net_0_proj_weight, _w_output_blocks_1_1_transformer_blocks_0_ff_net_0_proj_bias,
         _w_output_blocks_1_1_transformer_blocks_0_ff_net_2_weight, _w_output_blocks_1_1_transformer_blocks_0_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.1.1 st after tb0"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_1_1_transformer_blocks_1_norm1_weight, _w_output_blocks_1_1_transformer_blocks_1_norm1_bias,
         _w_output_blocks_1_1_transformer_blocks_1_norm2_weight, _w_output_blocks_1_1_transformer_blocks_1_norm2_bias,
@@ -2802,7 +2659,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_1_1_transformer_blocks_1_ff_net_0_proj_weight, _w_output_blocks_1_1_transformer_blocks_1_ff_net_0_proj_bias,
         _w_output_blocks_1_1_transformer_blocks_1_ff_net_2_weight, _w_output_blocks_1_1_transformer_blocks_1_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.1.1 st after tb1"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_1_1_transformer_blocks_2_norm1_weight, _w_output_blocks_1_1_transformer_blocks_2_norm1_bias,
         _w_output_blocks_1_1_transformer_blocks_2_norm2_weight, _w_output_blocks_1_1_transformer_blocks_2_norm2_bias,
@@ -2818,7 +2674,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_1_1_transformer_blocks_2_ff_net_0_proj_weight, _w_output_blocks_1_1_transformer_blocks_2_ff_net_0_proj_bias,
         _w_output_blocks_1_1_transformer_blocks_2_ff_net_2_weight, _w_output_blocks_1_1_transformer_blocks_2_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.1.1 st after tb2"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_1_1_transformer_blocks_3_norm1_weight, _w_output_blocks_1_1_transformer_blocks_3_norm1_bias,
         _w_output_blocks_1_1_transformer_blocks_3_norm2_weight, _w_output_blocks_1_1_transformer_blocks_3_norm2_bias,
@@ -2834,7 +2689,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_1_1_transformer_blocks_3_ff_net_0_proj_weight, _w_output_blocks_1_1_transformer_blocks_3_ff_net_0_proj_bias,
         _w_output_blocks_1_1_transformer_blocks_3_ff_net_2_weight, _w_output_blocks_1_1_transformer_blocks_3_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.1.1 st after tb3"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_1_1_transformer_blocks_4_norm1_weight, _w_output_blocks_1_1_transformer_blocks_4_norm1_bias,
         _w_output_blocks_1_1_transformer_blocks_4_norm2_weight, _w_output_blocks_1_1_transformer_blocks_4_norm2_bias,
@@ -2850,7 +2704,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_1_1_transformer_blocks_4_ff_net_0_proj_weight, _w_output_blocks_1_1_transformer_blocks_4_ff_net_0_proj_bias,
         _w_output_blocks_1_1_transformer_blocks_4_ff_net_2_weight, _w_output_blocks_1_1_transformer_blocks_4_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.1.1 st after tb4"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_1_1_transformer_blocks_5_norm1_weight, _w_output_blocks_1_1_transformer_blocks_5_norm1_bias,
         _w_output_blocks_1_1_transformer_blocks_5_norm2_weight, _w_output_blocks_1_1_transformer_blocks_5_norm2_bias,
@@ -2866,7 +2719,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_1_1_transformer_blocks_5_ff_net_0_proj_weight, _w_output_blocks_1_1_transformer_blocks_5_ff_net_0_proj_bias,
         _w_output_blocks_1_1_transformer_blocks_5_ff_net_2_weight, _w_output_blocks_1_1_transformer_blocks_5_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.1.1 st after tb5"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_1_1_transformer_blocks_6_norm1_weight, _w_output_blocks_1_1_transformer_blocks_6_norm1_bias,
         _w_output_blocks_1_1_transformer_blocks_6_norm2_weight, _w_output_blocks_1_1_transformer_blocks_6_norm2_bias,
@@ -2882,7 +2734,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_1_1_transformer_blocks_6_ff_net_0_proj_weight, _w_output_blocks_1_1_transformer_blocks_6_ff_net_0_proj_bias,
         _w_output_blocks_1_1_transformer_blocks_6_ff_net_2_weight, _w_output_blocks_1_1_transformer_blocks_6_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.1.1 st after tb6"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_1_1_transformer_blocks_7_norm1_weight, _w_output_blocks_1_1_transformer_blocks_7_norm1_bias,
         _w_output_blocks_1_1_transformer_blocks_7_norm2_weight, _w_output_blocks_1_1_transformer_blocks_7_norm2_bias,
@@ -2898,7 +2749,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_1_1_transformer_blocks_7_ff_net_0_proj_weight, _w_output_blocks_1_1_transformer_blocks_7_ff_net_0_proj_bias,
         _w_output_blocks_1_1_transformer_blocks_7_ff_net_2_weight, _w_output_blocks_1_1_transformer_blocks_7_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.1.1 st after tb7"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_1_1_transformer_blocks_8_norm1_weight, _w_output_blocks_1_1_transformer_blocks_8_norm1_bias,
         _w_output_blocks_1_1_transformer_blocks_8_norm2_weight, _w_output_blocks_1_1_transformer_blocks_8_norm2_bias,
@@ -2914,7 +2764,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_1_1_transformer_blocks_8_ff_net_0_proj_weight, _w_output_blocks_1_1_transformer_blocks_8_ff_net_0_proj_bias,
         _w_output_blocks_1_1_transformer_blocks_8_ff_net_2_weight, _w_output_blocks_1_1_transformer_blocks_8_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.1.1 st after tb8"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_1_1_transformer_blocks_9_norm1_weight, _w_output_blocks_1_1_transformer_blocks_9_norm1_bias,
         _w_output_blocks_1_1_transformer_blocks_9_norm2_weight, _w_output_blocks_1_1_transformer_blocks_9_norm2_bias,
@@ -2930,14 +2779,11 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_1_1_transformer_blocks_9_ff_net_0_proj_weight, _w_output_blocks_1_1_transformer_blocks_9_ff_net_0_proj_bias,
         _w_output_blocks_1_1_transformer_blocks_9_ff_net_2_weight, _w_output_blocks_1_1_transformer_blocks_9_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.1.1 st after tb9"); print(st_sum(_seq))
     _seq = linear_torch(_seq, _w_output_blocks_1_1_proj_out_weight, _w_output_blocks_1_1_proj_out_bias, n*hh*ww, 1280, 1280)
-    print("output_blocks.1.1 st after proj_out"); print(st_sum(_seq))
     _h_img = reshape_nlc_to_nchw(_seq, n, 1280, hh, ww)
     st_tensor_free(_seq)
     h_cur = add_tensor(_x_in, _h_img)
     st_tensor_free(_x_in); st_tensor_free(_h_img)
-    print("output_blocks.1.1 st out"); print(st_sum(h_cur))
 
     # output_blocks.2
     _cur = h_cur
@@ -2947,31 +2793,23 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
     _h_cur_orig = st_clone(h_cur)
     h_cur = group_norm_torch(h_cur, _w_output_blocks_2_0_in_layers_0_weight, _w_output_blocks_2_0_in_layers_0_bias, 32, 1920, hh, ww)
     h_cur = silu_torch(h_cur)
-    print("output_blocks.2.0 gn+silu"); print(st_sum(h_cur))
     h_cur = conv2d_torch(h_cur, _w_output_blocks_2_0_in_layers_2_weight, _w_output_blocks_2_0_in_layers_2_bias, n, 1920, 1280, hh, ww, 3, 1, 3//2)
-    print("output_blocks.2.0 conv1"); print(st_sum(h_cur))
     _se = silu_torch(emb)
     _y = linear_torch(_se, _w_output_blocks_2_0_emb_layers_1_weight, _w_output_blocks_2_0_emb_layers_1_bias, n, 1280, 1280)
-    print("output_blocks.2.0 emb linear"); print(st_sum(_y))
     h_cur = add_time_emb_tensor(h_cur, _y, n, 1280)
     st_tensor_free(_se); st_tensor_free(_y)
-    print("output_blocks.2.0 after time add"); print(st_sum(h_cur))
     h_cur = group_norm_torch(h_cur, _w_output_blocks_2_0_out_layers_0_weight, _w_output_blocks_2_0_out_layers_0_bias, 32, 1280, hh, ww)
     h_cur = silu_torch(h_cur)
     h_cur = conv2d_torch(h_cur, _w_output_blocks_2_0_out_layers_3_weight, _w_output_blocks_2_0_out_layers_3_bias, n, 1280, 1280, hh, ww, 3, 1, 3//2)
-    print("output_blocks.2.0 conv2"); print(st_sum(h_cur))
     _sk = conv2d_torch(_h_cur_orig, _w_output_blocks_2_0_skip_connection_weight, _w_output_blocks_2_0_skip_connection_bias, n, 1920, 1280, hh, ww, 1, 1, 1//2)
     h_cur = add_tensor(h_cur, _sk)
     st_tensor_free(_sk)
-    print("output_blocks.2.0 rb out"); print(st_sum(h_cur))
     # SpatialTransformer output_blocks.2.1
     _x_in = st_clone(h_cur)
     h_cur = group_norm_torch(h_cur, _w_output_blocks_2_1_norm_weight, _w_output_blocks_2_1_norm_bias, 32, 1280, hh, ww)
     _seq = reshape_nchw_to_nlc(h_cur, n, 1280, hh, ww)
-    print("output_blocks.2.1 st after gn+reshape"); print(st_sum(_seq))
     st_tensor_free(h_cur)
     _seq = linear_torch(_seq, _w_output_blocks_2_1_proj_in_weight, _w_output_blocks_2_1_proj_in_bias, n*hh*ww, 1280, 1280)
-    print("output_blocks.2.1 st after proj_in"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_2_1_transformer_blocks_0_norm1_weight, _w_output_blocks_2_1_transformer_blocks_0_norm1_bias,
         _w_output_blocks_2_1_transformer_blocks_0_norm2_weight, _w_output_blocks_2_1_transformer_blocks_0_norm2_bias,
@@ -2987,7 +2825,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_2_1_transformer_blocks_0_ff_net_0_proj_weight, _w_output_blocks_2_1_transformer_blocks_0_ff_net_0_proj_bias,
         _w_output_blocks_2_1_transformer_blocks_0_ff_net_2_weight, _w_output_blocks_2_1_transformer_blocks_0_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.2.1 st after tb0"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_2_1_transformer_blocks_1_norm1_weight, _w_output_blocks_2_1_transformer_blocks_1_norm1_bias,
         _w_output_blocks_2_1_transformer_blocks_1_norm2_weight, _w_output_blocks_2_1_transformer_blocks_1_norm2_bias,
@@ -3003,7 +2840,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_2_1_transformer_blocks_1_ff_net_0_proj_weight, _w_output_blocks_2_1_transformer_blocks_1_ff_net_0_proj_bias,
         _w_output_blocks_2_1_transformer_blocks_1_ff_net_2_weight, _w_output_blocks_2_1_transformer_blocks_1_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.2.1 st after tb1"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_2_1_transformer_blocks_2_norm1_weight, _w_output_blocks_2_1_transformer_blocks_2_norm1_bias,
         _w_output_blocks_2_1_transformer_blocks_2_norm2_weight, _w_output_blocks_2_1_transformer_blocks_2_norm2_bias,
@@ -3019,7 +2855,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_2_1_transformer_blocks_2_ff_net_0_proj_weight, _w_output_blocks_2_1_transformer_blocks_2_ff_net_0_proj_bias,
         _w_output_blocks_2_1_transformer_blocks_2_ff_net_2_weight, _w_output_blocks_2_1_transformer_blocks_2_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.2.1 st after tb2"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_2_1_transformer_blocks_3_norm1_weight, _w_output_blocks_2_1_transformer_blocks_3_norm1_bias,
         _w_output_blocks_2_1_transformer_blocks_3_norm2_weight, _w_output_blocks_2_1_transformer_blocks_3_norm2_bias,
@@ -3035,7 +2870,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_2_1_transformer_blocks_3_ff_net_0_proj_weight, _w_output_blocks_2_1_transformer_blocks_3_ff_net_0_proj_bias,
         _w_output_blocks_2_1_transformer_blocks_3_ff_net_2_weight, _w_output_blocks_2_1_transformer_blocks_3_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.2.1 st after tb3"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_2_1_transformer_blocks_4_norm1_weight, _w_output_blocks_2_1_transformer_blocks_4_norm1_bias,
         _w_output_blocks_2_1_transformer_blocks_4_norm2_weight, _w_output_blocks_2_1_transformer_blocks_4_norm2_bias,
@@ -3051,7 +2885,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_2_1_transformer_blocks_4_ff_net_0_proj_weight, _w_output_blocks_2_1_transformer_blocks_4_ff_net_0_proj_bias,
         _w_output_blocks_2_1_transformer_blocks_4_ff_net_2_weight, _w_output_blocks_2_1_transformer_blocks_4_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.2.1 st after tb4"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_2_1_transformer_blocks_5_norm1_weight, _w_output_blocks_2_1_transformer_blocks_5_norm1_bias,
         _w_output_blocks_2_1_transformer_blocks_5_norm2_weight, _w_output_blocks_2_1_transformer_blocks_5_norm2_bias,
@@ -3067,7 +2900,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_2_1_transformer_blocks_5_ff_net_0_proj_weight, _w_output_blocks_2_1_transformer_blocks_5_ff_net_0_proj_bias,
         _w_output_blocks_2_1_transformer_blocks_5_ff_net_2_weight, _w_output_blocks_2_1_transformer_blocks_5_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.2.1 st after tb5"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_2_1_transformer_blocks_6_norm1_weight, _w_output_blocks_2_1_transformer_blocks_6_norm1_bias,
         _w_output_blocks_2_1_transformer_blocks_6_norm2_weight, _w_output_blocks_2_1_transformer_blocks_6_norm2_bias,
@@ -3083,7 +2915,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_2_1_transformer_blocks_6_ff_net_0_proj_weight, _w_output_blocks_2_1_transformer_blocks_6_ff_net_0_proj_bias,
         _w_output_blocks_2_1_transformer_blocks_6_ff_net_2_weight, _w_output_blocks_2_1_transformer_blocks_6_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.2.1 st after tb6"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_2_1_transformer_blocks_7_norm1_weight, _w_output_blocks_2_1_transformer_blocks_7_norm1_bias,
         _w_output_blocks_2_1_transformer_blocks_7_norm2_weight, _w_output_blocks_2_1_transformer_blocks_7_norm2_bias,
@@ -3099,7 +2930,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_2_1_transformer_blocks_7_ff_net_0_proj_weight, _w_output_blocks_2_1_transformer_blocks_7_ff_net_0_proj_bias,
         _w_output_blocks_2_1_transformer_blocks_7_ff_net_2_weight, _w_output_blocks_2_1_transformer_blocks_7_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.2.1 st after tb7"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_2_1_transformer_blocks_8_norm1_weight, _w_output_blocks_2_1_transformer_blocks_8_norm1_bias,
         _w_output_blocks_2_1_transformer_blocks_8_norm2_weight, _w_output_blocks_2_1_transformer_blocks_8_norm2_bias,
@@ -3115,7 +2945,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_2_1_transformer_blocks_8_ff_net_0_proj_weight, _w_output_blocks_2_1_transformer_blocks_8_ff_net_0_proj_bias,
         _w_output_blocks_2_1_transformer_blocks_8_ff_net_2_weight, _w_output_blocks_2_1_transformer_blocks_8_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.2.1 st after tb8"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_2_1_transformer_blocks_9_norm1_weight, _w_output_blocks_2_1_transformer_blocks_9_norm1_bias,
         _w_output_blocks_2_1_transformer_blocks_9_norm2_weight, _w_output_blocks_2_1_transformer_blocks_9_norm2_bias,
@@ -3131,14 +2960,11 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_2_1_transformer_blocks_9_ff_net_0_proj_weight, _w_output_blocks_2_1_transformer_blocks_9_ff_net_0_proj_bias,
         _w_output_blocks_2_1_transformer_blocks_9_ff_net_2_weight, _w_output_blocks_2_1_transformer_blocks_9_ff_net_2_bias,
         n, hh*ww, 1280, 20, 5120)
-    print("output_blocks.2.1 st after tb9"); print(st_sum(_seq))
     _seq = linear_torch(_seq, _w_output_blocks_2_1_proj_out_weight, _w_output_blocks_2_1_proj_out_bias, n*hh*ww, 1280, 1280)
-    print("output_blocks.2.1 st after proj_out"); print(st_sum(_seq))
     _h_img = reshape_nlc_to_nchw(_seq, n, 1280, hh, ww)
     st_tensor_free(_seq)
     h_cur = add_tensor(_x_in, _h_img)
     st_tensor_free(_x_in); st_tensor_free(_h_img)
-    print("output_blocks.2.1 st out"); print(st_sum(h_cur))
     h_cur = upsample_nearest_torch(h_cur, 2)
     hh = hh*2; ww = ww*2
     h_cur = conv2d_torch(h_cur, _w_output_blocks_2_2_conv_weight, _w_output_blocks_2_2_conv_bias, n, 1280, 1280, hh, ww, 3, 1, 1)
@@ -3151,31 +2977,23 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
     _h_cur_orig = st_clone(h_cur)
     h_cur = group_norm_torch(h_cur, _w_output_blocks_3_0_in_layers_0_weight, _w_output_blocks_3_0_in_layers_0_bias, 32, 1920, hh, ww)
     h_cur = silu_torch(h_cur)
-    print("output_blocks.3.0 gn+silu"); print(st_sum(h_cur))
     h_cur = conv2d_torch(h_cur, _w_output_blocks_3_0_in_layers_2_weight, _w_output_blocks_3_0_in_layers_2_bias, n, 1920, 640, hh, ww, 3, 1, 3//2)
-    print("output_blocks.3.0 conv1"); print(st_sum(h_cur))
     _se = silu_torch(emb)
     _y = linear_torch(_se, _w_output_blocks_3_0_emb_layers_1_weight, _w_output_blocks_3_0_emb_layers_1_bias, n, 1280, 640)
-    print("output_blocks.3.0 emb linear"); print(st_sum(_y))
     h_cur = add_time_emb_tensor(h_cur, _y, n, 640)
     st_tensor_free(_se); st_tensor_free(_y)
-    print("output_blocks.3.0 after time add"); print(st_sum(h_cur))
     h_cur = group_norm_torch(h_cur, _w_output_blocks_3_0_out_layers_0_weight, _w_output_blocks_3_0_out_layers_0_bias, 32, 640, hh, ww)
     h_cur = silu_torch(h_cur)
     h_cur = conv2d_torch(h_cur, _w_output_blocks_3_0_out_layers_3_weight, _w_output_blocks_3_0_out_layers_3_bias, n, 640, 640, hh, ww, 3, 1, 3//2)
-    print("output_blocks.3.0 conv2"); print(st_sum(h_cur))
     _sk = conv2d_torch(_h_cur_orig, _w_output_blocks_3_0_skip_connection_weight, _w_output_blocks_3_0_skip_connection_bias, n, 1920, 640, hh, ww, 1, 1, 1//2)
     h_cur = add_tensor(h_cur, _sk)
     st_tensor_free(_sk)
-    print("output_blocks.3.0 rb out"); print(st_sum(h_cur))
     # SpatialTransformer output_blocks.3.1
     _x_in = st_clone(h_cur)
     h_cur = group_norm_torch(h_cur, _w_output_blocks_3_1_norm_weight, _w_output_blocks_3_1_norm_bias, 32, 640, hh, ww)
     _seq = reshape_nchw_to_nlc(h_cur, n, 640, hh, ww)
-    print("output_blocks.3.1 st after gn+reshape"); print(st_sum(_seq))
     st_tensor_free(h_cur)
     _seq = linear_torch(_seq, _w_output_blocks_3_1_proj_in_weight, _w_output_blocks_3_1_proj_in_bias, n*hh*ww, 640, 640)
-    print("output_blocks.3.1 st after proj_in"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_3_1_transformer_blocks_0_norm1_weight, _w_output_blocks_3_1_transformer_blocks_0_norm1_bias,
         _w_output_blocks_3_1_transformer_blocks_0_norm2_weight, _w_output_blocks_3_1_transformer_blocks_0_norm2_bias,
@@ -3191,7 +3009,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_3_1_transformer_blocks_0_ff_net_0_proj_weight, _w_output_blocks_3_1_transformer_blocks_0_ff_net_0_proj_bias,
         _w_output_blocks_3_1_transformer_blocks_0_ff_net_2_weight, _w_output_blocks_3_1_transformer_blocks_0_ff_net_2_bias,
         n, hh*ww, 640, 10, 2560)
-    print("output_blocks.3.1 st after tb0"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_3_1_transformer_blocks_1_norm1_weight, _w_output_blocks_3_1_transformer_blocks_1_norm1_bias,
         _w_output_blocks_3_1_transformer_blocks_1_norm2_weight, _w_output_blocks_3_1_transformer_blocks_1_norm2_bias,
@@ -3207,14 +3024,11 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_3_1_transformer_blocks_1_ff_net_0_proj_weight, _w_output_blocks_3_1_transformer_blocks_1_ff_net_0_proj_bias,
         _w_output_blocks_3_1_transformer_blocks_1_ff_net_2_weight, _w_output_blocks_3_1_transformer_blocks_1_ff_net_2_bias,
         n, hh*ww, 640, 10, 2560)
-    print("output_blocks.3.1 st after tb1"); print(st_sum(_seq))
     _seq = linear_torch(_seq, _w_output_blocks_3_1_proj_out_weight, _w_output_blocks_3_1_proj_out_bias, n*hh*ww, 640, 640)
-    print("output_blocks.3.1 st after proj_out"); print(st_sum(_seq))
     _h_img = reshape_nlc_to_nchw(_seq, n, 640, hh, ww)
     st_tensor_free(_seq)
     h_cur = add_tensor(_x_in, _h_img)
     st_tensor_free(_x_in); st_tensor_free(_h_img)
-    print("output_blocks.3.1 st out"); print(st_sum(h_cur))
 
     # output_blocks.4
     _cur = h_cur
@@ -3224,31 +3038,23 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
     _h_cur_orig = st_clone(h_cur)
     h_cur = group_norm_torch(h_cur, _w_output_blocks_4_0_in_layers_0_weight, _w_output_blocks_4_0_in_layers_0_bias, 32, 1280, hh, ww)
     h_cur = silu_torch(h_cur)
-    print("output_blocks.4.0 gn+silu"); print(st_sum(h_cur))
     h_cur = conv2d_torch(h_cur, _w_output_blocks_4_0_in_layers_2_weight, _w_output_blocks_4_0_in_layers_2_bias, n, 1280, 640, hh, ww, 3, 1, 3//2)
-    print("output_blocks.4.0 conv1"); print(st_sum(h_cur))
     _se = silu_torch(emb)
     _y = linear_torch(_se, _w_output_blocks_4_0_emb_layers_1_weight, _w_output_blocks_4_0_emb_layers_1_bias, n, 1280, 640)
-    print("output_blocks.4.0 emb linear"); print(st_sum(_y))
     h_cur = add_time_emb_tensor(h_cur, _y, n, 640)
     st_tensor_free(_se); st_tensor_free(_y)
-    print("output_blocks.4.0 after time add"); print(st_sum(h_cur))
     h_cur = group_norm_torch(h_cur, _w_output_blocks_4_0_out_layers_0_weight, _w_output_blocks_4_0_out_layers_0_bias, 32, 640, hh, ww)
     h_cur = silu_torch(h_cur)
     h_cur = conv2d_torch(h_cur, _w_output_blocks_4_0_out_layers_3_weight, _w_output_blocks_4_0_out_layers_3_bias, n, 640, 640, hh, ww, 3, 1, 3//2)
-    print("output_blocks.4.0 conv2"); print(st_sum(h_cur))
     _sk = conv2d_torch(_h_cur_orig, _w_output_blocks_4_0_skip_connection_weight, _w_output_blocks_4_0_skip_connection_bias, n, 1280, 640, hh, ww, 1, 1, 1//2)
     h_cur = add_tensor(h_cur, _sk)
     st_tensor_free(_sk)
-    print("output_blocks.4.0 rb out"); print(st_sum(h_cur))
     # SpatialTransformer output_blocks.4.1
     _x_in = st_clone(h_cur)
     h_cur = group_norm_torch(h_cur, _w_output_blocks_4_1_norm_weight, _w_output_blocks_4_1_norm_bias, 32, 640, hh, ww)
     _seq = reshape_nchw_to_nlc(h_cur, n, 640, hh, ww)
-    print("output_blocks.4.1 st after gn+reshape"); print(st_sum(_seq))
     st_tensor_free(h_cur)
     _seq = linear_torch(_seq, _w_output_blocks_4_1_proj_in_weight, _w_output_blocks_4_1_proj_in_bias, n*hh*ww, 640, 640)
-    print("output_blocks.4.1 st after proj_in"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_4_1_transformer_blocks_0_norm1_weight, _w_output_blocks_4_1_transformer_blocks_0_norm1_bias,
         _w_output_blocks_4_1_transformer_blocks_0_norm2_weight, _w_output_blocks_4_1_transformer_blocks_0_norm2_bias,
@@ -3264,7 +3070,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_4_1_transformer_blocks_0_ff_net_0_proj_weight, _w_output_blocks_4_1_transformer_blocks_0_ff_net_0_proj_bias,
         _w_output_blocks_4_1_transformer_blocks_0_ff_net_2_weight, _w_output_blocks_4_1_transformer_blocks_0_ff_net_2_bias,
         n, hh*ww, 640, 10, 2560)
-    print("output_blocks.4.1 st after tb0"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_4_1_transformer_blocks_1_norm1_weight, _w_output_blocks_4_1_transformer_blocks_1_norm1_bias,
         _w_output_blocks_4_1_transformer_blocks_1_norm2_weight, _w_output_blocks_4_1_transformer_blocks_1_norm2_bias,
@@ -3280,14 +3085,11 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_4_1_transformer_blocks_1_ff_net_0_proj_weight, _w_output_blocks_4_1_transformer_blocks_1_ff_net_0_proj_bias,
         _w_output_blocks_4_1_transformer_blocks_1_ff_net_2_weight, _w_output_blocks_4_1_transformer_blocks_1_ff_net_2_bias,
         n, hh*ww, 640, 10, 2560)
-    print("output_blocks.4.1 st after tb1"); print(st_sum(_seq))
     _seq = linear_torch(_seq, _w_output_blocks_4_1_proj_out_weight, _w_output_blocks_4_1_proj_out_bias, n*hh*ww, 640, 640)
-    print("output_blocks.4.1 st after proj_out"); print(st_sum(_seq))
     _h_img = reshape_nlc_to_nchw(_seq, n, 640, hh, ww)
     st_tensor_free(_seq)
     h_cur = add_tensor(_x_in, _h_img)
     st_tensor_free(_x_in); st_tensor_free(_h_img)
-    print("output_blocks.4.1 st out"); print(st_sum(h_cur))
 
     # output_blocks.5
     _cur = h_cur
@@ -3297,31 +3099,23 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
     _h_cur_orig = st_clone(h_cur)
     h_cur = group_norm_torch(h_cur, _w_output_blocks_5_0_in_layers_0_weight, _w_output_blocks_5_0_in_layers_0_bias, 32, 1280, hh, ww)
     h_cur = silu_torch(h_cur)
-    print("output_blocks.5.0 gn+silu"); print(st_sum(h_cur))
     h_cur = conv2d_torch(h_cur, _w_output_blocks_5_0_in_layers_2_weight, _w_output_blocks_5_0_in_layers_2_bias, n, 1280, 640, hh, ww, 3, 1, 3//2)
-    print("output_blocks.5.0 conv1"); print(st_sum(h_cur))
     _se = silu_torch(emb)
     _y = linear_torch(_se, _w_output_blocks_5_0_emb_layers_1_weight, _w_output_blocks_5_0_emb_layers_1_bias, n, 1280, 640)
-    print("output_blocks.5.0 emb linear"); print(st_sum(_y))
     h_cur = add_time_emb_tensor(h_cur, _y, n, 640)
     st_tensor_free(_se); st_tensor_free(_y)
-    print("output_blocks.5.0 after time add"); print(st_sum(h_cur))
     h_cur = group_norm_torch(h_cur, _w_output_blocks_5_0_out_layers_0_weight, _w_output_blocks_5_0_out_layers_0_bias, 32, 640, hh, ww)
     h_cur = silu_torch(h_cur)
     h_cur = conv2d_torch(h_cur, _w_output_blocks_5_0_out_layers_3_weight, _w_output_blocks_5_0_out_layers_3_bias, n, 640, 640, hh, ww, 3, 1, 3//2)
-    print("output_blocks.5.0 conv2"); print(st_sum(h_cur))
     _sk = conv2d_torch(_h_cur_orig, _w_output_blocks_5_0_skip_connection_weight, _w_output_blocks_5_0_skip_connection_bias, n, 1280, 640, hh, ww, 1, 1, 1//2)
     h_cur = add_tensor(h_cur, _sk)
     st_tensor_free(_sk)
-    print("output_blocks.5.0 rb out"); print(st_sum(h_cur))
     # SpatialTransformer output_blocks.5.1
     _x_in = st_clone(h_cur)
     h_cur = group_norm_torch(h_cur, _w_output_blocks_5_1_norm_weight, _w_output_blocks_5_1_norm_bias, 32, 640, hh, ww)
     _seq = reshape_nchw_to_nlc(h_cur, n, 640, hh, ww)
-    print("output_blocks.5.1 st after gn+reshape"); print(st_sum(_seq))
     st_tensor_free(h_cur)
     _seq = linear_torch(_seq, _w_output_blocks_5_1_proj_in_weight, _w_output_blocks_5_1_proj_in_bias, n*hh*ww, 640, 640)
-    print("output_blocks.5.1 st after proj_in"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_5_1_transformer_blocks_0_norm1_weight, _w_output_blocks_5_1_transformer_blocks_0_norm1_bias,
         _w_output_blocks_5_1_transformer_blocks_0_norm2_weight, _w_output_blocks_5_1_transformer_blocks_0_norm2_bias,
@@ -3337,7 +3131,6 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_5_1_transformer_blocks_0_ff_net_0_proj_weight, _w_output_blocks_5_1_transformer_blocks_0_ff_net_0_proj_bias,
         _w_output_blocks_5_1_transformer_blocks_0_ff_net_2_weight, _w_output_blocks_5_1_transformer_blocks_0_ff_net_2_bias,
         n, hh*ww, 640, 10, 2560)
-    print("output_blocks.5.1 st after tb0"); print(st_sum(_seq))
     _seq = spatial_transformer_block(_seq, context,
         _w_output_blocks_5_1_transformer_blocks_1_norm1_weight, _w_output_blocks_5_1_transformer_blocks_1_norm1_bias,
         _w_output_blocks_5_1_transformer_blocks_1_norm2_weight, _w_output_blocks_5_1_transformer_blocks_1_norm2_bias,
@@ -3353,14 +3146,11 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         _w_output_blocks_5_1_transformer_blocks_1_ff_net_0_proj_weight, _w_output_blocks_5_1_transformer_blocks_1_ff_net_0_proj_bias,
         _w_output_blocks_5_1_transformer_blocks_1_ff_net_2_weight, _w_output_blocks_5_1_transformer_blocks_1_ff_net_2_bias,
         n, hh*ww, 640, 10, 2560)
-    print("output_blocks.5.1 st after tb1"); print(st_sum(_seq))
     _seq = linear_torch(_seq, _w_output_blocks_5_1_proj_out_weight, _w_output_blocks_5_1_proj_out_bias, n*hh*ww, 640, 640)
-    print("output_blocks.5.1 st after proj_out"); print(st_sum(_seq))
     _h_img = reshape_nlc_to_nchw(_seq, n, 640, hh, ww)
     st_tensor_free(_seq)
     h_cur = add_tensor(_x_in, _h_img)
     st_tensor_free(_x_in); st_tensor_free(_h_img)
-    print("output_blocks.5.1 st out"); print(st_sum(h_cur))
     h_cur = upsample_nearest_torch(h_cur, 2)
     hh = hh*2; ww = ww*2
     h_cur = conv2d_torch(h_cur, _w_output_blocks_5_2_conv_weight, _w_output_blocks_5_2_conv_bias, n, 640, 640, hh, ww, 3, 1, 1)
@@ -3373,23 +3163,17 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
     _h_cur_orig = st_clone(h_cur)
     h_cur = group_norm_torch(h_cur, _w_output_blocks_6_0_in_layers_0_weight, _w_output_blocks_6_0_in_layers_0_bias, 32, 960, hh, ww)
     h_cur = silu_torch(h_cur)
-    print("output_blocks.6.0 gn+silu"); print(st_sum(h_cur))
     h_cur = conv2d_torch(h_cur, _w_output_blocks_6_0_in_layers_2_weight, _w_output_blocks_6_0_in_layers_2_bias, n, 960, 320, hh, ww, 3, 1, 3//2)
-    print("output_blocks.6.0 conv1"); print(st_sum(h_cur))
     _se = silu_torch(emb)
     _y = linear_torch(_se, _w_output_blocks_6_0_emb_layers_1_weight, _w_output_blocks_6_0_emb_layers_1_bias, n, 1280, 320)
-    print("output_blocks.6.0 emb linear"); print(st_sum(_y))
     h_cur = add_time_emb_tensor(h_cur, _y, n, 320)
     st_tensor_free(_se); st_tensor_free(_y)
-    print("output_blocks.6.0 after time add"); print(st_sum(h_cur))
     h_cur = group_norm_torch(h_cur, _w_output_blocks_6_0_out_layers_0_weight, _w_output_blocks_6_0_out_layers_0_bias, 32, 320, hh, ww)
     h_cur = silu_torch(h_cur)
     h_cur = conv2d_torch(h_cur, _w_output_blocks_6_0_out_layers_3_weight, _w_output_blocks_6_0_out_layers_3_bias, n, 320, 320, hh, ww, 3, 1, 3//2)
-    print("output_blocks.6.0 conv2"); print(st_sum(h_cur))
     _sk = conv2d_torch(_h_cur_orig, _w_output_blocks_6_0_skip_connection_weight, _w_output_blocks_6_0_skip_connection_bias, n, 960, 320, hh, ww, 1, 1, 1//2)
     h_cur = add_tensor(h_cur, _sk)
     st_tensor_free(_sk)
-    print("output_blocks.6.0 rb out"); print(st_sum(h_cur))
 
     # output_blocks.7
     _cur = h_cur
@@ -3399,23 +3183,17 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
     _h_cur_orig = st_clone(h_cur)
     h_cur = group_norm_torch(h_cur, _w_output_blocks_7_0_in_layers_0_weight, _w_output_blocks_7_0_in_layers_0_bias, 32, 640, hh, ww)
     h_cur = silu_torch(h_cur)
-    print("output_blocks.7.0 gn+silu"); print(st_sum(h_cur))
     h_cur = conv2d_torch(h_cur, _w_output_blocks_7_0_in_layers_2_weight, _w_output_blocks_7_0_in_layers_2_bias, n, 640, 320, hh, ww, 3, 1, 3//2)
-    print("output_blocks.7.0 conv1"); print(st_sum(h_cur))
     _se = silu_torch(emb)
     _y = linear_torch(_se, _w_output_blocks_7_0_emb_layers_1_weight, _w_output_blocks_7_0_emb_layers_1_bias, n, 1280, 320)
-    print("output_blocks.7.0 emb linear"); print(st_sum(_y))
     h_cur = add_time_emb_tensor(h_cur, _y, n, 320)
     st_tensor_free(_se); st_tensor_free(_y)
-    print("output_blocks.7.0 after time add"); print(st_sum(h_cur))
     h_cur = group_norm_torch(h_cur, _w_output_blocks_7_0_out_layers_0_weight, _w_output_blocks_7_0_out_layers_0_bias, 32, 320, hh, ww)
     h_cur = silu_torch(h_cur)
     h_cur = conv2d_torch(h_cur, _w_output_blocks_7_0_out_layers_3_weight, _w_output_blocks_7_0_out_layers_3_bias, n, 320, 320, hh, ww, 3, 1, 3//2)
-    print("output_blocks.7.0 conv2"); print(st_sum(h_cur))
     _sk = conv2d_torch(_h_cur_orig, _w_output_blocks_7_0_skip_connection_weight, _w_output_blocks_7_0_skip_connection_bias, n, 640, 320, hh, ww, 1, 1, 1//2)
     h_cur = add_tensor(h_cur, _sk)
     st_tensor_free(_sk)
-    print("output_blocks.7.0 rb out"); print(st_sum(h_cur))
 
     # output_blocks.8
     _cur = h_cur
@@ -3425,23 +3203,17 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
     _h_cur_orig = st_clone(h_cur)
     h_cur = group_norm_torch(h_cur, _w_output_blocks_8_0_in_layers_0_weight, _w_output_blocks_8_0_in_layers_0_bias, 32, 640, hh, ww)
     h_cur = silu_torch(h_cur)
-    print("output_blocks.8.0 gn+silu"); print(st_sum(h_cur))
     h_cur = conv2d_torch(h_cur, _w_output_blocks_8_0_in_layers_2_weight, _w_output_blocks_8_0_in_layers_2_bias, n, 640, 320, hh, ww, 3, 1, 3//2)
-    print("output_blocks.8.0 conv1"); print(st_sum(h_cur))
     _se = silu_torch(emb)
     _y = linear_torch(_se, _w_output_blocks_8_0_emb_layers_1_weight, _w_output_blocks_8_0_emb_layers_1_bias, n, 1280, 320)
-    print("output_blocks.8.0 emb linear"); print(st_sum(_y))
     h_cur = add_time_emb_tensor(h_cur, _y, n, 320)
     st_tensor_free(_se); st_tensor_free(_y)
-    print("output_blocks.8.0 after time add"); print(st_sum(h_cur))
     h_cur = group_norm_torch(h_cur, _w_output_blocks_8_0_out_layers_0_weight, _w_output_blocks_8_0_out_layers_0_bias, 32, 320, hh, ww)
     h_cur = silu_torch(h_cur)
     h_cur = conv2d_torch(h_cur, _w_output_blocks_8_0_out_layers_3_weight, _w_output_blocks_8_0_out_layers_3_bias, n, 320, 320, hh, ww, 3, 1, 3//2)
-    print("output_blocks.8.0 conv2"); print(st_sum(h_cur))
     _sk = conv2d_torch(_h_cur_orig, _w_output_blocks_8_0_skip_connection_weight, _w_output_blocks_8_0_skip_connection_bias, n, 640, 320, hh, ww, 1, 1, 1//2)
     h_cur = add_tensor(h_cur, _sk)
     st_tensor_free(_sk)
-    print("output_blocks.8.0 rb out"); print(st_sum(h_cur))
 
     h_cur = group_norm_torch(h_cur, _w_out_0_weight, _w_out_0_bias, 32, 320, hh, ww)
     h_cur = silu_torch(h_cur)
