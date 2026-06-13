@@ -33,16 +33,8 @@ def attn_self(x: ptr,
     q: ptr = st_linear(x, to_q_w, to_q_b)
     k: ptr = st_linear(x, to_k_w, to_k_b)
     v: ptr = st_linear(x, to_v_w, to_v_b)
-    st_tensor_save(q, "/tmp/elf_attn_q.bin")
-    st_tensor_save(k, "/tmp/elf_attn_k.bin")
-    st_tensor_save(v, "/tmp/elf_attn_v.bin")
-    print("    attn q sum"); print(st_sum(q))
-    print("    attn k sum"); print(st_sum(k))
-    print("    attn v sum"); print(st_sum(v))
     o: ptr = attention_torch(q, k, v, batch, tokens, tokens, dim, heads)
-    print("    attn out sum"); print(st_sum(o))
     r: ptr = st_linear(o, to_out_w, to_out_b)
-    print("    attn to_out sum"); print(st_sum(r))
     st_tensor_free(q); st_tensor_free(k); st_tensor_free(v); st_tensor_free(o)
     return r
 
@@ -89,27 +81,18 @@ def spatial_transformer_block(x: ptr, ctx: ptr,
                               ff2_w: ptr, ff2_b: ptr,
                               batch: int, tokens: int, dim: int, heads: int, hidden: int) -> ptr:
     _n1: ptr = st_layer_norm(x, norm1_w, norm1_b, 1e-5)
-    print("  tb ln1"); print(st_sum(_n1))
     o1: ptr = attn_self(_n1, to_q1_w, to_q1_b, to_k1_w, to_k1_b, to_v1_w, to_v1_b, to_out1_w, to_out1_b, batch, tokens, dim, heads)
-    print("  tb a1"); print(st_sum(o1))
     r1: ptr = st_add_tensor(x, o1)
-    print("  tb after a1 add"); print(st_sum(r1))
     st_tensor_free(_n1); st_tensor_free(o1); st_tensor_free(x)
 
     _n2: ptr = st_layer_norm(r1, norm2_w, norm2_b, 1e-5)
-    print("  tb ln2"); print(st_sum(_n2))
     o2: ptr = attn_cross(_n2, ctx, to_q2_w, to_q2_b, to_k2_w, to_k2_b, to_v2_w, to_v2_b, to_out2_w, to_out2_b, batch, tokens, 77, dim, heads)
-    print("  tb a2"); print(st_sum(o2))
     r2: ptr = st_add_tensor(r1, o2)
-    print("  tb after a2 add"); print(st_sum(r2))
     st_tensor_free(_n2); st_tensor_free(o2); st_tensor_free(r1)
 
     _n3: ptr = st_layer_norm(r2, norm3_w, norm3_b, 1e-5)
-    print("  tb ln3"); print(st_sum(_n3))
     o3: ptr = ff_geglu(_n3, ff0_w, ff0_b, ff2_w, ff2_b, batch * tokens, dim, hidden)
-    print("  tb ff"); print(st_sum(o3))
     r3: ptr = st_add_tensor(r2, o3)
-    print("  tb after ff add"); print(st_sum(r3))
     st_tensor_free(_n3); st_tensor_free(o3); st_tensor_free(r2)
     return r3
 
@@ -117,7 +100,6 @@ def spatial_transformer_block(x: ptr, ctx: ptr,
 def attention_torch(q: ptr, k: ptr, v: ptr, batch: int, tokens_q: int, tokens_k: int, dim: int, heads: int) -> ptr:
     dim_head: int = dim // heads
     scale: float = 1.0 / sqrt(float(dim_head))
-    print("    scale"); print(scale)
 
     # 将 2D [batch*tokens, dim] 按 heads 拆分：
     # 参考 PyTorch: x.reshape(batch, tokens, heads, dim_head).permute(0,2,1,3).reshape(batch*heads, tokens, dim_head)
@@ -136,7 +118,7 @@ def attention_torch(q: ptr, k: ptr, v: ptr, batch: int, tokens_q: int, tokens_k:
     v4: ptr = st_reshape(v, _dims4, 4)
     v4 = st_transpose(v4, 1, 2)  # [batch, heads, tokens_k, dim_head]
 
-    # 统一 reshape 为 3D [batch*heads, tokens, dim_head]
+    # 统一 reshape为 3D [batch*heads, tokens, dim_head]
     _dims3: list[int] = make_int_array(3)
     int_array_set(_dims3, 0, batch * heads)
     int_array_set(_dims3, 1, tokens_q)
@@ -151,33 +133,31 @@ def attention_torch(q: ptr, k: ptr, v: ptr, batch: int, tokens_q: int, tokens_k:
 
     # sim = q @ k^T: [batch*heads, tokens_q, tokens_k]
     kt: ptr = st_transpose(k_h, 1, 2)
-    print("    q_h shape"); st_print_shape(q_h)
-    print("    kt shape"); st_print_shape(kt)
     sim: ptr = st_bmm(q_h, kt)
-    print("    sim shape"); st_print_shape(sim)
     st_tensor_free(kt)
     # scale
     sim_scaled: ptr = st_mul_scalar_tensor(sim, scale)
     st_tensor_free(sim)
     # softmax on last dim
     attn: ptr = st_softmax(sim_scaled, -1)
-    print("    attn shape"); st_print_shape(attn)
-    print("    attn sum"); print(st_sum(attn))
     st_tensor_free(sim_scaled)
     # out = attn @ v: [batch*heads, tokens_q, dim_head]
     out_h: ptr = st_bmm(attn, v_h)
     st_tensor_free(attn); st_tensor_free(q_h); st_tensor_free(k_h); st_tensor_free(v_h)
 
-    # reshape back: [batch*heads, tokens_q, dim_head] -> [batch, heads, tokens_q, dim_head] -> [batch, tokens_q, heads, dim_head] -> [batch*tokens_q, dim]
-    int_array_set(_dims3, 0, batch)
-    int_array_set(_dims3, 1, heads)
-    int_array_set(_dims3, 2, tokens_q * dim_head)
-    out3: ptr = st_reshape(out_h, _dims3, 3)
-    out3 = st_transpose(out3, 1, 2)  # [batch, tokens_q, heads, dim_head]
-    int_array_set(_dims3, 0, batch * tokens_q)
-    int_array_set(_dims3, 1, dim)
-    out: ptr = st_reshape(out3, _dims3, 2)
-    st_tensor_free(out_h); st_tensor_free(out3)
+    # reshape back: [batch*heads, tokens_q, dim_head] -> [batch, heads, tokens_q, dim_head]
+    # -> [batch, tokens_q, heads, dim_head] -> [batch*tokens_q, dim]
+    int_array_set(_dims4, 0, batch)
+    int_array_set(_dims4, 1, heads)
+    int_array_set(_dims4, 2, tokens_q)
+    int_array_set(_dims4, 3, dim_head)
+    out4: ptr = st_reshape(out_h, _dims4, 4)
+    out4 = st_transpose(out4, 1, 2)  # [batch, tokens_q, heads, dim_head]
+    _dims2: list[int] = make_int_array(2)
+    int_array_set(_dims2, 0, batch * tokens_q)
+    int_array_set(_dims2, 1, dim)
+    out: ptr = st_reshape(out4, _dims2, 2)
+    st_tensor_free(out_h); st_tensor_free(out4)
     return out
 
 # 假设 st_transpose 和 st_bmm 已声明；如果未声明需要补

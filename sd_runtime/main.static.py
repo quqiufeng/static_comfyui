@@ -39,6 +39,7 @@ def main():
     print("UNet output sum="); print(st_sum(result_t))
     print("UNet output max="); print(st_max(result_t))
     print("UNet output min="); print(st_min(result_t))
+    st_tensor_save(result_t, "/tmp/elf_unet_output.bin")
     
     print("\nDone!")
     exit_program(0)

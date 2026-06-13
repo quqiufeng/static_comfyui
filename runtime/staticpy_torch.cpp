@@ -113,13 +113,7 @@ void* st_group_norm(void* input, int num_groups, void* weight, void* bias, doubl
     c10::optional<torch::Tensor> w, b;
     if (weight) w = *(torch::Tensor*)weight;
     if (bias) b = *(torch::Tensor*)bias;
-    fprintf(stderr, "[st_group_norm] input shape=[");
-    for (int i=0;i<inp.dim();i++) fprintf(stderr, "%ld%s", inp.size(i), i+1<inp.dim()?",":"");
-    fprintf(stderr, "] sum=%f num_groups=%d eps=%f weight=%p bias=%p\n", inp.sum().item<double>(), num_groups, eps, weight, bias);
-    if (w) fprintf(stderr, "  weight sum=%f\n", w->sum().item<double>());
-    if (b) fprintf(stderr, "  bias sum=%f\n", b->sum().item<double>());
     auto result = torch::group_norm(inp, num_groups, w, b, eps);
-    fprintf(stderr, "[st_group_norm] output sum=%f\n", result.sum().item<double>());
     return (void*)new torch::Tensor(result);
 }
 
@@ -244,7 +238,7 @@ void* st_mul_tensor(void* a, void* b) {
     return (void*)new_t(result);
 }
 
-void* st_mul_scalar_tensor(void* t, float s) {
+void* st_mul_scalar_tensor(void* t, double s) {
     auto result = (*((torch::Tensor*)t)) * s;
     return (void*)new_t(result);
 }
@@ -327,7 +321,8 @@ void* st_clone(void* t) {
 }
 
 void st_tensor_save(void* t, const char* path) {
-    auto tensor = ((torch::Tensor*)t)->clone().to(torch::kCPU);
+    auto tensor = ((torch::Tensor*)t)->clone().contiguous().to(torch::kCPU);
+    if (tensor.device().is_cuda()) torch::cuda::synchronize();
     FILE* f = fopen(path, "wb");
     if (f) {
         fwrite(tensor.data_ptr<float>(), sizeof(float), tensor.numel(), f);
