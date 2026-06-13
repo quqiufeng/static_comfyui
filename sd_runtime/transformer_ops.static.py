@@ -160,6 +160,66 @@ def attention_torch(q: ptr, k: ptr, v: ptr, batch: int, tokens_q: int, tokens_k:
     st_tensor_free(out_h); st_tensor_free(out4)
     return out
 
+# Masked version: mask is [tokens_q, tokens_k] 2D tensor
+def attention_torch_masked(q: ptr, k: ptr, v: ptr, batch: int, tokens_q: int, tokens_k: int, dim: int, heads: int, mask: ptr) -> ptr:
+    dim_head: int = dim // heads
+    scale: float = 1.0 / sqrt(float(dim_head))
+
+    _dims4: list[int] = make_int_array(4)
+    int_array_set(_dims4, 0, batch)
+    int_array_set(_dims4, 1, tokens_q)
+    int_array_set(_dims4, 2, heads)
+    int_array_set(_dims4, 3, dim_head)
+    q4: ptr = st_reshape(q, _dims4, 4)
+    q4 = st_transpose(q4, 1, 2)
+
+    int_array_set(_dims4, 1, tokens_k)
+    k4: ptr = st_reshape(k, _dims4, 4)
+    k4 = st_transpose(k4, 1, 2)
+
+    v4: ptr = st_reshape(v, _dims4, 4)
+    v4 = st_transpose(v4, 1, 2)
+
+    _dims3: list[int] = make_int_array(3)
+    int_array_set(_dims3, 0, batch * heads)
+    int_array_set(_dims3, 1, tokens_q)
+    int_array_set(_dims3, 2, dim_head)
+    q_h: ptr = st_reshape(q4, _dims3, 3)
+    st_tensor_free(q4)
+    int_array_set(_dims3, 1, tokens_k)
+    k_h: ptr = st_reshape(k4, _dims3, 3)
+    st_tensor_free(k4)
+    v_h: ptr = st_reshape(v4, _dims3, 3)
+    st_tensor_free(v4)
+
+    kt: ptr = st_transpose(k_h, 1, 2)
+    sim: ptr = st_bmm(q_h, kt)
+    st_tensor_free(kt)
+    sim_scaled: ptr = st_mul_scalar_tensor(sim, scale)
+    st_tensor_free(sim)
+
+    # Add mask: mask is already [batch*heads, tokens_q, tokens_k]
+    sim_masked: ptr = st_add_tensor(sim_scaled, mask)
+    st_tensor_free(sim_scaled)
+
+    attn: ptr = st_softmax(sim_masked, -1)
+    st_tensor_free(sim_masked)
+    out_h: ptr = st_bmm(attn, v_h)
+    st_tensor_free(attn); st_tensor_free(q_h); st_tensor_free(k_h); st_tensor_free(v_h)
+
+    int_array_set(_dims4, 0, batch)
+    int_array_set(_dims4, 1, heads)
+    int_array_set(_dims4, 2, tokens_q)
+    int_array_set(_dims4, 3, dim_head)
+    out4: ptr = st_reshape(out_h, _dims4, 4)
+    out4 = st_transpose(out4, 1, 2)
+    _dims2: list[int] = make_int_array(2)
+    int_array_set(_dims2, 0, batch * tokens_q)
+    int_array_set(_dims2, 1, dim)
+    out: ptr = st_reshape(out4, _dims2, 2)
+    st_tensor_free(out_h); st_tensor_free(out4)
+    return out
+
 # 假设 st_transpose 和 st_bmm 已声明；如果未声明需要补
 extern fn st_transpose(t: ptr, dim0: int, dim1: int) -> ptr from "staticpy_torch"
 extern fn st_bmm(a: ptr, b: ptr) -> ptr from "staticpy_torch"
