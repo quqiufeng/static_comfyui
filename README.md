@@ -413,6 +413,119 @@ StaticPy 路线:
 
 ---
 
+## 六、staticpyTorch：运行时封装 libtorch
+
+### 6.1 为什么需要 staticpyTorch
+
+最初用纯 StaticPy 手写所有算子：
+
+```python
+# 手写 conv2d：im2col + dgemm_row_auto + bias_add
+# 手写 group_norm：mean → var → normalize → affine
+# 手写 attention：Q@K^T → softmax → @V
+```
+
+每个算子 20-50 行 StaticPy，整个 UNet forward 需要 ~4000 行。
+难写、难调、难维护。
+
+### 6.2 解决方案
+
+PyTorch 本身就是 C++。`libtorch.so` 就在 `/data/venv/lib/.../torch/lib/` 下。
+直接封装它的 C API，StaticPy 通过 `extern fn` 调用：
+
+```
+StaticPy 用户代码
+    │  torch.conv2d(x, w, b, stride, padding)  ← Python 语法
+    ▼
+torch.static.py（高级 API 层）
+    │  def torch_conv2d(...): return st_conv2d(...)
+    ▼
+torch_ops.static.py（extern fn 声明层）
+    │  extern fn st_conv2d(...) -> ptr from "staticpy_torch"
+    ▼
+runtime/staticpy_torch.cpp（C 包装层）
+    │  extern "C" void* st_conv2d(...) {
+    │      return new torch::Tensor(torch::conv2d(inp, w, b, ...));
+    │  }
+    ▼
+libtorch.so（PyTorch 原生 C++ 库）
+    │  at::conv2d(input, weight, bias, stride, padding, dilation, groups)
+    ▼
+cuDNN / cuBLAS（GPU 加速）
+```
+
+**四层架构，每层只做一件事：**
+
+| 层 | 文件 | 职责 | 用户是否接触 |
+|----|------|------|------------|
+| 用户 API | `sd_runtime/torch.static.py` | `torch.conv2d(...)` 风格接口 | ✅ 是 |
+| FFI 声明 | `sd_runtime/torch_ops.static.py` | `extern fn` 到 C 函数 | ❌ 否（内部） |
+| C 包装 | `runtime/staticpy_torch.cpp` | C++ API → C 函数 | ❌ 否（内部） |
+| 原生库 | `libtorch.so` | 真正的计算（cuDNN/cuBLAS） | ❌ 否（运行时加载） |
+
+### 6.3 运行时加载原理
+
+所有 ML 库都在运行时通过 `dlopen` 按需加载，**编译时不需要任何 ML 头文件或库**：
+
+```
+编译时（build.sh）:
+  g++ staticpy_torch.cpp → libstaticpy_torch.so
+    ↑ 只需要 libtorch 头文件（编译时检测类型）
+    ↑ 不链接 libtorch（运行时才 dlopen）
+
+运行时（scheme --quiet app.so）:
+  load-shared-object "libc10.so"          ← dlopen C10 基础库
+  load-shared-object "libtorch_cpu.so"    ← dlopen PyTorch CPU
+  load-shared-object "libtorch_cuda.so"   ← dlopen PyTorch CUDA
+  load-shared-object "libtorch.so"        ← dlopen PyTorch 主库
+  load-shared-object "libstaticpy_torch.so" ← dlopen 我们的包装层
+    ↑ 全部在 .so 加载时通过 dlopen 完成
+    ↑ 有 GPU 用 libtorch_cuda，没有就跳过
+```
+
+关键设计：`staticpy_torch.cpp` 编译时**不链接 libtorch**（`-l` 参数只在链接时提供符号引用，真正加载在运行时）。编译产出仅 95KB。运行时如果机器上装了 PyTorch（libtorch.so 在标准路径），自动用 GPU 加速；没有就报错（可回退到手写算子）。
+
+### 6.4 与传统 PyTorch 对比
+
+```
+传统 PyTorch:
+  Python 代码
+    ↓ CPython 解释执行
+    ↓ pybind11 类型转换
+    ↓ C++ libtorch API
+    ↓ cuDNN / cuBLAS
+  → 每层都有开销
+
+staticpyTorch:
+  Python 语法代码（StaticPy）
+    ↓ 编译为原生机器码
+    ↓ extern fn 直接调 C 函数
+    ↓ C++ libtorch API
+    ↓ cuDNN / cuBLAS
+  → 编译后零解释器开销
+```
+
+**用户写的还是 Python，但运行时不经过 Python 解释器。** StaticPy 编译器把 Python 语法翻译成 Scheme，`compile-file` 编译为原生机器码。`torch.conv2d(...)` 在最终二进制里就是一次 C 函数调用，没有任何 Python 层的存在。
+
+### 6.5 已封装的算子
+
+| torch API | C 函数 | libtorch 后端 | 行数 |
+|-----------|--------|-------------|------|
+| `torch_conv2d` | `st_conv2d` | `torch::conv2d` → cuDNN | 10 |
+| `torch_group_norm` | `st_group_norm` | `torch::group_norm` → cuDNN | 8 |
+| `torch_layer_norm` | `st_layer_norm` | `torch::layer_norm` | 8 |
+| `torch_linear` | `st_linear` | `torch::linear` → cuBLAS | 6 |
+| `torch_silu` | `st_silu` | `torch::silu` | 4 |
+| `torch_relu` | `st_relu` | `torch::relu` | 4 |
+| `torch_gelu` | `st_gelu` | `torch::gelu` | 4 |
+| `torch_softmax` | `st_softmax` | `torch::softmax` | 4 |
+| `torch_mm` | `st_mm` | `a.mm(b)` → cuBLAS | 4 |
+| `torch_upsample_nearest` | `st_upsample_nearest` | `torch::upsample_nearest2d` | 5 |
+| `torch_add/sub/mul` | `st_add_tensor` | `a + b` | 3 |
+| `torch_sum/mean` | `st_sum/mean` | `t.sum()` | 3 |
+
+---
+
 ## 七、限制
 
 | 功能 | 能改？ | 说明 |
