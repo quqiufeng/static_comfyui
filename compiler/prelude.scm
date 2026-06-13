@@ -1,7 +1,7 @@
 ;; static_prelude.scm — StaticPy 值类型运行时
 ;; 
 ;; 值类型: int=fixnum, float=flonum, bool=boolean
-;; 数组类型: float[] = foreign-alloc 分配的 C double*
+;; 数组类型: float[] = foreign-alloc 分配的 C float*
 ;;           GC 自动回收（通过 guardian），无需手动 free
 
 (import (chezscheme))
@@ -28,22 +28,38 @@
 ;; ====== 浮点数组 ======
 
 (define (make-float-array n)
-  "创建 n 个 double 的 C 数组，自动 GC 回收"
-  (let ((ptr (foreign-alloc (* n 8))))
+  "创建 n 个 float 的 C 数组，自动 GC 回收"
+  (let ((ptr (foreign-alloc (* n 4))))
     (do ((i 0 (+ i 1))) ((= i n))
-      (foreign-set! 'double ptr (* i 8) 0.0))
+      (foreign-set! 'float ptr (* i 4) 0.0))
     (gc-register-ptr ptr)
     ptr))
 
 (define (float-array-set ptr i val)
-  (foreign-set! 'double ptr (* i 8) val))
+  (foreign-set! 'float ptr (* i 4) val))
 
 (define (float-array-ref ptr i)
-  (foreign-ref 'double ptr (* i 8)))
+  (foreign-ref 'float ptr (* i 4)))
 
 (define (float-array-free ptr)
   "手动释放（也可等 GC 自动回收）"
   (foreign-free ptr))
+
+;; ====== 指针数组（用于保存中间张量指针） ======
+
+(define (make-ptr-array n)
+  "创建 n 个 void* 的 C 数组，自动 GC 回收"
+  (let ((ptr (foreign-alloc (* n 8))))
+    (do ((i 0 (+ i 1))) ((= i n))
+      (foreign-set! 'void* ptr (* i 8) 0))
+    (gc-register-ptr ptr)
+    ptr))
+
+(define (ptr-array-set ptr i val)
+  (foreign-set! 'void* ptr (* i 8) val))
+
+(define (ptr-array-ref ptr i)
+  (foreign-ref 'void* ptr (* i 8)))
 
 ;; ====== 字典（hashtable） ======
 
@@ -192,10 +208,36 @@
   (let ((result (http-get url)))
     (cdr result)))
 
+;; ====== 整数数组（用于 shape） ======
+
+(define (make-int-array n)
+  "创建 n 个 int64 的 C 数组，自动 GC 回收"
+  (let ((ptr (foreign-alloc (* n 8))))
+    (do ((i 0 (+ i 1))) ((= i n))
+      (foreign-set! 'unsigned-64 ptr (* i 8) 0))
+    (gc-register-ptr ptr)
+    ptr))
+
+(define (int-array-set ptr i val)
+  (foreign-set! 'unsigned-64 ptr (* i 8) val))
+
+(define (int-array-ref ptr i)
+  (foreign-ref 'unsigned-64 ptr (* i 8)))
+
+(define (float-array-offset ptr n)
+  "按 float 元素个数偏移指针 (n*4 bytes)"
+  (+ ptr (* n 4)))
+
 ;; C ABI 包装（供 extern fn from "prelude" 调用）
 (define make_float_array (lambda (n) (make-float-array n)))
 (define float_array_set (lambda (ptr i val) (float-array-set ptr i val)))
 (define float_array_ref (lambda (ptr i) (float-array-ref ptr i)))
+(define float_array_offset (lambda (ptr n) (float-array-offset ptr n)))
+(define make_ptr_array (lambda (n) (make-ptr-array n)))
+(define ptr_array_set (lambda (ptr i val) (ptr-array-set ptr i val)))
+(define ptr_array_ref (lambda (ptr i) (ptr-array-ref ptr i)))
+(define make_int_array (lambda (n) (make-int-array n)))
+(define int_array_set (lambda (ptr i val) (int-array-set ptr i val)))
 (define make_dict (lambda () (make-dict)))
 (define dict_get (lambda (d key) (dict-get d key)))
 (define dict_set (lambda (d key val) (dict-set! d key val)))

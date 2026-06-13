@@ -10,7 +10,7 @@ def load_bin(fn: str, n: int) -> list[float]:
     _r: list[float] = make_float_array(n)
     _fp = fopen(fn, "rb")
     if _fp != 0:
-        fread(_r, 8, n, _fp)
+        fread(_r, 4, n, _fp)
         fclose(_fp)
     return _r
 
