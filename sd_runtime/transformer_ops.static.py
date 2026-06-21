@@ -97,6 +97,7 @@ def spatial_transformer_block(x: ptr, ctx: ptr,
     return r3
 
 # attention: q,k,v 都是 [batch*tokens, dim]
+# SDPA 版本（显存友好，数值可能与 ComfyUI manual attention 有差异）
 def attention_torch(q: ptr, k: ptr, v: ptr, batch: int, tokens_q: int, tokens_k: int, dim: int, heads: int) -> ptr:
     dim_head: int = dim // heads
 
@@ -130,6 +131,71 @@ def attention_torch(q: ptr, k: ptr, v: ptr, batch: int, tokens_q: int, tokens_k:
     out2: ptr = st_reshape(out, _dims2, 2)
     st_tensor_free(out)
     return out2
+
+# Manual attention 版本，与 ComfyUI 源码 q @ k^T / softmax / attn @ v 完全一致
+# 用于数值对齐验证
+def attention_torch_manual(q: ptr, k: ptr, v: ptr, batch: int, tokens_q: int, tokens_k: int, dim: int, heads: int) -> ptr:
+    dim_head: int = dim // heads
+    scale: float = 1.0 / sqrt(float(dim_head))
+
+    # 将 2D [batch*tokens, dim] 按 heads 拆分：
+    # 参考 PyTorch: x.reshape(batch, tokens, heads, dim_head).permute(0,2,1,3).reshape(batch*heads, tokens, dim_head)
+    _dims4: list[int] = make_int_array(4)
+    int_array_set(_dims4, 0, batch)
+    int_array_set(_dims4, 1, tokens_q)
+    int_array_set(_dims4, 2, heads)
+    int_array_set(_dims4, 3, dim_head)
+    q4: ptr = st_reshape(q, _dims4, 4)
+    q4 = st_transpose(q4, 1, 2)  # [batch, heads, tokens_q, dim_head]
+
+    int_array_set(_dims4, 1, tokens_k)
+    k4: ptr = st_reshape(k, _dims4, 4)
+    k4 = st_transpose(k4, 1, 2)  # [batch, heads, tokens_k, dim_head]
+
+    v4: ptr = st_reshape(v, _dims4, 4)
+    v4 = st_transpose(v4, 1, 2)  # [batch, heads, tokens_k, dim_head]
+
+    # 统一 reshape为 3D [batch*heads, tokens, dim_head]
+    _dims3: list[int] = make_int_array(3)
+    int_array_set(_dims3, 0, batch * heads)
+    int_array_set(_dims3, 1, tokens_q)
+    int_array_set(_dims3, 2, dim_head)
+    q_h: ptr = st_reshape(q4, _dims3, 3)
+    st_tensor_free(q4)
+    int_array_set(_dims3, 1, tokens_k)
+    k_h: ptr = st_reshape(k4, _dims3, 3)
+    st_tensor_free(k4)
+    v_h: ptr = st_reshape(v4, _dims3, 3)
+    st_tensor_free(v4)
+
+    # sim = q @ k^T: [batch*heads, tokens_q, tokens_k]
+    kt: ptr = st_transpose(k_h, 1, 2)
+    sim: ptr = st_bmm(q_h, kt)
+    st_tensor_free(kt)
+    # scale
+    sim_scaled: ptr = st_mul_scalar_tensor(sim, scale)
+    st_tensor_free(sim)
+    # softmax on last dim
+    attn: ptr = st_softmax(sim_scaled, -1)
+    st_tensor_free(sim_scaled)
+    # out = attn @ v: [batch*heads, tokens_q, dim_head]
+    out_h: ptr = st_bmm(attn, v_h)
+    st_tensor_free(attn); st_tensor_free(q_h); st_tensor_free(k_h); st_tensor_free(v_h)
+
+    # reshape back: [batch*heads, tokens_q, dim_head] -> [batch, heads, tokens_q, dim_head]
+    # -> [batch, tokens_q, heads, dim_head] -> [batch*tokens_q, dim]
+    int_array_set(_dims4, 0, batch)
+    int_array_set(_dims4, 1, heads)
+    int_array_set(_dims4, 2, tokens_q)
+    int_array_set(_dims4, 3, dim_head)
+    out4: ptr = st_reshape(out_h, _dims4, 4)
+    out4 = st_transpose(out4, 1, 2)  # [batch, tokens_q, heads, dim_head]
+    _dims2: list[int] = make_int_array(2)
+    int_array_set(_dims2, 0, batch * tokens_q)
+    int_array_set(_dims2, 1, dim)
+    out: ptr = st_reshape(out4, _dims2, 2)
+    st_tensor_free(out_h); st_tensor_free(out4)
+    return out
 
 # Masked version: mask is [tokens_q, tokens_k] 2D tensor
 def attention_torch_masked(q: ptr, k: ptr, v: ptr, batch: int, tokens_q: int, tokens_k: int, dim: int, heads: int, mask: ptr) -> ptr:

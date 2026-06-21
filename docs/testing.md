@@ -11,8 +11,18 @@
 |------|------|----------|
 | `test_twofwd_main.static.py` | UNet 双 forward 烟雾测试（dummy ctx/y） | 已通过 |
 | `test_sampler_main.static.py` | 5-step Euler sampler 测试（dummy ctx/y，cfg=7.5） | 2-step 通过，5-step OOM |
+| `test_attention_compare.static.py` | UNet 单 forward，保存输出用于 attention 对比 | 未运行 |
 
-## 运行方式
+便捷脚本：
+
+```bash
+# 切换并生成 manual / SDPA 版本的 UNet
+bash scripts/gen_unet_manual.sh
+bash scripts/gen_unet_sdpa.sh
+
+# 对比 manual vs SDPA 输出（需要 GPU）
+bash scripts/run_attention_compare.sh
+```
 
 ### 1. 构建 libstaticpy_torch.so
 
@@ -115,6 +125,12 @@ cd /opt/static_comfyui
 5. [ ] 实现正确的 `y` 编码。
 6. [ ] 数值对齐：将 ELF 输出与 ComfyUI reference 对比 `max_diff`。
 7. [ ] VAE decode：将 sampler 输出送入 VAE，得到最终图像。
+
+## Attention 对齐
+
+- 详见 `docs/attention_alignment.md`。
+- 当前 `sd_runtime/unet_forward.static.py` 默认是 **manual attention** 版本（源码对齐）。
+- 需要 GPU 空闲后运行 `bash scripts/run_attention_compare.sh` 验证 manual vs SDPA 输出差异。
 
 ## 显存调参记录
 
