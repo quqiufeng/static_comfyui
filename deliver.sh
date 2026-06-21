@@ -20,7 +20,7 @@ INPUT_PY="/tmp/sd_full_$$.py"
 for f in sd_runtime/array_ops.static.py sd_runtime/torch_ops.static.py \
          sd_runtime/nn_ops.static.py sd_runtime/transformer_ops.static.py \
          sd_runtime/unet_forward.static.py \
-         sd_runtime/samplers.static.py sd_runtime/clip.static.py \
+         sd_runtime/sampler.static.py sd_runtime/clip.static.py \
          sd_runtime/model_loader.static.py sd_runtime/vae.static.py \
          sd_runtime/main.static.py; do
     [ -f "$f" ] && cat "$f" >> "$INPUT_PY" && echo "" >> "$INPUT_PY"
@@ -37,7 +37,7 @@ echo "  [2b] Building libstaticpy_torch.so..."
 TORCH_INC=$($PYTHON -c 'from torch.utils.cpp_extension import include_paths; print(" ".join("-I"+p for p in include_paths()))')
 TORCH_LIB=$($PYTHON -c 'import torch; print(torch.__path__[0]+"/lib")')
 g++ -O2 -shared -fPIC -D_GLIBCXX_USE_CXX11_ABI=0 \
-  $TORCH_INC \
+  $TORCH_INC -I/data/venv/lib/python3.12/site-packages/nvidia/cuda_runtime/include -I/data/venv/lib/python3.12/site-packages/triton/backends/nvidia/include \
   -o /tmp/libstaticpy_torch.so runtime/staticpy_torch.cpp \
   -L"$TORCH_LIB" -ltorch -ltorch_cpu -lc10 -ltorch_cuda -lc10_cuda -Wl,-rpath,"$TORCH_LIB"
 

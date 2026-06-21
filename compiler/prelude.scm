@@ -133,8 +133,16 @@
     (foreign-free buf)
     (apply string-append (reverse result))))
 
+(define (file-read-floats path n)
+  "读取 n 个 float32 到 float-array"
+  (let ((arr (make-float-array n))
+        (fp (libc-fopen path "rb")))
+    (when (not fp) (error 'file-read-floats "cannot open file" path))
+    (libc-fread arr 4 n fp)
+    (libc-fclose fp)
+    arr))
+
 (define (file-exists? path)
-  "检查文件是否存在"
   (let ((fp (libc-fopen path "r")))
     (when fp (libc-fclose fp))
     (not (not fp))))
@@ -244,6 +252,7 @@
 (define file_open (lambda (path mode) (file-open path mode)))
 (define file_close (lambda (fp) (file-close fp)))
 (define file_read_all (lambda (fp) (file-read-all fp)))
+(define file_read_floats (lambda (path n) (file-read-floats path n)))
 (define file_write (lambda (fp s) (file-write fp s)))
 (define file_exists (lambda (path) (file-exists? path)))
 (define http_get_simple (lambda (url) (http-get-simple url)))

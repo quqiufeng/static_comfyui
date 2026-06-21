@@ -43,7 +43,7 @@ PRELUDE_FUNCTIONS = {
     "float_array_free", "make_ptr_array", "ptr_array_set", "ptr_array_ref",
     "make_int_array", "int_array_set", "int_array_ref",
     "make_dict", "dict_get", "dict_set",
-    "file_open", "file_close", "file_read_all", "file_write", "file_exists",
+    "file_open", "file_close", "file_read_all", "file_read_floats", "file_write", "file_exists",
     "http_get", "http_get_simple",
     "parse_json", "json_dumps", "now_ts", "format_time",
     "csv_parse", "csv_encode",
