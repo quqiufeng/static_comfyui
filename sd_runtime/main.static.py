@@ -55,12 +55,9 @@ def main():
     float_array_set(ts, 0, 50.0)
 
     # Build SDXL y conditioning: [pooled_g, image_dim_embed]
-    # TODO: use proper sinusoidal embedding for height/width/crop/target dims
-    img_dim: list[float] = make_float_array(1536)
-    _i = 0
-    while _i < 1536:
-        float_array_set(img_dim, _i, 0.0)
-        _i = _i + 1
+    # image_dim.bin contains 1536 floats: sinusoidal embeddings for
+    # height, width, crop_h, crop_w, target_h, target_w (each 256-dim)
+    img_dim: list[float] = file_read_floats("/tmp/image_dim.bin", 1536)
     img_dim_t: ptr = st_from_blob_2d(img_dim, 1, 1536)
     y_f: ptr = st_cat_dim(pooled_g, img_dim_t, 1)
     y: ptr = st_tensor_to_half(y_f)
