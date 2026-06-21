@@ -3389,6 +3389,10 @@ def load_unet_weights(data: list[float]) -> ptr:
     ptr_array_set(_weights, 1680, _w_time_embed_2_weight)
     return _weights
 
+# attention mode: manual (ComfyUI source-aligned q@k^T / softmax / attn@v)
+def attention_torch(q: ptr, k: ptr, v: ptr, batch: int, tokens_q: int, tokens_k: int, dim: int, heads: int) -> ptr:
+    return attention_torch_manual(q, k, v, batch, tokens_q, tokens_k, dim, heads)
+
 def unet_forward(latent: ptr, timestep: list[float], context: ptr, y: ptr, weights: ptr, n: int, hh: int, ww: int) -> ptr:
     h_cur: ptr; _s: ptr = make_ptr_array(30)
     _h_cur_orig: ptr; _sk: ptr; _cat: ptr; _y: ptr; _se: ptr; _h_old: ptr

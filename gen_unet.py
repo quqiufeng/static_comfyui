@@ -1,9 +1,34 @@
 #!/usr/bin/env python3
-"""gen_unet.py — 生成完整 SDXL UNet forward，所有中间张量都是 GPU ptr"""
+"""gen_unet.py — 生成完整 SDXL UNet forward，所有中间张量都是 GPU ptr
+
+用法: python3 gen_unet.py <index.json> [--attention {sdpa,manual}]
+  --attention sdpa   : 使用 PyTorch scaled_dot_product_attention（显存友好，数值可能不完全对齐）
+  --attention manual : 使用 ComfyUI 源码一致的 manual attention（默认，用于数值对齐）
+"""
 import sys, json
 
 def main():
-    idx = json.load(open(sys.argv[1]))
+    attention_mode = 'manual'
+    json_path = None
+    for arg in sys.argv[1:]:
+        if arg.startswith('--attention='):
+            attention_mode = arg.split('=', 1)[1]
+        elif arg == '--attention':
+            pass
+        elif arg in ('sdpa', 'manual'):
+            attention_mode = arg
+        elif not arg.startswith('--'):
+            json_path = arg
+
+    if json_path is None:
+        print('Usage: python3 gen_unet.py <index.json> [--attention {sdpa,manual}]', file=sys.stderr)
+        sys.exit(1)
+
+    if attention_mode not in ('sdpa', 'manual'):
+        print(f'Unknown attention mode: {attention_mode}', file=sys.stderr)
+        sys.exit(1)
+
+    idx = json.load(open(json_path))
     offs = {}
     for e in idx:
         name = e['name'].replace('model.diffusion_model.', '')
@@ -78,6 +103,16 @@ extern fn float_array_offset(a: list[float], n: int) -> list[float] from "prelud
     print('    return _weights')
     print()
 
+    # attention alias: map the attention function called by spatial_transformer_block
+    if attention_mode == 'manual':
+        print('''# attention mode: manual (ComfyUI source-aligned q@k^T / softmax / attn@v)
+def attention_torch(q: ptr, k: ptr, v: ptr, batch: int, tokens_q: int, tokens_k: int, dim: int, heads: int) -> ptr:
+    return attention_torch_manual(q, k, v, batch, tokens_q, tokens_k, dim, heads)
+''')
+    else:
+        print('''# attention mode: sdpa (PyTorch scaled_dot_product_attention)
+''')
+
     print(f'''def unet_forward(latent: ptr, timestep: list[float], context: ptr, y: ptr, weights: ptr, n: int, hh: int, ww: int) -> ptr:
     h_cur: ptr; _s: ptr = make_ptr_array(30)
     _h_cur_orig: ptr; _sk: ptr; _cat: ptr; _y: ptr; _se: ptr; _h_old: ptr
@@ -94,6 +129,9 @@ extern fn float_array_offset(a: list[float], n: int) -> list[float] from "prelud
         _i2 = _i2 + 1
     emb: ptr = st_from_blob_1d(_emb, n*320)
     emb = st_tensor_to_half(emb)''')
+
+    # Choose attention function used inside spatial_transformer_block
+    attn_fn = 'attention_torch' if attention_mode == 'sdpa' else 'attention_torch_manual'
 
     o1 = o('time_embed.0.weight'); o2 = o('time_embed.0.bias')
     o3 = o('time_embed.2.weight'); o4 = o('time_embed.2.bias')
