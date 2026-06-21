@@ -15,6 +15,8 @@ extern fn st_sigmoid(input: ptr) -> ptr from "staticpy_torch"
 extern fn st_mul_tensor(a: ptr, b: ptr) -> ptr from "staticpy_torch"
 extern fn st_add_tensor(a: ptr, b: ptr) -> ptr from "staticpy_torch"
 extern fn st_cat_dim(a: ptr, b: ptr, dim: int) -> ptr from "staticpy_torch"
+extern fn st_reshape(t: ptr, dims: ptr, ndim: int) -> ptr from "staticpy_torch"
+extern fn st_slice(t: ptr, dim: int, start: int, end: int) -> ptr from "staticpy_torch"
 extern fn st_tensor_free(t: ptr) -> void from "staticpy_torch"
 extern fn st_tensor_save(t: ptr, path: str) -> void from "staticpy_torch"
 extern fn st_clone(t: ptr) -> ptr from "staticpy_torch"
@@ -869,8 +871,23 @@ def clip_g_encode(tokens: list[float], data: list[float]) -> ptr:
     _fn_w: ptr = w_slice_1d(data, 693020160, 1280)
     _fn_b: ptr = w_slice_1d(data, 693018880, 1280)
     _fn_out: ptr = st_layer_norm(x, _fn_w, _fn_b, 1e-5)
+    # extract pooled at EOT position 4 -> [1,1,1280]
+    _pooled_raw: ptr = st_slice(_fn_out, 1, 4, 5)
+    _dims: list[int] = make_int_array(2)
+    int_array_set(_dims, 0, 1)
+    int_array_set(_dims, 1, 1280)
+    _pooled_2d: ptr = st_reshape(_pooled_raw, _dims, 2)
+    # text projection: [1280,1280]
+    _text_proj_w: ptr = w_slice_2d(data, 693021440, 1280, 1280)
+    _pooled: ptr = st_linear(_pooled_2d, _text_proj_w, 0)
+    st_tensor_free(_text_proj_w)
+    st_tensor_free(_pooled_2d)
+    st_tensor_free(_pooled_raw)
     st_tensor_free(mask); st_tensor_free(_fn_out); st_tensor_free(x)
-    return penultimate
+    _out_arr: ptr = make_ptr_array(2)
+    ptr_array_set(_out_arr, 0, penultimate)
+    ptr_array_set(_out_arr, 1, _pooled)
+    return _out_arr
 
 def clip_l_encode(tokens: list[float], data: list[float]) -> ptr:
     seq_len: int = 77
@@ -1177,7 +1194,12 @@ def clip_l_encode(tokens: list[float], data: list[float]) -> ptr:
 
 def clip_encode_lg(tokens_l: list[float], tokens_g: list[float], data: list[float]) -> ptr:
     out_l: ptr = clip_l_encode(tokens_l, data)
-    out_g: ptr = clip_g_encode(tokens_g, data)
+    out_g_arr: ptr = clip_g_encode(tokens_g, data)
+    out_g: ptr = ptr_array_ref(out_g_arr, 0)
+    pooled_g: ptr = ptr_array_ref(out_g_arr, 1)
     ctx: ptr = st_cat_dim(out_l, out_g, 2)  # [1,77,2048]
     st_tensor_free(out_l); st_tensor_free(out_g)
-    return ctx
+    _out_arr: ptr = make_ptr_array(2)
+    ptr_array_set(_out_arr, 0, ctx)
+    ptr_array_set(_out_arr, 1, pooled_g)
+    return _out_arr

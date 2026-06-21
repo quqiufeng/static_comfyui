@@ -9,6 +9,8 @@
 
 #include <torch/torch.h>
 #include <c10/util/Optional.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <cuda_runtime_api.h>
 #include <vector>
 #include <cstring>
 
@@ -253,6 +255,16 @@ void* st_bmm(void* a, void* b) {
     return (void*)new_t(result);
 }
 
+// Memory-efficient scaled dot-product attention (FlashAttention / memory-efficient).
+// Expects q,k,v as 4D [batch, heads, tokens, dim_head].
+void* st_scaled_dot_product_attention(void* q, void* k, void* v, int is_causal) {
+    auto& tq = *(torch::Tensor*)q;
+    auto& tk = *(torch::Tensor*)k;
+    auto& tv = *(torch::Tensor*)v;
+    auto result = torch::scaled_dot_product_attention(tq, tk, tv, {}, 0.0, is_causal);
+    return (void*)new_t(result);
+}
+
 // ===== 创建/转换 =====
 
 void* st_from_blob(float* data, int64_t* dims, int ndim) {
@@ -280,6 +292,62 @@ void* st_from_blob_3d(float* data, int64_t d0, int64_t d1, int64_t d2) {
 void* st_from_blob_4d(float* data, int64_t d0, int64_t d1, int64_t d2, int64_t d3) {
     auto opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
     return (void*)new_t(torch::from_blob(data, {d0, d1, d2, d3}, opts).clone());
+}
+
+void* st_from_blob_half_1d(float* data, int64_t d0) {
+    auto opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
+    return (void*)new_t(torch::from_blob(data, {d0}, opts).to(torch::kFloat16).clone());
+}
+
+void* st_from_blob_half_2d(float* data, int64_t d0, int64_t d1) {
+    auto opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
+    return (void*)new_t(torch::from_blob(data, {d0, d1}, opts).to(torch::kFloat16).clone());
+}
+
+void* st_from_blob_half_3d(float* data, int64_t d0, int64_t d1, int64_t d2) {
+    auto opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
+    return (void*)new_t(torch::from_blob(data, {d0, d1, d2}, opts).to(torch::kFloat16).clone());
+}
+
+void* st_from_blob_half_4d(float* data, int64_t d0, int64_t d1, int64_t d2, int64_t d3) {
+    auto opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
+    return (void*)new_t(torch::from_blob(data, {d0, d1, d2, d3}, opts).to(torch::kFloat16).clone());
+}
+
+void* st_tensor_to_half(void* t) {
+    return (void*)new_t(((torch::Tensor*)t)->to(torch::kFloat16));
+}
+
+void* st_tensor_to_float(void* t) {
+    return (void*)new_t(((torch::Tensor*)t)->to(torch::kFloat32));
+}
+
+// Upload entire float32 weights blob as one contiguous fp16 GPU buffer, then create views.
+void* st_from_blob_half_flat(float* data, int64_t n) {
+    auto opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
+    // Move the whole CPU blob to GPU and convert to fp16 in one go.
+    return (void*)new_t(torch::from_blob(data, {n}, opts).to(torch::kFloat16));
+}
+
+void* st_view_1d(void* base, int64_t offset, int64_t d0) {
+    auto& t = *(torch::Tensor*)base;
+    std::vector<int64_t> sizes = {d0};
+    std::vector<int64_t> strides = {1};
+    return (void*)new_t(t.as_strided(sizes, strides, offset));
+}
+
+void* st_view_2d(void* base, int64_t offset, int64_t d0, int64_t d1) {
+    auto& t = *(torch::Tensor*)base;
+    std::vector<int64_t> sizes = {d0, d1};
+    std::vector<int64_t> strides = {d1, 1};
+    return (void*)new_t(t.as_strided(sizes, strides, offset));
+}
+
+void* st_view_4d(void* base, int64_t offset, int64_t d0, int64_t d1, int64_t d2, int64_t d3) {
+    auto& t = *(torch::Tensor*)base;
+    std::vector<int64_t> sizes = {d0, d1, d2, d3};
+    std::vector<int64_t> strides = {d1*d2*d3, d2*d3, d3, 1};
+    return (void*)new_t(t.as_strided(sizes, strides, offset));
 }
 
 void* st_arange(int start, int end, int step) {
@@ -328,7 +396,7 @@ void* st_clone(void* t) {
 }
 
 void st_tensor_save(void* t, const char* path) {
-    auto tensor = ((torch::Tensor*)t)->clone().contiguous().to(torch::kCPU);
+    auto tensor = ((torch::Tensor*)t)->to(torch::kFloat32).clone().contiguous().to(torch::kCPU);
     if (tensor.device().is_cuda()) torch::cuda::synchronize();
     FILE* f = fopen(path, "wb");
     if (f) {
@@ -365,6 +433,30 @@ double st_min(void* t) {
 
 double st_mean(void* t) {
     return ((torch::Tensor*)t)->mean().item<double>();
+}
+
+void st_cuda_empty_cache() {
+    if (torch::cuda::is_available()) {
+        c10::cuda::CUDACachingAllocator::emptyCache();
+    }
+}
+
+int64_t st_cuda_memory_allocated() {
+    if (torch::cuda::is_available()) {
+        size_t free = 0, total = 0;
+        cudaMemGetInfo(&free, &total);
+        return static_cast<int64_t>((total - free) / (1024 * 1024));
+    }
+    return 0;
+}
+
+int64_t st_cuda_torch_memory_allocated() {
+    if (torch::cuda::is_available()) {
+        size_t free = 0, total = 0;
+        cudaMemGetInfo(&free, &total);
+        return static_cast<int64_t>((total - free) / (1024 * 1024));
+    }
+    return 0;
 }
 
 } // extern "C"

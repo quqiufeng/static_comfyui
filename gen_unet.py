@@ -25,24 +25,62 @@ def main():
 
     print('''# unet_forward.static.py — 自动生成，所有偏移硬编码
 extern fn make_float_array(n: int) -> list[float] from "prelude"
+extern fn make_ptr_array(n: int) -> ptr from "prelude"
+extern fn ptr_array_set(a: ptr, i: int, v: ptr) -> void from "prelude"
+extern fn ptr_array_ref(a: ptr, i: int) -> ptr from "prelude"
 extern fn st_from_blob_1d(data: ptr, d0: int) -> ptr from "staticpy_torch"
 extern fn st_from_blob_2d(data: ptr, d0: int, d1: int) -> ptr from "staticpy_torch"
 extern fn st_from_blob_4d(data: ptr, d0: int, d1: int, d2: int, d3: int) -> ptr from "staticpy_torch"
+extern fn st_from_blob_half_flat(data: ptr, n: int) -> ptr from "staticpy_torch"
+extern fn st_view_1d(base: ptr, offset: int, d0: int) -> ptr from "staticpy_torch"
+extern fn st_view_2d(base: ptr, offset: int, d0: int, d1: int) -> ptr from "staticpy_torch"
+extern fn st_view_4d(base: ptr, offset: int, d0: int, d1: int, d2: int, d3: int) -> ptr from "staticpy_torch"
+extern fn st_tensor_to_half(t: ptr) -> ptr from "staticpy_torch"
 
-def w_slice_1d(data: list[float], offset: int, n: int) -> ptr:
-    return st_from_blob_1d(float_array_offset(data, offset), n)
+def unet_view_1d(base: ptr, offset: int, n: int) -> ptr:
+    return st_view_1d(base, offset, n)
 
-def w_slice_2d(data: list[float], offset: int, d0: int, d1: int) -> ptr:
-    return st_from_blob_2d(float_array_offset(data, offset), d0, d1)
+def unet_view_2d(base: ptr, offset: int, d0: int, d1: int) -> ptr:
+    return st_view_2d(base, offset, d0, d1)
 
-def w_slice_4d(data: list[float], offset: int, d0: int, d1: int, d2: int, d3: int) -> ptr:
-    return st_from_blob_4d(float_array_offset(data, offset), d0, d1, d2, d3)
+def unet_view_4d(base: ptr, offset: int, d0: int, d1: int, d2: int, d3: int) -> ptr:
+    return st_view_4d(base, offset, d0, d1, d2, d3)
 
 extern fn float_array_offset(a: list[float], n: int) -> list[float] from "prelude"
+''')
 
-def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[float], n: int, hh: int, ww: int) -> ptr:
+    weight_entries = sorted(offs.items(), key=lambda x: x[1][0])
+    n_weights = len(weight_entries)
+    weight_vars = {}
+    for wi, (name, (off, nelem, shape)) in enumerate(weight_entries):
+        weight_vars[name] = (f'_w_{name.replace(".", "_")}', wi)
+
+    def ws(name):
+        if o(name) < 0:
+            return "0"
+        return f'ptr_array_ref(weights, {weight_vars[name][1] + 1})'
+
+    print(f'''def load_unet_weights(data: list[float]) -> ptr:
+    _base: ptr = st_from_blob_half_flat(data, {sum(e[1][1] for e in weight_entries)})
+    _weights: ptr = make_ptr_array({n_weights + 1})
+    ptr_array_set(_weights, 0, _base)''')
+
+    for wi, (name, (off, nelem, shape)) in enumerate(weight_entries):
+        var = weight_vars[name][0]
+        if len(shape) == 1:
+            print(f'    {var}: ptr = unet_view_1d(_base, {off}, {shape[0]})')
+        elif len(shape) == 2:
+            print(f'    {var}: ptr = unet_view_2d(_base, {off}, {shape[0]}, {shape[1]})')
+        elif len(shape) == 4:
+            print(f'    {var}: ptr = unet_view_4d(_base, {off}, {shape[0]}, {shape[1]}, {shape[2]}, {shape[3]})')
+        print(f'    ptr_array_set(_weights, {wi + 1}, {var})')
+
+    print('    return _weights')
+    print()
+
+    print(f'''def unet_forward(latent: ptr, timestep: list[float], context: ptr, y: ptr, weights: ptr, n: int, hh: int, ww: int) -> ptr:
     h_cur: ptr; _s: ptr = make_ptr_array(30)
-    _h_cur_orig: ptr; _sk: ptr; _cat: ptr; _y: ptr; _se: ptr
+    _h_cur_orig: ptr; _sk: ptr; _cat: ptr; _y: ptr; _se: ptr; _h_old: ptr
 
     # time embedding (inlined)
     _emb = make_float_array(n*320)
@@ -54,17 +92,8 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         float_array_set(_emb, _i2, cos(_t * _f))
         float_array_set(_emb, _h + _i2, sin(_t * _f))
         _i2 = _i2 + 1
-    emb: ptr = st_from_blob_1d(_emb, n*320)''')
-
-    # weight tensor declarations
-    for name, (off, nelem, shape) in sorted(offs.items(), key=lambda x: x[1][0]):
-        var = f'_w_{name.replace(".", "_")}'
-        if len(shape) == 1:
-            print(f'    {var}: ptr = w_slice_1d(data, {off}, {shape[0]})')
-        elif len(shape) == 2:
-            print(f'    {var}: ptr = w_slice_2d(data, {off}, {shape[0]}, {shape[1]})')
-        elif len(shape) == 4:
-            print(f'    {var}: ptr = w_slice_4d(data, {off}, {shape[0]}, {shape[1]}, {shape[2]}, {shape[3]})')
+    emb: ptr = st_from_blob_1d(_emb, n*320)
+    emb = st_tensor_to_half(emb)''')
 
     o1 = o('time_embed.0.weight'); o2 = o('time_embed.0.bias')
     o3 = o('time_embed.2.weight'); o4 = o('time_embed.2.bias')
@@ -72,33 +101,57 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
     print('    emb = silu_torch(emb)')
     print(f'    emb = linear_torch(emb, {ws("time_embed.2.weight")}, {ws("time_embed.2.bias")}, n, 1280, 1280)')
     print('    emb = silu_torch(emb)')
+    print(f'    _y_emb = linear_torch(y, {ws("label_emb.0.0.weight")}, {ws("label_emb.0.0.bias")}, n, 2816, 1280)')
+    print('    _y_emb = silu_torch(_y_emb)')
+    print(f'    _y_emb = linear_torch(_y_emb, {ws("label_emb.0.2.weight")}, {ws("label_emb.0.2.bias")}, n, 1280, 1280)')
+    print('    emb = add_tensor(emb, _y_emb)')
+    print('    st_tensor_free(_y_emb)')
     print()
 
     def rb(p, ci, co):
         def n(suffix): return f'{p}.{suffix}'
         print(f'    _h_cur_orig = st_clone(h_cur)')
+        print(f'    _h_old = h_cur')
         print(f'    h_cur = group_norm_torch(h_cur, {ws(n("in_layers.0.weight"))}, {ws(n("in_layers.0.bias"))}, 32, {ci}, hh, ww)')
+        print(f'    st_tensor_free(_h_old)')
+        print(f'    _h_old = h_cur')
         print(f'    h_cur = silu_torch(h_cur)')
+        print(f'    st_tensor_free(_h_old)')
+        print(f'    _h_old = h_cur')
         print(f'    h_cur = conv2d_torch(h_cur, {ws(n("in_layers.2.weight"))}, {ws(n("in_layers.2.bias"))}, n, {ci}, {co}, hh, ww, 3, 1, 3//2)')
+        print(f'    st_tensor_free(_h_old)')
         print(f'    _se = silu_torch(emb)')
         print(f'    _y = linear_torch(_se, {ws(n("emb_layers.1.weight"))}, {ws(n("emb_layers.1.bias"))}, n, 1280, {co})')
         # time emb broadcast add: _y is [n, co], h_cur is [n, co, h, w]
+        print(f'    _h_old = h_cur')
         print(f'    h_cur = add_time_emb_tensor(h_cur, _y, n, {co})')
+        print(f'    st_tensor_free(_h_old)')
         print(f'    st_tensor_free(_se); st_tensor_free(_y)')
+        print(f'    _h_old = h_cur')
         print(f'    h_cur = group_norm_torch(h_cur, {ws(n("out_layers.0.weight"))}, {ws(n("out_layers.0.bias"))}, 32, {co}, hh, ww)')
+        print(f'    st_tensor_free(_h_old)')
+        print(f'    _h_old = h_cur')
         print(f'    h_cur = silu_torch(h_cur)')
+        print(f'    st_tensor_free(_h_old)')
+        print(f'    _h_old = h_cur')
         print(f'    h_cur = conv2d_torch(h_cur, {ws(n("out_layers.3.weight"))}, {ws(n("out_layers.3.bias"))}, n, {co}, {co}, hh, ww, 3, 1, 3//2)')
+        print(f'    st_tensor_free(_h_old)')
         if ci != co:
             print(f'    _sk = conv2d_torch(_h_cur_orig, {ws(p+".skip_connection.weight")}, {ws(p+".skip_connection.bias")}, n, {ci}, {co}, hh, ww, 1, 1, 1//2)')
+            print(f'    st_tensor_free(_h_cur_orig)')
         else:
             print(f'    _sk = _h_cur_orig')
+        print(f'    _h_old = h_cur')
         print(f'    h_cur = add_tensor(h_cur, _sk)')
+        print(f'    st_tensor_free(_h_old)')
         print(f'    st_tensor_free(_sk)')
 
     def spatial_transformer(p, c, inner_dim, n_heads, d_head, hidden, depth):
         print(f'    # SpatialTransformer {p}')
         print(f'    _x_in = st_clone(h_cur)')
+        print(f'    _h_old = h_cur')
         print(f'    h_cur = group_norm_torch(h_cur, {ws(p+".norm.weight")}, {ws(p+".norm.bias")}, 32, {c}, hh, ww)')
+        print(f'    st_tensor_free(_h_old)')
         print(f'    _seq = reshape_nchw_to_nlc(h_cur, n, {c}, hh, ww)')
         print(f'    st_tensor_free(h_cur)')
         print(f'    _seq = linear_torch(_seq, {ws(p+".proj_in.weight")}, {ws(p+".proj_in.bias")}, n*hh*ww, {c}, {inner_dim})')
@@ -126,32 +179,36 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         print(f'    st_tensor_free(_x_in); st_tensor_free(_h_img)')
 
     print(f'    h_cur = conv2d_torch(latent, {ws("input_blocks.0.0.weight")}, {ws("input_blocks.0.0.bias")}, n, 4, 320, hh, ww, 3, 1, 3//2)')
-    print('    ptr_array_set(_s, 0, h_cur)\n')
+    print('    _ss_0: ptr = st_clone(h_cur)\n    ptr_array_set(_s, 0, _ss_0)\n')
 
     for bid in [1,2]:
         print(f'    # input_blocks.{bid}')
         rb(f'input_blocks.{bid}.0', 320, 320)
-        print(f'    ptr_array_set(_s, {bid}, h_cur)\n')
+        print(f'    _ss_{bid}: ptr = st_clone(h_cur)\n    ptr_array_set(_s, {bid}, _ss_{bid})\n')
 
+    print(f'    _h_old = h_cur')
     print(f'    h_cur = conv2d_torch(h_cur, {ws("input_blocks.3.0.op.weight")}, {ws("input_blocks.3.0.op.bias")}, n, 320, 320, hh, ww, 3, 2, 1)')
+    print(f'    st_tensor_free(_h_old)')
     print('    hh = hh//2; ww = ww//2')
-    print('    ptr_array_set(_s, 3, h_cur)\n')
+    print('    _ss_3: ptr = st_clone(h_cur)\n    ptr_array_set(_s, 3, _ss_3)\n')
 
     for bid in [4,5]:
         print(f'    # input_blocks.{bid}')
         rb(f'input_blocks.{bid}.0', 320 if bid==4 else 640, 640)
         spatial_transformer(f'input_blocks.{bid}.1', 640, 640, 10, 64, 2560, 2)
-        print(f'    ptr_array_set(_s, {bid}, h_cur)\n')
+        print(f'    _ss_{bid}: ptr = st_clone(h_cur)\n    ptr_array_set(_s, {bid}, _ss_{bid})\n')
 
+    print(f'    _h_old = h_cur')
     print(f'    h_cur = conv2d_torch(h_cur, {ws("input_blocks.6.0.op.weight")}, {ws("input_blocks.6.0.op.bias")}, n, 640, 640, hh, ww, 3, 2, 1)')
+    print(f'    st_tensor_free(_h_old)')
     print('    hh = hh//2; ww = ww//2')
-    print('    ptr_array_set(_s, 6, h_cur)\n')
+    print('    _ss_6: ptr = st_clone(h_cur)\n    ptr_array_set(_s, 6, _ss_6)\n')
 
     for bid in [7,8]:
         print(f'    # input_blocks.{bid}')
         rb(f'input_blocks.{bid}.0', 640 if bid==7 else 1280, 1280)
         spatial_transformer(f'input_blocks.{bid}.1', 1280, 1280, 20, 64, 5120, 10)
-        print(f'    ptr_array_set(_s, {bid}, h_cur)\n')
+        print(f'    _ss_{bid}: ptr = st_clone(h_cur)\n    ptr_array_set(_s, {bid}, _ss_{bid})\n')
 
     print('    # middle_block')
     rb('middle_block.0', 1280, 1280)
@@ -178,25 +235,36 @@ def unet_forward(latent: ptr, timestep: list[float], context: ptr, data: list[fl
         5: (640, 640, 10, 64, 2560, 2),
     }
 
-    for obid, skip_bid, skip_ch, cur_ch, cat_ch, out_ch, do_up in out_config:
+    for obid, skip_bid, cur_ch, skip_ch, cat_ch, out_ch, do_up in out_config:
         print(f'\n    # output_blocks.{obid}')
         print(f'    _cur = h_cur')
         print(f'    _skip = ptr_array_ref(_s, {skip_bid})')
         print(f'    h_cur = cat_channel_tensors(_cur, _skip, n, {cur_ch}, {skip_ch}, hh, ww)')
-        print(f'    st_tensor_free(_cur)')
+        print(f'    st_tensor_free(_cur); st_tensor_free(_skip)')
         rb(f'output_blocks.{obid}.0', cat_ch, out_ch)
         if obid in out_transformers:
             cfg = out_transformers[obid]
             spatial_transformer(f'output_blocks.{obid}.1', cfg[0], cfg[1], cfg[2], cfg[3], cfg[4], cfg[5])
         if do_up:
+            print(f'    _h_old = h_cur')
             print(f'    h_cur = upsample_nearest_torch(h_cur, 2)')
+            print(f'    st_tensor_free(_h_old)')
             print('    hh = hh*2; ww = ww*2')
+            print(f'    _h_old = h_cur')
             print(f'    h_cur = conv2d_torch(h_cur, {ws(f"output_blocks.{obid}.2.conv.weight")}, {ws(f"output_blocks.{obid}.2.conv.bias")}, n, {out_ch}, {out_ch}, hh, ww, 3, 1, 1)')
+            print(f'    st_tensor_free(_h_old)')
 
-    print(f'\n    h_cur = group_norm_torch(h_cur, {ws("out.0.weight")}, {ws("out.0.bias")}, 32, 320, hh, ww)')
+    print(f'\n    _h_out = h_cur')
+    print(f'    h_cur = group_norm_torch(h_cur, {ws("out.0.weight")}, {ws("out.0.bias")}, 32, 320, hh, ww)')
+    print(f'    st_tensor_free(_h_out)')
+    print(f'    _h_out = h_cur')
     print(f'    h_cur = silu_torch(h_cur)')
+    print(f'    st_tensor_free(_h_out)')
+    print(f'    _h_out = h_cur')
     print(f'    h_cur = conv2d_torch(h_cur, {ws("out.2.weight")}, {ws("out.2.bias")}, n, 320, 4, hh, ww, 3, 1, 1)')
-    print('    return h_cur')
+    print(f'    st_tensor_free(_h_out)')
+    print('    result: ptr = h_cur')
+    print('    return result')
 
 if __name__ == '__main__':
     main()
