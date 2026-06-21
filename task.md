@@ -33,12 +33,17 @@
 
 | 任务 | 难度 | 工作量 | 说明 |
 |------|------|--------|------|
-| ~~合并权重文件~~ | 低 | 1h | ✅ 已完成：单 `weights.bin` + `index.json` |
+| ~~合并权重文件~~ | 低 | 1h | 已完成：单 `weights.bin` + `index.json` |
 | CLIP tokenizer | 中 | 4h | BPE 词表 + transformer encode |
 | VAE encoder | 中 | 4h | encoder + skip connections for decoder |
 | txt2img 端到端 | 中 | 4h | CLIP→UNet→VAE 串联 |
 | ControlNet/LoRA | 高 | 8h | 额外 conv 注入 + 权重合并 |
 | img2img/HiResFix | 低 | 2h | 加噪声→去噪 / latent 放大→refine |
+
+## 当前阻塞
+
+- GPU 正在跑训练，SDXL UNet 5-step 采样 OOM，需等 GPU 空闲后再验证。
+- 详见 `docs/testing.md`。
 
 ## 模型路径
 
