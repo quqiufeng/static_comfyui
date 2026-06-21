@@ -34,9 +34,10 @@
 | 任务 | 难度 | 工作量 | 说明 |
 |------|------|--------|------|
 | ~~合并权重文件~~ | 低 | 1h | 已完成：单 `weights.bin` + `index.json` |
-| CLIP tokenizer | 中 | 4h | BPE 词表 + transformer encode |
+| CLIP tokenizer | 中 | 4h | 已完成 Python 预处理版，见 `scripts/preprocess_prompt.py`；二进制内实现待后续 |
+| SDXL y conditioning | 低 | 1h | 已完成：Python 生成 image_dim.bin + main.static.py 拼接 pooled_g |
 | VAE encoder | 中 | 4h | encoder + skip connections for decoder |
-| txt2img 端到端 | 中 | 4h | CLIP→UNet→VAE 串联 |
+| txt2img 端到端 | 中 | 4h | CLIP→UNet→VAE 串联，等待 GPU 验证 |
 | ControlNet/LoRA | 高 | 8h | 额外 conv 注入 + 权重合并 |
 | img2img/HiResFix | 低 | 2h | 加噪声→去噪 / latent 放大→refine |
 
