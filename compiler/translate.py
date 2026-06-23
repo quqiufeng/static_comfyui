@@ -462,90 +462,13 @@ def translate_function(node, source_file=""):
         for i, (arg_name, default_node) in enumerate(zip(args[default_start:], node.args.defaults)):
             default_val = translate_expr(default_node)
             warn(f"Parameter '{arg_name}' has default value {default_val} — caller must provide all args", node)
-    all_bindings = []
-    body_exprs = []
-    si = 0
-    lineno = getattr(node, 'lineno', 0)
-    comment = f";; {source_file}:{lineno} def {node.name}()"
     # Skip docstring (first string literal expression in body)
-    if (si < len(node.body) and isinstance(node.body[si], ast.Expr)
-            and isinstance(node.body[si].value, ast.Constant)
-            and isinstance(node.body[si].value.value, str)):
-        si += 1
-    while si < len(node.body):
-        stmt = node.body[si]
-        if isinstance(stmt, ast.FunctionDef):
-            body_exprs.append(translate_function(stmt))
-        elif isinstance(stmt, ast.Return):
-            val = translate_expr(stmt.value) if stmt.value else "#f"
-            body_exprs.append(val)
-        elif isinstance(stmt, ast.AugAssign):
-            body_exprs.append(translate_aug_assign(stmt))
-        elif isinstance(stmt, (ast.Assign, ast.AnnAssign)):
-            target = None
-            val = None
-            if isinstance(stmt, ast.AnnAssign):
-                target = stmt.target.id if isinstance(stmt.target, ast.Name) else None
-                val = translate_expr(stmt.value) if stmt.value else "#f"
-            else:
-                if len(stmt.targets) == 1:
-                    t = stmt.targets[0]
-                    if isinstance(t, ast.Name):
-                        target = t.id
-                        val = translate_expr(stmt.value)
-                    elif isinstance(t, ast.Subscript):
-                        d = translate_expr(t.value)
-                        k = translate_expr(t.slice)
-                        v = translate_expr(stmt.value)
-                        body_exprs.append(f"(dict-set! {d} {k} {v})")
-            if target and val:
-                body_exprs.append(f"(set! {target} {val})")
-            else:
-                body_exprs.append(f";; {ast.dump(stmt)}")
-        elif isinstance(stmt, ast.If):
-            test = translate_expr(stmt.test)
-            then_exprs = translate_block(stmt.body)
-            else_body = stmt.orelse
-            if else_body:
-                else_exprs = translate_block(else_body)
-                body_exprs.append(
-                    f"(if {test}\n    (begin {' '.join(then_exprs)})\n    (begin {' '.join(else_exprs)}))")
-            elif (si + 1 < len(node.body) and isinstance(node.body[si + 1], ast.Return)
-                  and len(stmt.body) > 0 and isinstance(stmt.body[-1], ast.Return)):
-                next_stmt = node.body[si + 1]
-                next_val = translate_expr(next_stmt.value) if next_stmt.value else "#f"
-                body_exprs.append(f"(if {test}\n    (begin {' '.join(then_exprs)})\n    {next_val})")
-                si += 1
-            else:
-                body_exprs.append(f"(if {test}\n    (begin {' '.join(then_exprs)}))")
-        elif isinstance(stmt, ast.For):
-            target = stmt.target.id if isinstance(stmt.target, ast.Name) else "i"
-            if isinstance(stmt.iter, ast.Call) and hasattr(stmt.iter.func, 'id') and stmt.iter.func.id == 'range':
-                rargs = stmt.iter.args
-                if len(rargs) == 1:
-                    n = translate_expr(rargs[0])
-                    body_parts = translate_block(stmt.body)
-                    body_str = wrap_body_with_continue(body_parts, stmt.body)
-                    body_exprs.append(
-                        f"(do (({target} 0 (+ {target} 1))) ((>= {target} {n})) {body_str})")
-                else:
-                    body_exprs.append(f";; for range with {len(rargs)} args")
-            else:
-                body_exprs.append(f";; for loop (untranslated)")
-        elif isinstance(stmt, ast.While):
-            test = translate_expr(stmt.test)
-            body_parts = translate_block(stmt.body)
-            body_str = wrap_body_with_continue(body_parts, stmt.body)
-            body_exprs.append(f"(let loop () (if {test} (begin {body_str} (loop))))")
-        elif isinstance(stmt, ast.Expr):
-            body_exprs.append(translate_expr(stmt.value))
-        elif isinstance(stmt, ast.Global):
-            pass  # Python global declaration; Scheme define handles scope
-        elif isinstance(stmt, ast.Pass):
-            pass  # no-op
-        else:
-            body_exprs.append(f";; {type(stmt).__name__}: {ast.dump(stmt)}")
-        si += 1
+    body_start = 0
+    if (len(node.body) > body_start and isinstance(node.body[body_start], ast.Expr)
+            and isinstance(node.body[body_start].value, ast.Constant)
+            and isinstance(node.body[body_start].value.value, str)):
+        body_start = 1
+    body_exprs = translate_block(node.body[body_start:])
     if len(body_exprs) == 1:
         body = f"  {body_exprs[0]}"
     else:
@@ -558,10 +481,13 @@ def generate_extern_ffi():
     """生成 extern fn 的 Scheme foreign-procedure 声明"""
     lines = []
     loaded_libs = set()
+    # .so 路径优先从环境变量读取, 用于 deploy 时指向 lib/ 目录
+    torch_std_so = os.environ.get("STATICPY_TORCH_STD_SO",
+                                   "/opt/ReScheme/build/libtorch_std_helper.so")
     for name, info in EXTERN_FUNCTIONS.items():
         lib = info["lib"]
         if lib == "torch_std_helper" and lib not in loaded_libs:
-            lines.append('(load-shared-object "/opt/ReScheme/build/libtorch_std_helper.so")')
+            lines.append(f'(load-shared-object "{torch_std_so}")')
         elif lib == "dgemm_row" and lib not in loaded_libs:
             lines.append('(load-shared-object "/tmp/libdgemm_row.so")')
         loaded_libs.add(lib)
