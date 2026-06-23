@@ -3,7 +3,7 @@
 ;; 值类型: int=fixnum, float=flonum, bool=boolean
 ;; 数组类型: float[] = foreign-alloc 分配的 C float*
 ;;           ptr[] = foreign-alloc 分配的 C void* (张量指针)
-;;           自动 GC 回收（通过 guardian），无需手动 free
+;;           自动 GC 回收（通过 guardian + 主动 drain）
 
 (import (chezscheme))
 
@@ -15,13 +15,16 @@
   (*gc-guardian* ptr)
   ptr)
 
-(define (gc-cleanup)
-  "由 GC 在回收时自动调用"
+(define (gc-drain)
+  "主动释放所有回收的 C 内存。需在 GC 后或定期调用。"
   (let loop ()
     (let ((ptr (*gc-guardian*)))
       (when ptr
         (foreign-free ptr)
         (loop)))))
+
+;; 注册 GC hook: Chez Scheme 每次 GC 后自动调用 gc-drain
+(collect-rendezvous (lambda () (gc-drain)))
 
 ;; ====== 浮点数组 ======
 
@@ -69,15 +72,15 @@
   "创建 n 个 int64 的 C 数组，自动 GC 回收"
   (let ((ptr (foreign-alloc (* n 8))))
     (do ((i 0 (+ i 1))) ((= i n))
-      (foreign-set! 'unsigned-64 ptr (* i 8) 0))
+      (foreign-set! 'signed-64 ptr (* i 8) 0))
     (gc-register-ptr ptr)
     ptr))
 
 (define (int-array-set ptr i val)
-  (foreign-set! 'unsigned-64 ptr (* i 8) val))
+  (foreign-set! 'signed-64 ptr (* i 8) val))
 
 (define (int-array-ref ptr i)
-  (foreign-ref 'unsigned-64 ptr (* i 8)))
+  (foreign-ref 'signed-64 ptr (* i 8)))
 
 ;; ====== 字典（hashtable） ======
 
@@ -398,18 +401,23 @@
 
 ;; ====== sleep / clock ======
 
+(define libc-nanosleep
+  (foreign-procedure "nanosleep" (void* void*) int))
+
 (define (sleep ms)
-  (let ((sec (/ ms 1000.0)))
-    (foreign-procedure "nanosleep" (void* void*) int)
-    ;; 简化的 sleep: 用 busy wait + 时间比较
-    (let ((start (current-second)))
-      (let loop ()
-        (when (< (- (current-second) start) sec)
-          (loop))))))
+  (let* ((sec (quotient ms 1000))
+         (nsec (* (remainder ms 1000) 1000000))
+         (req (foreign-alloc 16)))
+    (foreign-set! 'signed-64 req 0 sec)
+    (foreign-set! 'signed-64 req 8 nsec)
+    (libc-nanosleep req 0)
+    (foreign-free req)))
 
 (define (clock)
   (current-second))
 
+(define libc-exit
+  (foreign-procedure "exit" (int) void))
+
 (define (exit_program code)
-  (foreign-procedure "exit" (int) void)
-  (exit code))
+  (libc-exit code))
