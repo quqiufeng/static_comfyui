@@ -345,7 +345,18 @@ def translate_expr(node):
             if name == "range":
                 return f"({args[0]})"
             if name == "int":
-                return f"(exact (round {args[0]}))" if args else "0"
+                if args:
+                    arg = args[0]
+                    # If the argument to int() is a call to an extern fn that returns int,
+                    # the value is already a fixnum — skip truncation
+                    if (len(node.args) > 0 and isinstance(node.args[0], ast.Call)
+                            and isinstance(node.args[0].func, ast.Name)
+                            and node.args[0].func.id in EXTERN_FUNCTIONS
+                            and EXTERN_FUNCTIONS[node.args[0].func.id]["ret"] == "int"):
+                        return arg
+                    # General case: truncate toward zero to match Python semantics
+                    return f"(exact (truncate {arg}))"
+                return "0"
             if name == "float":
                 return f"(inexact {args[0]})" if args else "0.0"
             if name in PRELUDE_FUNCTIONS:
@@ -443,6 +454,14 @@ def wrap_body_with_continue(body_parts, stmts):
 def translate_function(node, source_file=""):
     name = f"static_{node.name}"
     args = [arg.arg for arg in node.args.args]
+    # Warn about default parameter values (not supported)
+    if node.args.defaults:
+        n_defaults = len(node.args.defaults)
+        n_args = len(args)
+        default_start = n_args - n_defaults
+        for i, (arg_name, default_node) in enumerate(zip(args[default_start:], node.args.defaults)):
+            default_val = translate_expr(default_node)
+            warn(f"Parameter '{arg_name}' has default value {default_val} — caller must provide all args", node)
     all_bindings = []
     body_exprs = []
     si = 0
