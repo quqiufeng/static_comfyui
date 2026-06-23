@@ -15,6 +15,8 @@ from sd_vae import *
 _sc_stage_a: ptr   # VAE-like: 图像 ↔ latent 压缩 (c=4, 8x)
 _sc_stage_b: ptr   # 浅扩散: latent → latent (c=4, 4x, 1024x1024 → 256x256)
 _sc_stage_c: ptr   # 主扩散: latent → latent with text conditioning
+_sc_weight_ptrs: ptr  # C++ forward weight ptr array
+_sc_n_weights: int
 _sc_has_init: int
 
 
@@ -24,11 +26,19 @@ _sc_has_init: int
 
 def stable_cascade_init(stage_a_path: str, stage_b_path: str,
                          stage_c_path: str) -> void:
-    """加载 Stable Cascade 三个阶段的 JIT 模型."""
+    """加载 Stable Cascade 三个阶段的 JIT 模型 + C++ forward 权重."""
     global _sc_stage_a, _sc_stage_b, _sc_stage_c, _sc_has_init
+    global _sc_weight_ptrs, _sc_n_weights
     _sc_stage_a = torch_std_jit_load(stage_a_path)
     _sc_stage_b = torch_std_jit_load(stage_b_path)
-    _sc_stage_c = torch_std_jit_load(stage_c_path)
+    # Stage C: 使用 libTorch C++ forward, 加载 safetensors 权重
+    sd_dict = torch_std_safetensors_load(stage_c_path)
+    n = torch_std_safetensors_count(sd_dict)
+    w = make_ptr_array(n)
+    for i in range(n):
+        ptr_array_set(w, i, torch_std_safetensors_tensor(sd_dict, i))
+    _sc_weight_ptrs = w
+    _sc_n_weights = n
     _sc_has_init = 1
 
 
@@ -101,7 +111,7 @@ def sc_stage_b_sample(noise: ptr, steps: int, r_val: float,
 def sc_stage_c_forward(latent: ptr, timestep: ptr, r: ptr,
                         clip_text: ptr, clip_text_pooled: ptr,
                         clip_img: ptr) -> ptr:
-    """Stage C denoising step with full conditioning.
+    """Stage C denoising step with full conditioning (libTorch C++).
     
     latent: (1, 16, H, W)
     timestep: (1,) scalar
@@ -111,9 +121,11 @@ def sc_stage_c_forward(latent: ptr, timestep: ptr, r: ptr,
     clip_img: optional (1, 4, 768) CLIP image embeddings
     Returns: denoised latent
     """
-    global _sc_stage_c
-    return torch_std_jit_forward(_sc_stage_c, latent, timestep, r,
-                                  clip_text, clip_text_pooled, clip_img)
+    global _sc_weight_ptrs, _sc_n_weights
+    return torch_std_stable_cascade_stage_c(
+        _sc_weight_ptrs, _sc_n_weights,
+        latent, r, timestep,
+        clip_text, clip_text_pooled, clip_img)
 
 
 def sc_stage_c_sample(noise: ptr, steps: int, r_val: float,
