@@ -486,7 +486,7 @@ def generate_extern_ffi():
     loaded_libs = set()
     # .so 路径优先从环境变量读取, 用于 deploy 时指向 lib/ 目录
     torch_std_so = os.environ.get("STATICPY_TORCH_STD_SO",
-                                   "/opt/ReScheme/build/libtorch_std_helper.so")
+                                   "./cpp_runtime/build/libtorch_std_helper.so")
     for name, info in EXTERN_FUNCTIONS.items():
         lib = info["lib"]
         if lib == "torch_std_helper" and lib not in loaded_libs:
