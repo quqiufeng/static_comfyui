@@ -271,8 +271,8 @@ def my_forward(x: ptr, t: ptr) -> ptr:
 
 | 文件 | 职责 | 语言 |
 |------|------|------|
-| `libtorch_std_helper.h` | extern "C" API 声明 | C |
-| `libtorch_std_helper.cpp` | 所有模型 forward 实现 | C++ (libTorch) |
+| `cpp_runtime/libtorch_std_helper.h` | extern "C" API 声明 | C |
+| `cpp_runtime/libtorch_std_helper.cpp` | 所有模型 forward 实现 | C++ (libTorch) |
 | `ops.static.py` | 所有 extern fn 声明 | StaticPy |
 | `sd_runtime/*.static.py` | 管线编排 + 模型封装 | StaticPy |
 | `compiler/translate.py` | StaticPy → Scheme 翻译 | Python |
