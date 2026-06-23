@@ -327,3 +327,104 @@ extern fn torch_std_ddpm_add_noise(latent: ptr, noise: ptr, timestep: ptr,
 
 extern fn torch_std_to_double_array(t: ptr, out: ptr, n: int) -> void from "torch_std_helper"
 extern fn torch_std_to_float_array(t: ptr, out: ptr, n: int) -> void from "torch_std_helper"
+extern fn torch_std_to_int64_array(t: ptr, out: ptr, n: int) -> void from "torch_std_helper"
+
+# ==============================================================================
+# Missing extern fn — align libtorch_std_helper.h (172 total, +58 added here)
+# ==============================================================================
+
+# Tensor creation extras
+extern fn torch_std_randint(low: int, high: int, shape: ptr, ndim: int, dtype: int) -> ptr from "torch_std_helper"
+extern fn torch_std_tensor_from_blob_3d(data: ptr, d0: int, d1: int, d2: int, dtype: int) -> ptr from "torch_std_helper"
+extern fn torch_std_detach(t: ptr) -> ptr from "torch_std_helper"
+extern fn torch_std_randn(shape: ptr, ndim: int, dtype: int) -> ptr from "torch_std_helper"
+
+# Array utilities
+extern fn torch_std_float_array_ptr(arr: ptr) -> ptr from "torch_std_helper"
+extern fn torch_std_int_array_ptr(arr: ptr) -> ptr from "torch_std_helper"
+extern fn torch_std_float_array_ptr_offset(arr: ptr, offset: int) -> ptr from "torch_std_helper"
+extern fn torch_std_int_array_ptr_offset(arr: ptr, offset: int) -> ptr from "torch_std_helper"
+
+# Compare ops
+extern fn torch_std_eq(a: ptr, b: ptr) -> ptr from "torch_std_helper"
+extern fn torch_std_gt(a: ptr, b: ptr) -> ptr from "torch_std_helper"
+extern fn torch_std_lt(a: ptr, b: ptr) -> ptr from "torch_std_helper"
+extern fn torch_std_ge(a: ptr, b: ptr) -> ptr from "torch_std_helper"
+extern fn torch_std_le(a: ptr, b: ptr) -> ptr from "torch_std_helper"
+extern fn torch_std_clamp(a: ptr, min_val: float, max_val: float) -> ptr from "torch_std_helper"
+extern fn torch_std_where(condition: ptr, x: ptr, y: ptr) -> ptr from "torch_std_helper"
+extern fn torch_std_masked_select(a: ptr, mask: ptr) -> ptr from "torch_std_helper"
+
+# JIT module management
+extern fn torch_std_jit_forward(module: ptr, input_tensor: ptr) -> ptr from "torch_std_helper"
+extern fn torch_std_jit_module_delete(module: ptr) -> void from "torch_std_helper"
+extern fn torch_std_jit_load_module(path: str) -> ptr from "torch_std_helper"
+extern fn torch_std_jit_named_parameters(module: ptr, out_ptrs: ptr, max_n: int) -> int from "torch_std_helper"
+extern fn torch_std_jit_parameters(module: ptr, out_ptrs: ptr, max_n: int) -> int from "torch_std_helper"
+
+# Image I/O extras
+extern fn torch_std_load_image_png(path: str) -> ptr from "torch_std_helper"
+extern fn torch_std_save_image(tensor: ptr, path: str, as_pgm: int) -> void from "torch_std_helper"
+extern fn torch_std_save_image_png(tensor: ptr, path: str) -> void from "torch_std_helper"
+extern fn torch_std_image_composite(bg: ptr, fg: ptr, x: int, y: int) -> ptr from "torch_std_helper"
+extern fn torch_std_color_convert(img: ptr, src_fmt: int, dst_fmt: int) -> ptr from "torch_std_helper"
+
+# Loss functions
+extern fn torch_std_mse_loss(pred: ptr, target: ptr, reduction: str) -> ptr from "torch_std_helper"
+extern fn torch_std_l1_loss(pred: ptr, target: str, reduction: str) -> ptr from "torch_std_helper"
+extern fn torch_std_cross_entropy_loss(logits: ptr, target: ptr, reduction: str) -> ptr from "torch_std_helper"
+extern fn torch_std_nll_loss(log_probs: ptr, target: ptr, reduction: str) -> ptr from "torch_std_helper"
+extern fn torch_std_bce_loss(pred: ptr, target: ptr, reduction: str) -> ptr from "torch_std_helper"
+extern fn torch_std_bce_with_logits_loss(pred: ptr, target: ptr, reduction: str) -> ptr from "torch_std_helper"
+extern fn torch_std_copy_probs(logits: ptr, temperature: float) -> ptr from "torch_std_helper"
+
+# Gradient / autograd
+extern fn torch_std_requires_grad(t: ptr) -> int from "torch_std_helper"
+extern fn torch_std_set_requires_grad(t: ptr, requires_grad: int) -> ptr from "torch_std_helper"
+extern fn torch_std_has_grad(t: ptr) -> int from "torch_std_helper"
+extern fn torch_std_grad(t: ptr) -> ptr from "torch_std_helper"
+extern fn torch_std_backward(loss: ptr) -> void from "torch_std_helper"
+extern fn torch_std_backward_retain_graph(loss: ptr) -> void from "torch_std_helper"
+extern fn torch_std_zero_grad(params: ptr, n: int) -> void from "torch_std_helper"
+extern fn torch_std_clip_grad_norm(params: ptr, n: int, max_norm: float) -> void from "torch_std_helper"
+
+# Optimizers (SGD / Adam / AdamW)
+extern fn torch_std_sgd_create(params: ptr, n: int, lr: float, momentum: float,
+                                weight_decay: float) -> ptr from "torch_std_helper"
+extern fn torch_std_adam_create(params: ptr, n: int, lr: float, beta1: float,
+                                 beta2: float, eps: float, weight_decay: float) -> ptr from "torch_std_helper"
+extern fn torch_std_adamw_create(params: ptr, n: int, lr: float, beta1: float,
+                                  beta2: float, eps: float, weight_decay: float) -> ptr from "torch_std_helper"
+extern fn torch_std_optimizer_step(optim: ptr) -> void from "torch_std_helper"
+extern fn torch_std_optimizer_zero_grad(optim: ptr) -> void from "torch_std_helper"
+extern fn torch_std_optimizer_destroy(optim: ptr) -> void from "torch_std_helper"
+
+# ControlNet
+extern fn torch_std_controlnet_forward(weight_ptrs: ptr, n_weights: int, x: ptr,
+                                        timestep: ptr, text_emb: ptr,
+                                        hint: ptr, num_hint_channels: int) -> ptr from "torch_std_helper"
+extern fn torch_std_controlnet_apply(unet_output: ptr, control_features: ptr,
+                                      strength: float) -> ptr from "torch_std_helper"
+
+# LoRA
+extern fn torch_std_lora_apply(weight: ptr, lora_down: ptr, lora_up: ptr,
+                                scale: float) -> ptr from "torch_std_helper"
+extern fn torch_std_lora_merge_into(model_dict: ptr, lora_dict: ptr,
+                                     prefix: str, scale: float) -> int from "torch_std_helper"
+
+# Normalization layers (batch norm)
+extern fn torch_std_batch_norm1d(input: ptr, weight: ptr, bias: ptr,
+                                  running_mean: ptr, running_var: ptr,
+                                  training: int, momentum: float,
+                                  eps: float) -> ptr from "torch_std_helper"
+
+# SD UNet forward
+extern fn torch_std_sd_unet_forward(wdict: ptr, x: ptr, timestep: ptr,
+                                     context: ptr, y: ptr, guidance: ptr,
+                                     num_tokens: int) -> ptr from "torch_std_helper"
+
+# Flow matching
+extern fn torch_std_fm_sigmas(steps: int, sigma_min: float, sigma_max: float) -> ptr from "torch_std_helper"
+
+# Save/load state dict
+extern fn torch_std_save_state_dict(module: ptr, path: str) -> void from "torch_std_helper"

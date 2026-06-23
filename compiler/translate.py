@@ -104,6 +104,23 @@ def translate_aug_assign(node):
     return "(void)"
 
 
+def has_continue(stmts):
+    """Check if a list of statements contains continue (recursively into if bodies)."""
+    for s in stmts:
+        if isinstance(s, ast.Continue):
+            return True
+        if isinstance(s, ast.If):
+            if has_continue(s.body) or has_continue(s.orelse):
+                return True
+        if isinstance(s, ast.For):
+            if has_continue(s.body):
+                return True
+        if isinstance(s, ast.While):
+            if has_continue(s.body):
+                return True
+    return False
+
+
 def translate_type(py_type):
     if py_type.startswith("list[") or py_type == "list":
         return "void*"
@@ -205,9 +222,30 @@ def translate_block(stmts):
         elif isinstance(s, ast.While):
             test = translate_expr(s.test)
             body = translate_block(s.body)
-            exprs.append(f"(let loop () (if {test} (begin {' '.join(body)} (loop))))")
+            body_str = wrap_body_with_continue(body, s.body)
+            exprs.append(f"(let loop () (if {test} (begin {body_str} (loop))))")
+        elif isinstance(s, ast.For):
+            target = s.target.id if isinstance(s.target, ast.Name) else "i"
+            if isinstance(s.iter, ast.Call) and hasattr(s.iter.func, 'id') and s.iter.func.id == 'range':
+                rargs = s.iter.args
+                if len(rargs) == 1:
+                    n = translate_expr(rargs[0])
+                    body_parts = translate_block(s.body)
+                    body_str = wrap_body_with_continue(body_parts, s.body)
+                    exprs.append(
+                        f"(do (({target} 0 (+ {target} 1))) ((>= {target} {n})) {body_str})")
+                else:
+                    exprs.append(f";; for range with {len(rargs)} args")
+            else:
+                exprs.append(f";; for loop (untranslated)")
         elif isinstance(s, ast.Call):
             exprs.append(translate_expr(s))
+        elif isinstance(s, ast.Pass):
+            pass  # no-op
+        elif isinstance(s, ast.Global):
+            pass  # Python global declaration → Scheme define handles this
+        elif isinstance(s, ast.Continue):
+            exprs.append("(continue)")  # will be wrapped in call/cc
         else:
             exprs.append(f";; {type(s).__name__}: {ast.dump(s)}")
     return exprs
@@ -289,6 +327,10 @@ def translate_expr(node):
             elif isinstance(ops[0], ast.NotEq):
                 return f"(not (= {left} {right}))"
         return f"(and {left} ... cmp)"
+    elif isinstance(node, ast.BoolOp):
+        op = "or" if isinstance(node.op, ast.Or) else "and"
+        values = [translate_expr(v) for v in node.values]
+        return f"({op} {' '.join(values)})"
     elif isinstance(node, ast.Call):
         func = node.func
         args = [translate_expr(a) for a in node.args]
@@ -390,6 +432,14 @@ def translate_expr(node):
         return "(void)"
 
 
+def wrap_body_with_continue(body_parts, stmts):
+    """If the loop body contains continue, wrap in call/cc for skip-to-next-iteration."""
+    if has_continue(stmts):
+        body_str = " ".join(body_parts)
+        return f"(call/cc (lambda (continue) {body_str}))"
+    return " ".join(body_parts)
+
+
 def translate_function(node, source_file=""):
     name = f"static_{node.name}"
     args = [arg.arg for arg in node.args.args]
@@ -398,6 +448,11 @@ def translate_function(node, source_file=""):
     si = 0
     lineno = getattr(node, 'lineno', 0)
     comment = f";; {source_file}:{lineno} def {node.name}()"
+    # Skip docstring (first string literal expression in body)
+    if (si < len(node.body) and isinstance(node.body[si], ast.Expr)
+            and isinstance(node.body[si].value, ast.Constant)
+            and isinstance(node.body[si].value.value, str)):
+        si += 1
     while si < len(node.body):
         stmt = node.body[si]
         if isinstance(stmt, ast.FunctionDef):
@@ -451,7 +506,7 @@ def translate_function(node, source_file=""):
                 if len(rargs) == 1:
                     n = translate_expr(rargs[0])
                     body_parts = translate_block(stmt.body)
-                    body_str = " ".join(body_parts)
+                    body_str = wrap_body_with_continue(body_parts, stmt.body)
                     body_exprs.append(
                         f"(do (({target} 0 (+ {target} 1))) ((>= {target} {n})) {body_str})")
                 else:
@@ -461,10 +516,14 @@ def translate_function(node, source_file=""):
         elif isinstance(stmt, ast.While):
             test = translate_expr(stmt.test)
             body_parts = translate_block(stmt.body)
-            body_str = " ".join(body_parts)
+            body_str = wrap_body_with_continue(body_parts, stmt.body)
             body_exprs.append(f"(let loop () (if {test} (begin {body_str} (loop))))")
         elif isinstance(stmt, ast.Expr):
             body_exprs.append(translate_expr(stmt.value))
+        elif isinstance(stmt, ast.Global):
+            pass  # Python global declaration; Scheme define handles scope
+        elif isinstance(stmt, ast.Pass):
+            pass  # no-op
         else:
             body_exprs.append(f";; {type(stmt).__name__}: {ast.dump(stmt)}")
         si += 1
@@ -593,8 +652,15 @@ def translate_method_body(node, class_name):
     """Translate class method body — handles self.field patterns."""
     # Track field → class mappings (from constructor calls in __init__)
     field_classes = {}  # field_name -> class_name
+    start_idx = 0
+    # Skip docstring
+    if (len(node.body) > start_idx and isinstance(node.body[start_idx], ast.Expr)
+            and isinstance(node.body[start_idx].value, ast.Constant)
+            and isinstance(node.body[start_idx].value.value, str)):
+        start_idx = 1
     if node.name == '__init__':
-        for s in node.body:
+        for s in node.body[start_idx:]:
+
             if isinstance(s, (ast.Assign, ast.AnnAssign)):
                 val = None
                 target_name = None
@@ -613,7 +679,7 @@ def translate_method_body(node, class_name):
                         field_classes[target_name] = ctor_name
     
     body_parts = []
-    for s in node.body:
+    for s in node.body[start_idx:]:
         if isinstance(s, ast.FunctionDef):
             body_parts.append(translate_function(s))
             continue

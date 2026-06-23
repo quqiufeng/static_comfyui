@@ -247,4 +247,22 @@ Phase 14: Utils     ██████████  3/3
 **StaticPy 侧（28 模块，~3100 行）：** ops (255), nn (150), attention (120), flux_attention (70), clip_tokenizer (55), clip_model (55), sd1_clip (110), sdxl_clip (80), sd_unet (120), sd_vae (70), sd_samplers (230), sd_samplers_extras (180), sd_pipeline (370), sd_controlnet (60), sd_lora (70), sd_flux (110), sd_t5 (50), sd_embed (60), sd_utils (150), sd_clip_vision (90), sd_core (170), sd_models (140), sd_loha_lokr (130), sd_t2i_adapter (80), sd_flux_controlnet (100), sd_long_clip (70), sd_t5_config (100), sd_sd3 (120)
 **translate.py 增强：** +120 行 — ClassDef/Dict/Module-level/function reference tracking
 **build.sh 修复：** 拼接所有源文件后单次 translate.py 调用（避免 extern fn 跨文件丢失）
-**编译状态：** 2054 行 Scheme, 359 顶层面, 164 函数, 116 extern FFI, 81 模块级定义
+**编译状态（最终）：** 1519 行 Scheme, 417 顶层面, 172 extern FFI（100% 对齐 C++ 头文件）, 164 函数, 0 警告
+
+## 代码复盘优化（2026-06-23）
+
+### 修复的严重 Bug
+1. **`or`/`and` 条件编译为 `(void)`** — `if x == null or y == null:` 变成 `(if (void) ...)` 条件永远为真。影响 5 个模块（sd_core, sd_loha_lokr, sd_pipeline, sd_samplers_extras, sd_utils）。**修复**: 添加 `ast.BoolOp` → `(or ...)` / `(and ...)`。
+2. **`continue` 编译为注释** — 循环体不跳转，继续执行后续代码。影响 sd_loha_lokr, sd_utils。**修复**: 包裹 `call/cc` + `(continue)` 跳转到下一个迭代。
+
+### 修复的中等 Bug
+3. **缺少 58 个 extern fn 声明** — `torch_std_randn`, `torch_std_jit_forward`, `torch_std_clamp` 等无 extern fn → 编译为 `static_` 前缀 → 运行时找不到。已全部补全，现在 172 个 extern fn 100% 对齐 C++ 头文件。
+4. **GC guardian 从不 drain** — C 数组（float/int/ptr）内存泄漏。**修复**: `collect-rendezvous` 自动 drain guardian。
+5. **`sleep` 忙等待** — 吃满 CPU 核心。**修复**: 使用 `nanosleep` 系统调用。
+6. **`make_int_array` 用 unsigned-64** — 负维度会导致溢出。**修复**: 改为 `signed-64`。
+
+### 清理项
+7. Docstrings 不再输出为 Scheme 字符串字面量（节省 571 行噪音）
+8. `global` 声明不再产生 `;; Global:` 注释
+9. `pass` 正确编译为空操作
+10. `exit_program` 移除死代码
