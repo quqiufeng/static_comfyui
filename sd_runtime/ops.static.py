@@ -212,3 +212,14 @@ extern fn torch_std_sdxl_unet_forward(
     os_h: float, os_w: float,
     crop_t: float, crop_l: float,
     ts_h: float, ts_w: float) -> ptr from "torch_std_helper"
+
+# ==============================================================================
+# VAE JIT encode/decode
+# ==============================================================================
+
+extern fn torch_std_vae_encode(vae: ptr, image: ptr) -> ptr from "torch_std_helper"
+extern fn torch_std_vae_decode(vae: ptr, latent: ptr) -> ptr from "torch_std_helper"
+extern fn torch_std_vae_encode_tiled(vae: ptr, image: ptr,
+                                      tile_size: int, overlap: int) -> ptr from "torch_std_helper"
+extern fn torch_std_vae_decode_tiled(vae: ptr, latent: ptr,
+                                      tile_size: int, overlap: int) -> ptr from "torch_std_helper"

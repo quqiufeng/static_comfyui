@@ -79,15 +79,15 @@ libtorch_std_helper 已有 SD1.5/SDXL UNet forward，StaticPy 侧做权重管理
 
 ## Phase 5: VAE
 
-对应 `comfyui_ref/comfy/ldm/modules/diffusionmodules/model.py`。
-libtorch_std_helper 已有 VAE tiled encode/decode。
+使用 JIT 导出的 TorchScript VAE 模块（encoder+quant_conv → post_quant_conv+decoder），
+通过 C++ `torch_std_vae_encode/decode` (已含 0.18215 scaling) 和 tiled 变体调用。
 
 | 状态 | 模块 | 源文件 | 行数 | 策略 |
 |------|------|--------|------|------|
-| [ ] | **Encoder** | `model.py` | 250 | down blocks + mid block |
-| [ ] | **Decoder** | `model.py` | 250 | mid block + up blocks |
-| [ ] | **VAE tiling** | model_management 引用 | — | 调用 `torch_std_vae_*_tiled` |
-| [ ] | **TAESD** | `taesd/taesd.py, taesd/taehv.py` | — | 轻量 VAE |
+| [x] | **VAE Encode (非分块)** | `sd_runtime/sd_vae.static.py` + C++ | 35 | JIT module forward + 0.18215 scale |
+| [x] | **VAE Decode (非分块)** | `sd_runtime/sd_vae.static.py` + C++ | 35 | JIT module forward + /0.18215 scale |
+| [x] | **VAE Tiled Encode** | C++ `torch_std_vae_encode_tiled` | 60 | tiled_scale + weight blending |
+| [x] | **VAE Tiled Decode** | C++ `torch_std_vae_decode_tiled` | 60 | tiled_scale + weight blending |
 
 ## Phase 6: K-Diffusion Samplers
 
@@ -216,7 +216,7 @@ Phase 1: 张量基元   ██████████  4/4
 Phase 2: Attention  █████░░░░░  5/7
 Phase 3: CLIP       █████░░░░░  4/6
 Phase 4: SD UNet    ██████████  4/4
-Phase 5: VAE        ░░░░░░░░░░  0/4
+Phase 5: VAE        ██████████  4/4
 Phase 6: K-Samplers ░░░░░░░░░░  0/9
 Phase 7: Comfy Samplers ░░░░░░  0/5
 Phase 8: SD Pipe    ░░░░░░░░░░  0/5
