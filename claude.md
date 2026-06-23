@@ -1,5 +1,7 @@
 # static_comfyui — 开发最佳实践（2026-06-23 复盘总结）
 
+> **StaticPy: Compile ML. Ship ELF. No Python.**
+
 ## 0. 项目定位
 
 **面对 AI 的 ML 开发语言和运行时。**
