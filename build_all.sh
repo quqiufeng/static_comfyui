@@ -39,6 +39,13 @@ FILES=" \
   sd_runtime/sd_flux_controlnet.static.py \
   sd_runtime/sd_long_clip.static.py \
   sd_runtime/sd_t5_config.static.py \
-  sd_runtime/sd_sd3.static.py"
+  sd_runtime/sd_sd3.static.py \
+  sd_runtime/sd_gligen.static.py \
+  sd_runtime/sd_ip_adapter.static.py \
+  sd_runtime/sd_stable_cascade.static.py \
+  sd_runtime/sd_pixart.static.py \
+  sd_runtime/sd_hunyuan_video.static.py \
+  sd_runtime/sd_wan_video.static.py \
+  sd_runtime/sd_cosmos.static.py"
 
 ./build.sh $FILES && ./deliver.sh
