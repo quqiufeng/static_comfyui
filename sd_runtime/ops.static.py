@@ -162,3 +162,35 @@ extern fn torch_std_group_norm(input: ptr, weight: ptr, bias: ptr, num_groups: i
 
 extern fn torch_std_mul_scalar(t: ptr, s: float) -> ptr from "torch_std_helper"
 extern fn torch_std_add_scalar(t: ptr, s: float) -> ptr from "torch_std_helper"
+
+# ==============================================================================
+# CLIP Tokenizer (libtorch_std_helper C++ BPE)
+# ==============================================================================
+
+extern fn torch_std_clip_tokenizer_create(vocab_path: str, merges_path: str) -> ptr from "torch_std_helper"
+extern fn torch_std_clip_tokenizer_encode(tokenizer: ptr, text: str) -> ptr from "torch_std_helper"
+extern fn torch_std_clip_tokenizer_free(tokenizer: ptr) -> void from "torch_std_helper"
+
+# ==============================================================================
+# CLIP Text Encoder (JIT module forward)
+# ==============================================================================
+
+extern fn torch_std_clip_text_forward(clip_module: ptr, token_ids: ptr, cast_to_f16: int) -> ptr from "torch_std_helper"
+extern fn torch_std_sdxl_dual_clip(clip1: ptr, clip2: ptr, token_ids: ptr) -> ptr from "torch_std_helper"
+
+# ==============================================================================
+# JIT Module Loader
+# ==============================================================================
+
+extern fn torch_std_jit_load(path: str) -> ptr from "torch_std_helper"
+
+# ==============================================================================
+# Safetensors loader
+# ==============================================================================
+
+extern fn torch_std_safetensors_load(path: str) -> ptr from "torch_std_helper"
+extern fn torch_std_safetensors_count(sd: ptr) -> int from "torch_std_helper"
+extern fn torch_std_safetensors_name(sd: ptr, idx: int) -> str from "torch_std_helper"
+extern fn torch_std_safetensors_tensor(sd: ptr, idx: int) -> ptr from "torch_std_helper"
+extern fn torch_std_safetensors_get_tensor_by_name(sd: ptr, name: str) -> ptr from "torch_std_helper"
+extern fn torch_std_safetensors_free(sd: ptr) -> void from "torch_std_helper"
