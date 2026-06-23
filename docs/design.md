@@ -386,3 +386,62 @@ scp -r build_out/deploy/ target:/app/
 2. 同目录的 `lib/` 包含全部 PyTorch/CUDA 运行时 .so（`libtorch.so`, `libc10.so`, `libcudart.so.12`, `libcublas.so.12`, `libcudnn.so.9` 等）
 3. ELF 的 RPATH 设置为 `$ORIGIN/lib`，运行时自动找到这些 .so
 4. 目标机器只需 NVIDIA 驱动（供 CUDA 运行时调用），无需安装 Python 或 PyTorch
+
+---
+
+## 为什么这比 pip/conda 部署好太多
+
+### 传统 Python 方案
+
+```bash
+# 部署一台新机器，第一步就疯了：
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+# ↑ 3GB 下载，30 分钟，还得祈祷 CUDA 版本不冲突
+
+pip install diffusers transformers accelerate pillow
+# ↑ 又 10 分钟，中间可能 glibc 版本不够新编译失败
+
+# 建个虚拟环境，装错了还得重来
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+# ↑ 光解决 torch+cuda 版本组合就能折磨半天
+
+# 更别提：
+#   - CUDA 驱动版本 vs CUDA toolkit 版本 mismatch
+#   - glibc 版本不够 → "undefined symbol: __cxa_thread_atexit_impl"
+#   - 两个项目需要不同 PyTorch 版本 → 两个 venv
+#   - pip 跑一半网络断了 → 重来
+#   - sudo pip install 污染系统 Python
+```
+
+### 本方案
+
+```bash
+# 部署（唯一命令）：
+tar xzf deploy.tar.gz
+./deploy/sd_generate.elf
+```
+
+**有显卡驱动就能跑。没有 Python，没有 pip，没有 venv，没有 conda，没有 glibc 版本战争，没有 CUDA toolkit 安装，没有依赖地狱。**
+
+### 对比表
+
+| 维度 | Python (pip/conda) | 本方案 (StaticPy → ELF) |
+|------|-------------------|-------------------------|
+| 部署步骤 | 装 Python → 建 venv → pip install → 试错 → 修冲突 → 终于能跑 | 解压 → 跑 |
+| 环境隔离 | venv/conda（额外学习成本） | 不需要，OS 级隔离 |
+| CUDA 版本 | 必须匹配 PyTorch 版本 | 构建时固定，部署时只要驱动兼容 |
+| glibc 版本 | 容易冲突导致编译/运行失败 | 构建时固定，同 OS 架构直接跑 |
+| 多项目共存 | 每个项目一个 venv（几 GB 重复） | 每个项目一个 deploy/ 目录 |
+| 启动时间 | `import torch` 就要 ~1 秒 | Chez Scheme AOT 原生码，毫秒级 |
+| 跨机器部署 | 每台都要装一模一样的 Python 环境 | 解压即用 |
+| 网络依赖 | 部署时需要装 PyTorch（3GB 下载） | 不需要（部署包自包含） |
+| 升级代价 | `pip install --upgrade` 可能打破兼容性 | 构建机上重新 `./deliver.sh` |
+| 依赖组成 | pip 自动拉取，但可能拉错版本 | DT_NEEDED 自动解析，固定版本 |
+| "它在我机器上能跑" | 经典问题（环境不一样） | **永远不会出现**——环境就在包里 |
+
+### 一句话
+
+> **pip 解决的是"怎么装"的问题，但引出了"装对了没有"的问题。**
+> StaticPy 编译到 ELF 的方案根本不走这条路——编译期把所有依赖都固定好，部署只是文件拷贝。
