@@ -470,3 +470,9 @@ extern fn torch_std_cosmos_forward(
     weight_ptrs: ptr, n_weights: int,
     x: ptr, timestep: ptr, text_emb: ptr,
     n_frames: int, height: int, width: int) -> ptr from "torch_std_helper"
+
+# SD3 MMDiT
+extern fn torch_std_sd3_mmdit_forward(
+    sd_dict: ptr,
+    x: ptr, timestep: ptr, y: ptr,
+    cfg_scale: float) -> ptr from "torch_std_helper"

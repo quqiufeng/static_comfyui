@@ -14,7 +14,7 @@ from sd_utils import *
 
 
 # 全局状态
-_sd3_jit: ptr
+_sd3_dict: ptr
 _sd3_t5: ptr
 _sd3_clip_l: ptr
 _sd3_clip_g: ptr
@@ -26,8 +26,8 @@ _sd3_clip_g: ptr
 
 def sd3_init(jit_model_path: str) -> void:
     """Initialize SD3 model and text encoders."""
-    global _sd3_jit
-    _sd3_jit = torch_std_jit_load(jit_model_path)
+    global _sd3_dict
+    _sd3_dict = torch_std_safetensors_load(jit_model_path)
 
 
 def sd3_encode_prompt(text: str) -> ptr:
@@ -59,17 +59,12 @@ def sd3_encode_prompt(text: str) -> ptr:
 
 def sd3_forward(img: ptr, txt: ptr, timestep: ptr,
                 guidance: float) -> ptr:
-    """SD3 MMDiT forward.
+    """SD3 MMDiT forward via libTorch C++.
     
-    img: (1, 16*H, W) latent patches
-    txt: (1, L, 4096) T5 + CLIP text embeddings
-    timestep: (1,) timestep tensor
-    guidance: CFG scale
-    
-    Returns: (1, 16*H, W) predicted noise/velocity
+    Uses torch_std_sd3_mmdit_forward with safetensors weight dict.
     """
-    global _sd3_jit
-    return torch_std_jit_forward(_sd3_jit, img, txt, timestep)
+    global _sd3_dict
+    return torch_std_sd3_mmdit_forward(_sd3_dict, img, timestep, txt, guidance)
 
 
 def sd3_generate(prompt: str, steps: int, cfg: float, seed: int,
@@ -107,5 +102,4 @@ def sd3_generate(prompt: str, steps: int, cfg: float, seed: int,
 
 
 def sd3_free() -> void:
-    global _sd3_jit
-    torch_std_jit_module_delete(_sd3_jit)
+    pass
