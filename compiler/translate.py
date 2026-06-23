@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """StaticPy 翻译器 — Python 静态子集 → Scheme S-表达式
-语法: Python + 类型标注 (int/float/bool/list[T])
-语义: int/float = 值类型（Chez fixnum/flonum），非 PyObject*
+值类型: int=fixnum, float=flonum, bool=boolean
+张量: ptr=void* (由 C++ runtime 管理的 GPU/CPU 张量指针)
+数组: list[float]=float* (C float 数组, GC 自动回收)
+extern fn: 声明 C++ 运行时函数, 编译为 foreign-procedure
 """
 import sys
 import os
@@ -9,22 +11,17 @@ import re
 import json
 import ast
 
-# 定位 PyTorch 库目录（用于加载 libstaticpy_torch 依赖）
-TORCH_LIB = None
-try:
-    import torch
-    TORCH_LIB = os.path.join(torch.__path__[0], 'lib')
-except Exception:
-    TORCH_LIB = os.environ.get('TORCH_LIB', '/data/venv/lib/python3.12/site-packages/torch/lib')
-
 # ====== C 类型映射 ======
 TYPE_MAP = {
     "int": "int",
+    "int32": "int",
+    "int64": "int",
     "float": "double",
     "double": "double",
     "bool": "boolean",
     "str": "string",
     "ptr": "void*",
+    "void": "void",
 }
 
 # ====== 外部 FFI 函数注册表 ======
@@ -43,23 +40,18 @@ PRELUDE_FUNCTIONS = {
     "float_array_free", "make_ptr_array", "ptr_array_set", "ptr_array_ref",
     "make_int_array", "int_array_set", "int_array_ref",
     "make_dict", "dict_get", "dict_set",
-    "file_open", "file_close", "file_read_all", "file_read_floats", "file_write", "file_exists",
-    "http_get", "http_get_simple",
-    "parse_json", "json_dumps", "now_ts", "format_time",
-    "csv_parse", "csv_encode",
+    "file_open", "file_close", "file_read_all", "file_read_floats", "file_write",
+    "file_exists", "http_get_simple",
+    "parse_json",
     "str_split", "str_join", "str_trim", "str_lower", "str_upper",
     "str_replace", "str_contains", "str_starts_with", "str_ends_with",
     "os_list_dir", "os_getenv", "os_getcwd", "os_file_size",
     "os_file_exists", "os_move_file", "os_delete_file",
     "os_mkdir", "os_rmdir", "os_shell", "os_cwd",
-    "re_match", "re_search",
-    "random_seed", "random_int", "random_float", "random_range",
-    "string_to_float", "string_to_int", "list_length", "list_ref", "vec_ref",
-    "cuda_gemm", "cuda_gemm_tn", "cuda_axpy", "cuda_dot", "cuda_copy",
-    "sleep", "clock",
-    "argv", "exit_program",
-    "pi", "e",
+    "string_to_float", "string_to_int",
+    "sleep", "clock", "exit_program",
 } | MATH_FUNCTIONS
+
 
 def parse_extern_functions(code):
     """解析 extern fn 声明"""
@@ -67,7 +59,6 @@ def parse_extern_functions(code):
     for m in re.finditer(pattern, code, re.DOTALL):
         name = m.group(1)
         if name in PRELUDE_FUNCTIONS:
-            # Scheme 预置函数，不走 FFI
             continue
         params_str = m.group(2)
         ret = m.group(3)
@@ -85,7 +76,6 @@ def parse_extern_functions(code):
             "params": params,
             "lib": lib,
         }
-    # 移除 extern 行（需要 DOTALL 匹配多行参数列表，但排除注释中的 extern fn）
     code = re.sub(r'(?m)^\s*extern\s+fn\s+.*?from\s+"\w+"', "", code, flags=re.DOTALL)
     return code
 
@@ -95,19 +85,18 @@ AUGOP_MAP = {
     "FloorDiv": "quotient", "Mod": "remainder",
 }
 
+
 def translate_aug_assign(node):
-    """翻译 AugAssign (i += 1, s *= 2 等)"""
     target = node.target.id if isinstance(node.target, ast.Name) else None
     op = type(node.op).__name__
     val = translate_expr(node.value)
     s_op = AUGOP_MAP.get(op, "+")
     if target:
         return f"(set! {target} ({s_op} {target} {val}))"
-    return f"(void)"
+    return "(void)"
+
 
 def translate_type(py_type):
-    """Python 类型 → C 类型（用于 FFI）"""
-    # list[float] → void* (double*), list[int] → void* (int64_t*)
     if py_type.startswith("list[") or py_type == "list":
         return "void*"
     base = py_type.replace("[]", "")
@@ -115,13 +104,10 @@ def translate_type(py_type):
 
 
 def translate_stmt(node, bindings=None):
-    """翻译一条语句
-    bindings: 收集 let 绑定，用于在函数级别统一包装
-    """
     if bindings is None:
         bindings = []
     if isinstance(node, ast.FunctionDef):
-        return translate_function(node, bindings)
+        return translate_function(node)
     elif isinstance(node, ast.Return):
         val = translate_expr(node.value) if node.value else "#f"
         return val
@@ -159,7 +145,6 @@ def translate_stmt(node, bindings=None):
         target = node.target.id if isinstance(node.target, ast.Name) else "i"
         iter_expr = node.iter
         body = "\n".join(translate_stmt(s) for s in node.body)
-        # for i in range(n): → 用 do 循环
         if isinstance(iter_expr, ast.Call) and hasattr(iter_expr.func, 'id') and iter_expr.func.id == 'range':
             args = iter_expr.args
             if len(args) == 1:
@@ -171,22 +156,12 @@ def translate_stmt(node, bindings=None):
                 return f"  (do (({target} {start} (+ {target} 1))) ((>= {target} {end}))\n{body})"
         return f"  ;; for loop (untranslated)"
     elif isinstance(node, ast.AugAssign):
-        target = node.target.id if isinstance(node.target, ast.Name) else "x"
-        val = translate_expr(node.value)
-        op = node.op
-        if isinstance(op, ast.Add):
-            return f"  (set! {target} (+ {target} {val}))"
-        elif isinstance(op, ast.Sub):
-            return f"  (set! {target} (- {target} {val}))"
-        elif isinstance(op, ast.Mult):
-            return f"  (set! {target} (* {target} {val}))"
-        return f"  ;; aug-assign"
+        return translate_aug_assign(node)
     else:
         return f"  ;; {type(node).__name__}: {ast.dump(node)}"
 
 
 def translate_block(stmts):
-    """翻译一个语句块（if/while 体），正确处理 set! 赋值"""
     exprs = []
     for s in stmts:
         if isinstance(s, (ast.Assign, ast.AnnAssign)):
@@ -211,12 +186,12 @@ def translate_block(stmts):
         elif isinstance(s, ast.AugAssign):
             exprs.append(translate_aug_assign(s))
         elif isinstance(s, ast.If):
-            # 嵌套 if
             test = translate_expr(s.test)
             inner_then = translate_block(s.body)
             if s.orelse:
                 inner_else = translate_block(s.orelse)
-                exprs.append(f"(if {test}\n        (begin {' '.join(inner_then)})\n        (begin {' '.join(inner_else)}))")
+                exprs.append(
+                    f"(if {test}\n        (begin {' '.join(inner_then)})\n        (begin {' '.join(inner_else)}))")
             else:
                 exprs.append(f"(if {test}\n        (begin {' '.join(inner_then)}))")
         elif isinstance(s, ast.While):
@@ -232,27 +207,16 @@ def translate_block(stmts):
 
 WARNINGS = []
 
+
 def warn(msg, node=None):
-    """收集警告"""
     if node and hasattr(node, 'lineno'):
         lineno = getattr(node, 'lineno', '?')
-        WARNINGS.append(f"  ⚠ {msg} at line {lineno}")
+        WARNINGS.append(f"  ! {msg} at line {lineno}")
     else:
-        WARNINGS.append(f"  ⚠ {msg}")
+        WARNINGS.append(f"  ! {msg}")
 
-def format_loc(node):
-    """返回源码位置字符串"""
-    if node and hasattr(node, 'lineno'):
-        return f" (line {node.lineno})"
-    return ""
-
-def gen_error(node, msg):
-    """生成带源码位置的错误表达式"""
-    loc = format_loc(node)
-    return f"(error \"StaticPy:{loc} {msg}\")"
 
 def translate_expr(node):
-    """翻译一个表达式"""
     if node is None:
         return "#f"
     if isinstance(node, ast.Constant):
@@ -277,7 +241,6 @@ def translate_expr(node):
         left = translate_expr(node.left)
         right = translate_expr(node.right)
         if isinstance(node.op, ast.Add):
-            # String concatenation vs numeric addition
             if (isinstance(node.left, ast.Constant) and isinstance(node.left.value, str)) or \
                (isinstance(node.right, ast.Constant) and isinstance(node.right.value, str)):
                 return f"(string-append {left} {right})"
@@ -319,82 +282,29 @@ def translate_expr(node):
         args = [translate_expr(a) for a in node.args]
         if isinstance(func, ast.Name):
             name = func.id
-            # 外部 FFI 函数
             if name in EXTERN_FUNCTIONS:
-                ffi = EXTERN_FUNCTIONS[name]
                 return f"({name} {' '.join(args)})"
-            # 内置函数
             if name == "print":
                 return f"(print {' '.join(args)})"
             if name == "len":
                 return f"(vector-length {args[0]})" if args else "0"
             if name == "range":
-                return f"({args[0]})"  # simplified
+                return f"({args[0]})"
             if name == "int":
                 return f"(exact (round {args[0]}))" if args else "0"
             if name == "float":
                 return f"(inexact {args[0]})" if args else "0.0"
-            # 预置函数（Scheme 运行时，不走 FFI，无需 extern fn 声明）
             if name in PRELUDE_FUNCTIONS:
                 return f"({name} {' '.join(args)})"
-            # 用户自定义函数加 static_ 前缀
             return f"(static_{name} {' '.join(args)})"
         elif isinstance(func, ast.Attribute):
-            # np.dot / torch.matmul / la.svd 等
             obj = None
             if isinstance(func.value, ast.Name):
                 obj = func.value.id
-            if isinstance(func.value, ast.Attribute):
-                obj = translate_expr(func.value)
             if obj:
                 attr = func.attr
-                # numpy 兼容
-                if obj == "np":
-                    NUMPY_MAP = {
-                        "dot": "np-dot", "daxpy": "np-daxpy",
-                        "copy": "np-copy", "scal": "np-scal",
-                        "gemv": "np-gemv", "gemm": "np-gemm",
-                        "sum": "np-sum", "mean": "np-mean",
-                        "max": "np-max", "min": "np-min",
-                        "zeros": "np-zeros", "ones": "np-ones",
-                        "sqrt": "np-sqrt", "exp": "np-exp",
-                        "abs": "np-abs", "argmax": "np-argmax",
-                        "arange": "np-arange", "linspace": "np-linspace",
-                        "concatenate": "np-concatenate", "clip": "np-clip",
-                    }
-                if obj == "cuda":
-                    CUDA_MAP = {
-                        "gemm": "cuda-gemm",
-                    }
-                    mapped = CUDA_MAP.get(attr, attr)
-                    return f"({mapped} {' '.join(args)})"
-                    mapped = NUMPY_MAP.get(attr, attr)
-                    return f"({mapped} {' '.join(args)})"
-                # scipy.linalg 兼容
-                if obj == "la":
-                    LA_MAP = {
-                        "solve": "la-solve", "svd": "la-svd",
-                        "eigvals": "la-eigvals",
-                    }
-                    mapped = LA_MAP.get(attr, attr)
-                    return f"({mapped} {' '.join(args)})"
-                # PyTorch 兼容
-                if obj == "torch":
-                    TORCH_MAP = {
-                        "add": "torch-add", "mul": "torch-mul",
-                        "sub": "torch-sub", "matmul": "torch-matmul",
-                        "clone": "torch-clone", "reshape": "torch-reshape",
-                        "conv2d": "torch-conv2d",
-                    }
-                    mapped = TORCH_MAP.get(attr, attr)
-                    return f"({mapped} {' '.join(args)})"
-                # ML Runtime: 所有 ML 库的统一入口
-                # 用户写 ml.cublas_dgemm(...), ml.cudnn_conv_forward(...) 等
-                # 映射为 (ml_cublas_dgemm ...), (ml_cudnn_conv_forward ...)
-                # 这些函数由 static_stdlib.scm 定义（运行时按需 dlopen）
                 if obj == "ml":
                     return f"(ml_{attr} {' '.join(args)})"
-            # 普通属性访问
             return f"({ast.dump(func)} . {attr})"
         elif isinstance(func, ast.Attribute):
             obj = translate_expr(func.value)
@@ -402,13 +312,10 @@ def translate_expr(node):
             return f"({obj} {attr} {' '.join(args)})"
         return f"({ast.dump(func)} {' '.join(args)})"
     elif isinstance(node, ast.Dict):
-        # {"a": 1, "b": 2} → dict literal
         keys = [translate_expr(k) for k in node.keys]
         vals = [translate_expr(v) for v in node.values]
         if not keys:
             return "(make-dict)"
-        # Build dict by sequential set! in the caller
-        # Return a make-dict + series of dict-set! as a single expression
         items = []
         for k, v in zip(keys, vals):
             items.append(f"(dict-set! d {k} {v})")
@@ -417,24 +324,20 @@ def translate_expr(node):
         elems = [translate_expr(e) for e in node.elts]
         return f"(vector {' '.join(elems)})"
     elif isinstance(node, ast.Subscript):
-        # a[i] → float_array_ref (if int index) or dict_get (if str key)
         value = translate_expr(node.value)
         slc = node.slice
         idx = translate_expr(slc)
-        # If the index is a string literal, use dict-get
         if isinstance(slc, ast.Constant) and isinstance(slc.value, str):
             return f"(dict-get {value} {idx})"
         return f"(float_array_ref {value} {idx})"
     elif isinstance(node, ast.Attribute):
         return f"({translate_expr(node.value)} . {node.attr})"
     elif isinstance(node, ast.JoinedStr):
-        # f-string: f"hello {name}" → (string-append "hello " (format "~s" name))
         parts = []
         for val in node.values:
             if isinstance(val, ast.Constant):
                 parts.append(translate_expr(val))
             elif isinstance(val, ast.FormattedValue):
-                # {expr} → (format "~s" expr)
                 expr = translate_expr(val.value)
                 parts.append(f"(format \"~a\" {expr})")
             else:
@@ -451,21 +354,17 @@ def translate_expr(node):
         elts = [translate_expr(e) for e in node.elts]
         return f"(values {' '.join(elts)})"
     else:
-        return f"(void)"
+        return "(void)"
 
 
 def translate_function(node, source_file=""):
-    """翻译函数定义"""
     name = f"static_{node.name}"
     args = [arg.arg for arg in node.args.args]
-    
     all_bindings = []
     body_exprs = []
     si = 0
     lineno = getattr(node, 'lineno', 0)
-    # Source line mapping header
     comment = f";; {source_file}:{lineno} def {node.name}()"
-    
     while si < len(node.body):
         stmt = node.body[si]
         if isinstance(stmt, ast.FunctionDef):
@@ -500,18 +399,16 @@ def translate_function(node, source_file=""):
             test = translate_expr(stmt.test)
             then_exprs = translate_block(stmt.body)
             else_body = stmt.orelse
-            
             if else_body:
                 else_exprs = translate_block(else_body)
-                body_exprs.append(f"(if {test}\n    (begin {' '.join(then_exprs)})\n    (begin {' '.join(else_exprs)}))")
+                body_exprs.append(
+                    f"(if {test}\n    (begin {' '.join(then_exprs)})\n    (begin {' '.join(else_exprs)}))")
             elif (si + 1 < len(node.body) and isinstance(node.body[si + 1], ast.Return)
                   and len(stmt.body) > 0 and isinstance(stmt.body[-1], ast.Return)):
-                # 优化: if cond: return a\nreturn b  →  (if cond a b)
-                # 仅在 if 体也以 return 结尾时优化，否则 return 是公共尾路径
                 next_stmt = node.body[si + 1]
                 next_val = translate_expr(next_stmt.value) if next_stmt.value else "#f"
                 body_exprs.append(f"(if {test}\n    (begin {' '.join(then_exprs)})\n    {next_val})")
-                si += 1  # 跳过下一个 return
+                si += 1
             else:
                 body_exprs.append(f"(if {test}\n    (begin {' '.join(then_exprs)}))")
         elif isinstance(stmt, ast.For):
@@ -522,7 +419,8 @@ def translate_function(node, source_file=""):
                     n = translate_expr(rargs[0])
                     body_parts = translate_block(stmt.body)
                     body_str = " ".join(body_parts)
-                    body_exprs.append(f"(do (({target} 0 (+ {target} 1))) ((>= {target} {n})) {body_str})")
+                    body_exprs.append(
+                        f"(do (({target} 0 (+ {target} 1))) ((>= {target} {n})) {body_str})")
                 else:
                     body_exprs.append(f";; for range with {len(rargs)} args")
             else:
@@ -537,14 +435,11 @@ def translate_function(node, source_file=""):
         else:
             body_exprs.append(f";; {type(stmt).__name__}: {ast.dump(stmt)}")
         si += 1
-    
-    # 生成函数体
     if len(body_exprs) == 1:
         body = f"  {body_exprs[0]}"
     else:
         exprs_str = "\n    ".join(body_exprs)
         body = f"  (begin\n    {exprs_str}\n  )"
-    
     return f"(define ({name} {' '.join(args)})\n{body})"
 
 
@@ -554,89 +449,43 @@ def generate_extern_ffi():
     loaded_libs = set()
     for name, info in EXTERN_FUNCTIONS.items():
         lib = info["lib"]
-        # 加载库（每种库只加载一次）
-        if lib == "openblas" and lib not in loaded_libs:
-            lines.append('(load-shared-object "libopenblas.so.0")')
-        elif lib == "lapack" and lib not in loaded_libs:
-            lines.append('(load-shared-object "liblapacke.so")')
-        elif lib == "xgboost" and lib not in loaded_libs:
-            lines.append('(load-shared-object "/data/venv/lib/python3.12/site-packages/xgboost/lib/libxgboost.so")')
-        elif lib == "cublas" and lib not in loaded_libs:
-            lines.append('(load-shared-object "libcublas.so.12")')
-        elif lib == "cudnn" and lib not in loaded_libs:
-            lines.append('(load-shared-object "libcudnn.so.9")')
-        elif lib == "onnxruntime" and lib not in loaded_libs:
-            lines.append('(load-shared-object "libonnxruntime.so")')
-        elif lib == "onnx_helper" and lib not in loaded_libs:
-            lines.append('(load-shared-object "/tmp/libonnx_helper.so")')
-        elif lib == "staticpy_torch" and lib not in loaded_libs:
-            lines.append(f'(load-shared-object "{TORCH_LIB}/libc10.so")')
-            lines.append(f'(load-shared-object "{TORCH_LIB}/libtorch_cpu.so")')
-            lines.append(f'(load-shared-object "{TORCH_LIB}/libtorch_cuda.so")')
-            lines.append(f'(load-shared-object "{TORCH_LIB}/libc10_cuda.so")')
-            lines.append('(load-shared-object "/tmp/libstaticpy_torch.so")')
-        elif lib == "dgemm_row" and lib not in loaded_libs:
-            lines.append('(load-shared-object "/tmp/libdgemm_row.so")')
+        if lib == "torch_std_helper" and lib not in loaded_libs:
+            lines.append('(load-shared-object "/opt/ReScheme/build/libtorch_std_helper.so")')
         elif lib == "dgemm_row" and lib not in loaded_libs:
             lines.append('(load-shared-object "/tmp/libdgemm_row.so")')
         loaded_libs.add(lib)
-        
-        # 构建参数类型列表
         param_types = []
         for pname, ptype in info["params"]:
             ct = translate_type(ptype)
             param_types.append(ct)
-        
-        # 返回类型
         ret_c = TYPE_MAP.get(info["ret"], "void")
-        
-        # 生成 foreign-procedure 声明
         types_str = " ".join(param_types)
         lines.append(f"(define {name}")
         lines.append(f"  (foreign-procedure \"{name}\" ({types_str}) {ret_c}))")
-    
     return "\n".join(lines)
 
 
 def main():
     code = sys.stdin.read()
-    
-    # 提取 extern fn 声明
     code = parse_extern_functions(code)
-    
-    # 使用 Python 的 ast 解析
     tree = ast.parse(code)
-    
-    # 生成 Scheme
     output_parts = []
-    
-    # extern FFI 声明
     ffi = generate_extern_ffi()
     if ffi:
         output_parts.append(";; extern FFI functions")
         output_parts.append(ffi)
         output_parts.append("")
-    
-    # Source filename for error messages
     source_filename = getattr(tree, 'source_file', '<input>')
     output_parts.append(f";; Source: {source_filename}")
     output_parts.append("")
-    
-    # 函数定义
     output_parts.append(";; StaticPy functions")
     for node in tree.body:
         if isinstance(node, ast.FunctionDef):
             output_parts.append(translate_function(node, source_filename))
-    
-    # 顶层表达式（调用 main）
     output_parts.append("")
     output_parts.append(";; Entry point")
     output_parts.append("(static_main)")
-    
-    # 输出 Scheme 代码
     print("\n".join(output_parts))
-    
-    # 输出警告
     if WARNINGS:
         print("\n;;=== WARNINGS ===")
         for w in WARNINGS:
