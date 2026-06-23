@@ -71,10 +71,14 @@ def sample_dpmpp_2m_loop(unet_fn, x, sigmas, text_emb_cond, text_emb_uncond, cfg
 def sample_ddim_loop(unet_fn, x, sigmas, text_emb_cond, text_emb_uncond, cfg):
     return sample_ddim(unet_fn, x, sigmas, text_emb_cond, text_emb_uncond, cfg)
 
+def sample_dpmpp_sde_loop(unet_fn, x, sigmas, text_emb_cond, text_emb_uncond, cfg):
+    return sample_dpmpp_sde(unet_fn, x, sigmas, text_emb_cond, text_emb_uncond, cfg)
+
 SAMPLER_FUNCTIONS = {
     "euler": sample_euler_loop,
     "euler_ancestral": sample_euler_ancestral_loop,
     "dpmpp_2m": sample_dpmpp_2m_loop,
+    "dpmpp_sde": sample_dpmpp_sde_loop,
     "ddim": sample_ddim_loop,
 }
 
@@ -90,9 +94,8 @@ class KSampler:
     sigma_min: float
     sigma_max: float
 
-    def __init__(self, steps: int = 20, sampler_name: str = "euler",
-                 scheduler_name: str = "karras",
-                 sigma_min: float = 0.03, sigma_max: float = 14.6):
+    def __init__(self, steps: int, sampler_name: str,
+                 scheduler_name: str, sigma_min: float, sigma_max: float):
         self.steps = steps
         self.sampler_name = sampler_name
         self.scheduler_name = scheduler_name
@@ -112,8 +115,8 @@ def sample(noise: ptr, steps: int, cfg: float,
            sampler_name: str, scheduler_name: str,
            unet_fn,
            text_emb_cond: ptr, text_emb_uncond: ptr,
-           sigma_min: float = 0.03, sigma_max: float = 14.6,
-           denoise: float = 1.0) -> ptr:
+           sigma_min: float, sigma_max: float,
+           denoise: float) -> ptr:
     """Top-level sampling. Supports partial denoise."""
     if denoise < 1.0:
         full_steps = int(steps / denoise)
@@ -192,29 +195,57 @@ class SD15Pipeline:
     clip
     vae
     unet_fn
+    lora_A: ptr
+    lora_B: ptr
+    lora_indices: ptr
+    n_lora: int
     
-    def __init__(self, sd_dict: ptr, clip, vae, unet_fn=None):
+    def __init__(self, sd_dict: ptr, clip, vae, unet_fn):
         """Initialize pipeline.
         
         sd_dict: safetensors dict for UNet weights
         clip: SD1.5 CLIP pipeline (sd1_clip.SD15ClipPipeline)
-        vae: VAE or TiledVAE (sd_vae module)
-        unet_fn: optional custom UNet wrapper (default: make_sd15_unet_fn)
+        vae: VAE module
+        unet_fn: UNet forward wrapper fn or null for auto
         """
         self.sd_dict = sd_dict
         self.clip = clip
         self.vae = vae
-        self.unet_fn = unet_fn if unet_fn else make_sd15_unet_fn(sd_dict)
+        if unet_fn:
+            self.unet_fn = unet_fn
+        else:
+            self.unet_fn = make_sd15_unet_fn(sd_dict)
+        self.lora_A = null
+        self.lora_B = null
+        self.lora_indices = null
+        self.n_lora = 0
+    
+    def load_lora(self, lora_dict: ptr, n_weights: int,
+                   max_lora: int) -> int:
+        """Load LoRA weights and match to UNet.
+        
+        Uses flat function API from sd_lora.
+        Returns: number of matched LoRA pairs
+        """
+        lora_init(n_weights, max_lora)
+        lora_load_from_dict(lora_dict)
+        n = lora_match()
+        if n > 0:
+            self.lora_A = lora_get_A()
+            self.lora_B = lora_get_B()
+            self.lora_indices = lora_get_indices()
+            self.n_lora = n
+        return n
     
     def encode_prompt(self, text: str) -> ptr:
         """Encode text prompt to embeddings.
         
         Returns: (1, 77, 768) float32 text embeddings
         """
-        return self.clip.encode(text)
+        return sd1_clip_encode(self.clip, text)
     
     def prepare_noise(self, batch_size: int, height: int, width: int,
-                       seed: int = 42) -> ptr:
+                       seed: int) -> ptr:
         """Generate initial random noise latent.
         
         Returns: (B, 4, H/8, W/8) float32 noise
@@ -222,7 +253,6 @@ class SD15Pipeline:
         torch_std_manual_seed(seed)
         latent_h = height // 8
         latent_w = width // 8
-        # Create shape array
         shape = make_int_array(4)
         int_array_set(shape, 0, batch_size)
         int_array_set(shape, 1, SD15_LATENT_CHANNELS)
@@ -230,29 +260,21 @@ class SD15Pipeline:
         int_array_set(shape, 3, latent_w)
         return torch_std_randn(shape, 4, 0)  # 0 = float32
     
-    def txt2img(self, prompt: str, steps: int = 20, cfg: float = 7.0,
-                 sampler_name: str = "euler",
-                 scheduler_name: str = "karras",
-                 height: int = 512, width: int = 512,
-                 seed: int = 42,
-                 denoise: float = 1.0,
-                 sigma_min: float = 0.03,
-                 sigma_max: float = 14.6) -> ptr:
-        """Full txt2img pipeline from prompt to image tensor.
+    def txt2img(self, prompt: str, steps: int, cfg: float,
+                 sampler_name: str, scheduler_name: str,
+                 height: int, width: int, seed: int,
+                 denoise: float, sigma_min: float, sigma_max: float) -> ptr:
+        """Full txt2img pipeline.
         
-        Returns: (1, 3, H, W) float32 image in [-1, 1]
+        Returns: (1, 3, H, W) float32 image
         """
-        # 1. Encode prompt → text embeddings
         text_emb = self.encode_prompt(prompt)
         text_emb_uncond = self.encode_prompt("")
         
-        # 2. Generate noise latent
         noise = self.prepare_noise(1, height, width, seed)
         
-        # 3. Run sampling
-        sampler = KSampler(steps=steps, sampler_name=sampler_name,
-                            scheduler_name=scheduler_name,
-                            sigma_min=sigma_min, sigma_max=sigma_max)
+        sampler = KSampler(steps, sampler_name, scheduler_name,
+                            sigma_min, sigma_max)
         
         def wrapped_fn(x, sigma, te):
             return self.unet_fn(x, sigma, te)
@@ -260,9 +282,7 @@ class SD15Pipeline:
         latent = sampler.sample(noise, cfg, wrapped_fn,
                                  text_emb, text_emb_uncond)
         
-        # 4. VAE decode → image
-        image = self.vae.decode(latent)
-        
+        image = torch_std_vae_decode(self.vae, latent)
         return image
 
 
@@ -278,31 +298,28 @@ class SDXLPipeline:
     vae
     unet_fn
     
-    def __init__(self, sd_dict: ptr, clip, vae,
-                 original_size_h: float = 1024.0,
-                 original_size_w: float = 1024.0,
-                 crop_top: float = 0.0, crop_left: float = 0.0,
-                 target_size_h: float = 1024.0,
-                 target_size_w: float = 1024.0,
-                 unet_fn=None):
+    def __init__(self, sd_dict: ptr, clip, vae, unet_fn,
+                 original_size_h: float, original_size_w: float,
+                 crop_top: float, crop_left: float,
+                 target_size_h: float, target_size_w: float):
+        """Initialize SDXL pipeline."""
         self.sd_dict = sd_dict
         self.clip = clip
         self.vae = vae
-        self.unet_fn = unet_fn or make_sdxl_unet_fn(
-            sd_dict, original_size_h, original_size_w,
-            crop_top, crop_left,
-            target_size_h, target_size_w)
+        if unet_fn:
+            self.unet_fn = unet_fn
+        else:
+            self.unet_fn = make_sdxl_unet_fn(
+                sd_dict, original_size_h, original_size_w,
+                crop_top, crop_left,
+                target_size_h, target_size_w)
     
-    def encode_prompt(self, text: str) -> (ptr, ptr):
-        """Encode prompt → (text_emb_og, pooled_emb).
-        
-        SDXL uses dual CLIP: returns combined (L+G) embeddings + pooled.
-        Returns: (text_emb, pooled_emb)
-        """
-        return self.clip.encode(text)
+    def encode_prompt(self, text: str):
+        """Encode prompt → (text_emb, pooled_emb) using SDXL dual CLIP."""
+        return sdxl_clip_encode(self.clip, text)
     
     def prepare_noise(self, batch_size: int, height: int, width: int,
-                       seed: int = 42) -> ptr:
+                       seed: int) -> ptr:
         torch_std_manual_seed(seed)
         latent_h = height // 8
         latent_w = width // 8
@@ -313,41 +330,27 @@ class SDXLPipeline:
         int_array_set(shape, 3, latent_w)
         return torch_std_randn(shape, 4, 0)
     
-    def txt2img(self, prompt: str, steps: int = 20, cfg: float = 7.0,
-                 sampler_name: str = "euler",
-                 scheduler_name: str = "karras",
-                 height: int = 1024, width: int = 1024,
-                 seed: int = 42,
-                 denoise: float = 1.0,
-                 sigma_min: float = 0.03,
-                 sigma_max: float = 14.6) -> ptr:
+    def txt2img(self, prompt: str, steps: int, cfg: float,
+                 sampler_name: str, scheduler_name: str,
+                 height: int, width: int, seed: int,
+                 denoise: float, sigma_min: float, sigma_max: float) -> ptr:
         """Full SDXL txt2img pipeline.
         
-        Returns: (1, 3, H, W) float32 image in [-1, 1]
+        Returns: (1, 3, H, W) float32 image
         """
-        # 1. Encode prompt → text_emb (2048-dim) + pooled_emb (1280-dim)
         text_emb, pooled_emb = self.encode_prompt(prompt)
         text_emb_uncond, pooled_emb_uncond = self.encode_prompt("")
         
-        # 2. Generate noise
         noise = self.prepare_noise(1, height, width, seed)
         
-        # 3. Run sampling
-        sampler = KSampler(steps=steps, sampler_name=sampler_name,
-                            scheduler_name=scheduler_name,
-                            sigma_min=sigma_min, sigma_max=sigma_max)
+        sampler = KSampler(steps, sampler_name, scheduler_name,
+                            sigma_min, sigma_max)
         
         def wrapped_fn(x, sigma, te):
-            # SDXL passes pooled_emb as separate arg
-            # Simplified: use full unet forward with all params
             return self.unet_fn(x, sigma, te, pooled_emb)
         
-        # For SDXL, need CFG with cond+uncond pooled→simplify: pass combined
-        # (SDXL has its own CFG pattern)
         latent = sampler.sample(noise, cfg, wrapped_fn,
                                  text_emb, text_emb_uncond)
         
-        # 4. VAE decode
-        image = self.vae.decode(latent)
-        
+        image = torch_std_vae_decode(self.vae, latent)
         return image

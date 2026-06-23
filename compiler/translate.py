@@ -27,6 +27,14 @@ TYPE_MAP = {
 # ====== 外部 FFI 函数注册表 ======
 EXTERN_FUNCTIONS = {}
 
+# Class tracking for method dispatch
+CLASS_METHODS = {}      # class_name -> set of method names
+CLASS_FIELDS = {}       # class_name -> set of field names
+CLASS_INSTANCES = {}    # var_name -> class_name (propagated from constructors)
+_IN_CLASS = None        # current class name being translated
+_IN_METHOD = None       # current method name being translated
+DEFINED_FUNCTIONS = set()  # set of static function names (w/o prefix)
+
 # Scheme 预置函数（不是 C 函数，不走 foreign-procedure）
 MATH_FUNCTIONS = {
     "sin", "cos", "tan", "log", "log2", "log10", "exp", "sqrt",
@@ -230,6 +238,10 @@ def translate_expr(node):
             return '"{}"'.format(node.value.replace('"', '\\"'))
         return repr(node.value)
     elif isinstance(node, ast.Name):
+        # If this name refers to a user-defined function, add static_ prefix
+        # This ensures dict values referencing functions work correctly
+        if node.id in DEFINED_FUNCTIONS:
+            return f"static_{node.id}"
         return node.id
     elif isinstance(node, ast.UnaryOp):
         if isinstance(node.op, ast.Not):
@@ -298,28 +310,40 @@ def translate_expr(node):
                 return f"({name} {' '.join(args)})"
             return f"(static_{name} {' '.join(args)})"
         elif isinstance(func, ast.Attribute):
-            obj = None
-            if isinstance(func.value, ast.Name):
-                obj = func.value.id
-            if obj:
-                attr = func.attr
-                if obj == "ml":
-                    return f"(ml_{attr} {' '.join(args)})"
-            return f"({ast.dump(func)} . {attr})"
-        elif isinstance(func, ast.Attribute):
-            obj = translate_expr(func.value)
+            obj_expr = func.value
             attr = func.attr
-            return f"({obj} {attr} {' '.join(args)})"
+            if isinstance(obj_expr, ast.Name):
+                obj_name = obj_expr.id
+                # self.method() inside class → dispatch to class method
+                if obj_name == 'self' and _IN_CLASS:
+                    return f"({_IN_CLASS}_{attr} self {' '.join(args)})"
+                # obj.method() for known class instances
+                if obj_name in CLASS_INSTANCES:
+                    cname = CLASS_INSTANCES[obj_name]
+                    return f"({cname}_{attr} {obj_name} {' '.join(args)})"
+                # ml.method() — legacy ML module
+                if obj_name == "ml":
+                    return f"(ml_{attr} {' '.join(args)})"
+            # Complex obj expression: just dispatch as (obj attr args)
+            obj_str = translate_expr(obj_expr)
+            return f"({obj_str} {attr} {' '.join(args)})"
         return f"({ast.dump(func)} {' '.join(args)})"
     elif isinstance(node, ast.Dict):
-        keys = [translate_expr(k) for k in node.keys]
-        vals = [translate_expr(v) for v in node.values]
+        keys = node.keys
+        vals = node.values
         if not keys:
             return "(make-dict)"
         items = []
         for k, v in zip(keys, vals):
-            items.append(f"(dict-set! d {k} {v})")
-        return f"(let ((d (make-dict))) {' '.join(items)} d)"
+            key_str = translate_expr(k)
+            val_str = translate_expr(v)
+            # String keys should be quoted for dict-set!
+            if isinstance(k, ast.Constant) and isinstance(k.value, str):
+                items.append(f'(dict-set! d {key_str} {val_str})')
+            else:
+                items.append(f'(dict-set! d {key_str} {val_str})')
+        items_str = ' '.join(items)
+        return f"(let ((d (make-dict))) {items_str} d)"
     elif isinstance(node, ast.List):
         elems = [translate_expr(e) for e in node.elts]
         return f"(vector {' '.join(elems)})"
@@ -331,6 +355,15 @@ def translate_expr(node):
             return f"(dict-get {value} {idx})"
         return f"(float_array_ref {value} {idx})"
     elif isinstance(node, ast.Attribute):
+        obj = node.value
+        attr = node.attr
+        # self.attr inside class method → Class_attr (prefixed global)
+        if isinstance(obj, ast.Name) and obj.id == 'self' and _IN_CLASS:
+            return f"{_IN_CLASS}_{attr}"
+        # obj.attr where obj is a known class instance → field access
+        if isinstance(obj, ast.Name) and obj.id in CLASS_INSTANCES:
+            return attr
+        # Fallback: dotted pair (for dictionaries or opaque access)
         return f"({translate_expr(node.value)} . {node.attr})"
     elif isinstance(node, ast.JoinedStr):
         parts = []
@@ -465,6 +498,135 @@ def generate_extern_ffi():
     return "\n".join(lines)
 
 
+def translate_class_field_init(node, class_name):
+    """Translate self.field = val in __init__ to (set! Class_field val)."""
+    target = None
+    val = None
+    if isinstance(node, (ast.Assign, ast.AnnAssign)):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            t = node.targets[0]
+            if isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name) and t.value.id == 'self':
+                target = f"{class_name}_{t.attr}"
+                val = translate_expr(node.value)
+        elif isinstance(node, ast.AnnAssign):
+            if isinstance(node.target, ast.Attribute) and isinstance(node.target.value, ast.Name) and node.target.value.id == 'self':
+                target = f"{class_name}_{node.target.attr}"
+                val = translate_expr(node.value) if node.value else '#f'
+    if target and val:
+        return f"(set! {target} {val})"
+    return None
+
+
+def translate_stmt_method(node, class_name, field_classes=None):
+    """Translate a statement inside a class method body."""
+    if field_classes is None:
+        field_classes = {}
+    if isinstance(node, (ast.Assign, ast.AnnAssign)):
+        target = None
+        val = None
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            t = node.targets[0]
+            if isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name) and t.value.id == 'self':
+                # self.field = val → (set! Class_field val)  (prefix with class name)
+                target = f"{class_name}_{t.attr}"
+                val = translate_expr(node.value)
+            elif isinstance(t, ast.Tuple):
+                # Tuple unpacking: a, b = expr
+                names = [e.id for e in t.elts if isinstance(e, ast.Name)]
+                val = translate_expr(node.value)
+                if len(names) == 2 and val:
+                    return f"(set! {names[0]} {val})"  # only first for now
+                return None
+            elif isinstance(t, ast.Name):
+                target = t.id
+                val = translate_expr(node.value)
+        elif isinstance(node, ast.AnnAssign):
+            t = node.target
+            if isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name) and t.value.id == 'self':
+                target = f"{class_name}_{t.attr}"
+                val = translate_expr(node.value) if node.value else '#f'
+            elif isinstance(t, ast.Name):
+                target = t.id
+                val = translate_expr(node.value) if node.value else '#f'
+        if target and val:
+            return f"(set! {target} {val})"
+        return None
+    elif isinstance(node, ast.Return):
+        val = translate_expr(node.value) if node.value else "#f"
+        return val
+    elif isinstance(node, ast.Expr):
+        return translate_expr(node.value)
+    elif isinstance(node, ast.AugAssign):
+        return translate_aug_assign(node)
+    elif isinstance(node, ast.If):
+        test = translate_expr(node.test)
+        then_parts = [translate_stmt_method(s, class_name) for s in node.body]
+        then_str = ' '.join([t for t in then_parts if t])
+        if node.orelse:
+            else_parts = [translate_stmt_method(s, class_name) for s in node.orelse]
+            else_str = ' '.join([e for e in else_parts if e])
+            return f"(if {test}\n    (begin {then_str})\n    (begin {else_str}))"
+        return f"(if {test}\n    (begin {then_str}))"
+    elif isinstance(node, ast.For):
+        target = node.target.id if isinstance(node.target, ast.Name) else "i"
+        if isinstance(node.iter, ast.Call) and hasattr(node.iter.func, 'id') and node.iter.func.id == 'range':
+            rargs = node.iter.args
+            body_parts = [translate_stmt_method(s, class_name) for s in node.body]
+            body_str = ' '.join([b for b in body_parts if b])
+            if len(rargs) == 1:
+                n = translate_expr(rargs[0])
+                return f"(do (({target} 0 (+ {target} 1))) ((>= {target} {n})) {body_str})"
+            elif len(rargs) == 2:
+                start = translate_expr(rargs[0])
+                end = translate_expr(rargs[1])
+                return f"(do (({target} {start} (+ {target} 1))) ((>= {target} {end})) {body_str})"
+        return f";; for loop (untranslated)"
+    elif isinstance(node, ast.While):
+        test = translate_expr(node.test)
+        body_parts = [translate_stmt_method(s, class_name) for s in node.body]
+        body_str = ' '.join([b for b in body_parts if b])
+        return f"(let loop () (if {test} (begin {body_str} (loop))))"
+    return f";; {type(node).__name__}: {ast.dump(node)}"
+
+
+def translate_method_body(node, class_name):
+    """Translate class method body — handles self.field patterns."""
+    # Track field → class mappings (from constructor calls in __init__)
+    field_classes = {}  # field_name -> class_name
+    if node.name == '__init__':
+        for s in node.body:
+            if isinstance(s, (ast.Assign, ast.AnnAssign)):
+                val = None
+                target_name = None
+                if isinstance(s, ast.Assign) and len(s.targets) == 1:
+                    t = s.targets[0]
+                    if isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name) and t.value.id == 'self':
+                        target_name = t.attr
+                        val = s.value
+                elif isinstance(s, ast.AnnAssign):
+                    if isinstance(s.target, ast.Attribute) and isinstance(s.target.value, ast.Name) and s.target.value.id == 'self':
+                        target_name = s.target.attr
+                        val = s.value
+                if target_name and isinstance(val, ast.Call) and isinstance(val.func, ast.Name):
+                    ctor_name = val.func.id
+                    if ctor_name in CLASS_METHODS:
+                        field_classes[target_name] = ctor_name
+    
+    body_parts = []
+    for s in node.body:
+        if isinstance(s, ast.FunctionDef):
+            body_parts.append(translate_function(s))
+            continue
+        # Pass field_classes to translate_stmt_method
+        tr = translate_stmt_method(s, class_name, field_classes)
+        if tr:
+            body_parts.append(tr)
+    if len(body_parts) == 1:
+        return f"  {body_parts[0]}"
+    body_str = "\n    ".join(body_parts)
+    return f"  (begin\n    {body_str}\n  )"
+
+
 def main():
     code = sys.stdin.read()
     code = parse_extern_functions(code)
@@ -479,9 +641,85 @@ def main():
     output_parts.append(f";; Source: {source_filename}")
     output_parts.append("")
     output_parts.append(";; StaticPy functions")
+    
+    # Pass 1: Build CLASS_METHODS and CLASS_INSTANCES maps
+    global CLASS_METHODS, CLASS_FIELDS, CLASS_INSTANCES
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef):
+            cname = node.name
+            methods = set()
+            fields = set()
+            for item in node.body:
+                if isinstance(item, ast.FunctionDef):
+                    methods.add(item.name)
+                elif isinstance(item, ast.AnnAssign):
+                    if isinstance(item.target, ast.Name):
+                        fields.add(item.target.id)
+            CLASS_METHODS[cname] = methods
+            CLASS_FIELDS[cname] = fields
+    
+    # Pass 2: Record all user-defined function names and class instances
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef):
+            DEFINED_FUNCTIONS.add(node.name)
+        elif isinstance(node, ast.ClassDef):
+            for item in node.body:
+                if isinstance(item, ast.FunctionDef) and item.name != '__init__':
+                    DEFINED_FUNCTIONS.add(f"{node.name}_{item.name}")
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            target = None
+            val = None
+            if isinstance(node, ast.AnnAssign):
+                if isinstance(node.target, ast.Name) and node.value:
+                    target = node.target.id
+                    val = node.value
+            elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+                if isinstance(node.targets[0], ast.Name):
+                    target = node.targets[0].id
+                    val = node.value
+            if target and isinstance(val, ast.Call) and isinstance(val.func, ast.Name):
+                cname = val.func.id
+                if cname in CLASS_METHODS:
+                    CLASS_INSTANCES[target] = cname
+    
+    # Pass 3: Emit translated code
     for node in tree.body:
         if isinstance(node, ast.FunctionDef):
             output_parts.append(translate_function(node, source_filename))
+        elif isinstance(node, ast.ClassDef):
+            cname = node.name
+            global _IN_CLASS
+            _IN_CLASS = cname
+            for item in node.body:
+                if isinstance(item, ast.FunctionDef):
+                    # Class method: rename to ClassName_method, add self param
+                    method_name = item.name
+                    if method_name == '__init__':
+                        # Use full method body translation (handles if/else etc.)
+                        body = translate_method_body(item, cname)
+                        output_parts.append(f";; {cname} init from __init__")
+                        output_parts.append(
+                            f"(define ({cname}_init self)\n{body})")
+                    else:
+                        # Has self as first arg
+                        user_args = [a.arg for a in item.args.args if a.arg != 'self']
+                        all_params = ' '.join(['self'] + user_args)
+                        body = translate_method_body(item, cname)
+                        output_parts.append(
+                            f"(define ({cname}_{method_name} {all_params})\n{body})")
+            _IN_CLASS = None
+        elif isinstance(node, ast.Assign):
+            # Module-level assignment
+            if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                name = node.targets[0].id
+                val = translate_expr(node.value)
+                output_parts.append(f"(define {name} {val})")
+        elif isinstance(node, ast.AnnAssign):
+            # Module-level annotated assignment
+            if isinstance(node.target, ast.Name) and node.value:
+                name = node.target.id
+                val = translate_expr(node.value)
+                output_parts.append(f"(define {name} {val})")
     output_parts.append("")
     output_parts.append(";; Entry point")
     output_parts.append("(static_main)")

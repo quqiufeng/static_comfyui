@@ -253,3 +253,77 @@ extern fn torch_std_sample_dpmpp_2m(noise_pred: ptr, x_t: ptr,
 extern fn torch_std_sampler_sigmas(steps: int, sigma_min: float,
                                     sigma_max: float,
                                     schedule: str) -> ptr from "torch_std_helper"
+
+# ==============================================================================
+# LoRA matching helper
+# ==============================================================================
+
+extern fn torch_std_lora_match_to_unet(lora_dict: ptr, n_weights: int,
+                                        out_indices: ptr,
+                                        out_A: ptr, out_B: ptr,
+                                        max_lora: int) -> int from "torch_std_helper"
+
+# ==============================================================================
+# T5 SentencePiece tokenizer
+# ==============================================================================
+
+extern fn torch_std_t5_tokenizer_create(path: str) -> ptr from "torch_std_helper"
+extern fn torch_std_t5_tokenizer_encode(tok: ptr, text: str,
+                                         max_len: int) -> ptr from "torch_std_helper"
+extern fn torch_std_t5_tokenizer_free(tok: ptr) -> void from "torch_std_helper"
+
+# ==============================================================================
+# FLUX MMDiT forward
+# ==============================================================================
+
+extern fn torch_std_flux_forward(
+    wdict: ptr, img: ptr, txt: ptr,
+    timestep: ptr, img_pos: ptr,
+    guidance: float, n_blocks: int,
+    n_heads_img: int, n_heads_txt: int,
+    head_dim: int) -> ptr from "torch_std_helper"
+
+extern fn torch_std_flux_embed_nd(ids: ptr, dim: int, theta: float,
+                                   axes_dim: ptr, n_axes: int) -> ptr from "torch_std_helper"
+
+# ==============================================================================
+# Flow matching step (for FLUX)
+# ==============================================================================
+
+extern fn torch_std_fm_step(velocity: ptr, x_t: ptr, dt: float) -> ptr from "torch_std_helper"
+
+# ==============================================================================
+# GGUF model loader
+# ==============================================================================
+
+extern fn torch_std_gguf_load(path: str) -> ptr from "torch_std_helper"
+extern fn torch_std_gguf_tensor_count(model: ptr) -> int from "torch_std_helper"
+extern fn torch_std_gguf_tensor_name(model: ptr, idx: int) -> str from "torch_std_helper"
+extern fn torch_std_gguf_load_tensor(model: ptr, idx: int) -> ptr from "torch_std_helper"
+extern fn torch_std_gguf_load_tensor_by_name(model: ptr, name: str) -> ptr from "torch_std_helper"
+extern fn torch_std_gguf_free(model: ptr) -> void from "torch_std_helper"
+
+# ==============================================================================
+# Image processing
+# ==============================================================================
+
+extern fn torch_std_image_resize(img: ptr, new_h: int, new_w: int,
+                                  mode: str) -> ptr from "torch_std_helper"
+extern fn torch_std_image_crop(img: ptr, x: int, y: int, w: int, h: int) -> ptr from "torch_std_helper"
+extern fn torch_std_load_image(path: str) -> ptr from "torch_std_helper"
+
+# ==============================================================================
+# DDPM noise utilities
+# ==============================================================================
+
+extern fn torch_std_ddpm_betas(T: int, beta_start: float,
+                                beta_end: float) -> ptr from "torch_std_helper"
+extern fn torch_std_ddpm_add_noise(latent: ptr, noise: ptr, timestep: ptr,
+                                    alpha_bar: ptr) -> ptr from "torch_std_helper"
+
+# ==============================================================================
+# Scalar extraction from 1-element tensor
+# ==============================================================================
+
+extern fn torch_std_to_double_array(t: ptr, out: ptr, n: int) -> void from "torch_std_helper"
+extern fn torch_std_to_float_array(t: ptr, out: ptr, n: int) -> void from "torch_std_helper"
