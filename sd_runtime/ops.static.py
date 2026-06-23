@@ -223,3 +223,29 @@ extern fn torch_std_vae_encode_tiled(vae: ptr, image: ptr,
                                       tile_size: int, overlap: int) -> ptr from "torch_std_helper"
 extern fn torch_std_vae_decode_tiled(vae: ptr, latent: ptr,
                                       tile_size: int, overlap: int) -> ptr from "torch_std_helper"
+
+# ==============================================================================
+# Sampler step functions
+# ==============================================================================
+
+extern fn torch_std_sample_ddim(noise_pred: ptr, x_t: ptr,
+                                 alpha_bar_t: ptr, alpha_bar_prev: ptr,
+                                 eta: float) -> ptr from "torch_std_helper"
+
+extern fn torch_std_sample_ddim_from_sigma(noise_pred: ptr, x_t: ptr,
+                                            sigma_t: ptr, sigma_prev: ptr,
+                                            eta: float) -> ptr from "torch_std_helper"
+
+extern fn torch_std_sample_euler(noise_pred: ptr, x_t: ptr,
+                                  sigma_t: ptr, sigma_prev: ptr) -> ptr from "torch_std_helper"
+
+extern fn torch_std_sample_euler_ancestral(noise_pred: ptr, x_t: ptr,
+                                            sigma_t: ptr, sigma_prev: ptr) -> ptr from "torch_std_helper"
+
+extern fn torch_std_sample_dpmpp_2m(noise_pred: ptr, x_t: ptr,
+                                     sigma_t: ptr, sigma_prev: ptr,
+                                     old_denoised: ptr, is_first_step: int) -> ptr from "torch_std_helper"
+
+extern fn torch_std_sampler_sigmas(steps: int, sigma_min: float,
+                                    sigma_max: float,
+                                    schedule: str) -> ptr from "torch_std_helper"
