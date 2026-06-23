@@ -311,7 +311,42 @@ grep 'torch_std_jit_forward' /tmp/out.scm | grep -v "foreign-procedure\|t5\|vae\
 
 ---
 
-## 9. 生态飞轮
+## 9. 核心开发原则
+
+### 9.1 先查运行时，再写代码
+
+实现任何新功能前，**先去 cpp_runtime (libtorch_std_helper) 核对**:
+
+```bash
+# 查 C++ 头文件
+grep "要用的函数" /opt/ReScheme/libtorch_std_helper.h
+
+# 查 C++ 已有辅助函数
+grep -n "static.*(" /opt/ReScheme/libtorch_std_helper.cpp | grep -E "sdxl_|flux_|timestep"
+
+# 查 extern fn 声明
+grep "要用的函数" sd_runtime/ops.static.py
+```
+
+**常见可复用组件** (不要自己重写):
+
+| 组件 | C++ 函数 | StaticPy extern fn |
+|------|---------|-------------------|
+| Linear | `sdxl_linear(x, d, name)` | `torch_std_linear` |
+| Conv2d | `sdxl_conv2d(x, d, name, stride, pad)` | `torch_std_conv2d` |
+| Attention | `at::scaled_dot_product_attention` | `torch_std_attention` |
+| Timestep embed | `timestep_embedding(t, dim)` | (内部 C++ 辅助) |
+| FLUX block | `flux_block(img, txt, te, rope, d, prefix, ...)` | (内部 C++ 辅助) |
+| RoPE | `flux_rope(h, w, dim, ref)` | (内部 C++ 辅助) |
+| LayerNorm | `at::layer_norm` | `torch_std_layernorm` |
+| safetensors 加载 | — | `torch_std_safetensors_load` |
+| 图像 I/O | — | `torch_std_load_image/save_image` |
+
+**教训**: Hunyuan Video 实际上就是 FLUX + 3D 输入，复用现成的 `flux_block()` 只要 50 行代码。但我没去查，想当然写了 placeholder。先查运行时能省 90% 的工作。
+
+### 9.2 源码优先，禁止脑补
+
+### 9.3 生态飞轮
 
 这个项目的真正价值不是"一个 ComfyUI 二进制版"，而是**用应用驱动语言运行时成长**：
 
