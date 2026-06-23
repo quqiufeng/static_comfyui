@@ -308,3 +308,23 @@ grep 'torch_std_jit_forward' /tmp/out.scm | grep -v "foreign-procedure\|t5\|vae\
 ---
 
 > 一句话：**所有模型 forward 用 C++ libTorch，StaticPy 只做管线编排，translate.py 只做语言翻译。**
+
+---
+
+## 9. 生态飞轮
+
+这个项目的真正价值不是"一个 ComfyUI 二进制版"，而是**用应用驱动语言运行时成长**：
+
+```
+写一个 ML 应用 → 发现缺什么运行时能力 → 补到 ReScheme 里
+              → 语言更强了 → 下一个应用更容易 → 更多人用
+```
+
+每个新模型都会暴露运行时缺失的能力：
+- 写 SD → 补齐了张量基元 + safetensors
+- 写 FLUX → 补齐了 MMDiT + RoPE + T5 tokenizer
+- 写 PixArt → 补齐了 DiT + adaLN-Zero
+- 写视频模型 → 补齐了 3D conv + 时空注意力
+- 下一个应用 → 补齐更多
+
+**这就是"三环自举"在实践中的样子。** 不需要刻意"发展语言生态"，多做应用自然就有了。
