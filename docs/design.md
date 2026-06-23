@@ -15,9 +15,14 @@ libtorch_std_helper  (extern "C" API)    ←  张量基元 + 模型前向
     ↓
 PyTorch C++ API (libtorch)  / cuBLAS / cuDNN
     ↓
-Chez Scheme AOT compile-file → .so
+Chez Scheme AOT compile-file → runtime.so
     ↓
-C launcher + objcopy → 单文件 ELF
+C launcher (嵌入 scheme+boot+runtime.so)
+    + lib/ (PyTorch + CUDA .so)
+    ↓
+部署：单文件 ELF + lib/ 目录
+    部署机只需：NVIDIA 驱动 + libc
+    不需要：Python / PyTorch
 ```
 
 ## 架构分层
@@ -176,7 +181,31 @@ Input:  user_module.static.py
 Output: build_out/user_module.so  (~400KB-1.5MB)
 ```
 
-## ELF 打包 (deliver.sh)
+## 部署包 (deliver.sh)
+
+`deliver.sh` 产出**完整的自包含部署包**，部署机只需 NVIDIA 驱动 + libc，**无需安装 PyTorch，无需 Python**。
+
+### 部署包结构
+
+```
+build_out/deploy/
+├── sd_generate.elf          ← 单文件 ELF（嵌入 scheme 二进制 + boot + runtime.so）
+└── lib/
+    ├── libtorch_std_helper.so   ← 我们的 C++ 运行时包装
+    ├── libtorch.so              ← PyTorch 核心库
+    ├── libc10.so                ← PyTorch 基础库
+    ├── libtorch_cpu.so          ← PyTorch CPU 后端
+    ├── libtorch_cuda.so         ← PyTorch CUDA 后端
+    ├── libc10_cuda.so           ← PyTorch CUDA 基础库
+    ├── libcudart.so.12          ← CUDA 运行时
+    ├── libcublas.so.12          ← CUDA BLAS
+    ├── libcublasLt.so.12        ← CUDA BLAS (轻量)
+    ├── libcudnn.so.9            ← cuDNN
+    ├── libnvrtc.so.12           ← CUDA JIT 编译
+    └── ...                      ← 其他 DT_NEEDED 依赖自动追踪
+```
+
+### 构建流程
 
 ```
 sd_runtime/*.static.py   (多个 StaticPy 源文件)
@@ -188,10 +217,10 @@ python3 compiler/translate.py  →  sd_runtime.ss
 cat prelude.scm stdlib.scm sd_runtime.ss > merged.ss
         │
         ▼
-scheme --compile-file merged.ss → build_out/sd_runtime.so
+scheme --compile-file merged.ss → build_out/runtime.so
         │
         ▼
-g++ -shared -fPIC -o build_out/libtorch_std_helper.so \
+g++ -shared -fPIC -o build_out/libs/libtorch_std_helper.so \
     /opt/ReScheme/libtorch_std_helper.cpp \
     -I/data/venv/lib/python3.12/site-packages/torch/include \
     -I/data/venv/lib/python3.12/site-packages/torch/include/torch/csrc/api/include \
@@ -202,23 +231,30 @@ g++ -shared -fPIC -o build_out/libtorch_std_helper.so \
 C launcher:
   │ 嵌入 scheme 二进制
   │ 嵌入 petite.boot + scheme.boot
-  │ 嵌入 sd_runtime.so
-  │ 嵌入 libtorch_std_helper.so
+  │ 嵌入 runtime.so (StaticPy 编译产物)
   │
   ▼
-gcc -o sd_generate.elf
+gcc -o sd_generate.elf -Wl,-rpath,'$ORIGIN/lib'
   │
   ▼
-单文件 ELF (≈6MB)，运行时不需任何 Python 环境
+收集 PyTorch/CUDA .so → lib/
+  │
+  ▼
+build_out/deploy/
+  ├── sd_generate.elf   (≈3MB, 仅嵌入 scheme+boot+runtime)
+  └── lib/              (≈2-3GB, 全部 PyTorch+CUDA .so)
 ```
 
 ### ELF 运行时行为
 
-1. C launcher 创建临时目录 `/stock/.tmp/`
-2. 写入 `scheme` 二进制、boot 文件、`sd_runtime.so`、`libtorch_std_helper.so`
-3. 设置 `LD_LIBRARY_PATH` 指向 PyTorch 库路径
-4. `execv(scheme, ["--quiet", "sd_runtime.so", ...])`
-5. Chez Scheme 加载 `.so`，执行 `(static_main)`
+1. ELF 启动后通过 `/proc/self/exe` 获取自身路径
+2. 提取嵌入的 `scheme` 二进制、`petite.boot`、`scheme.boot`、`runtime.so` 到 `/stock/.tmp/`
+3. 设置 `LD_LIBRARY_PATH` 指向：
+   - `{self_dir}/lib/`（与 ELF 同目录的部署库）
+   - 标准 CUDA/系统路径
+4. `execv(scheme, ["--quiet", "--boot", "petite.boot", "runtime.so"])`
+5. Chez Scheme 加载 `runtime.so`，执行 `(static_main)`
+6. `runtime.so` 内部的 `foreign-procedure` 从 `LD_LIBRARY_PATH` 找到 `libtorch_std_helper.so` → `libtorch.so` → GPU
 
 ## 模型权重管理
 
@@ -317,3 +353,36 @@ comfyui_ref/comfy/
 | 管线编排 | StaticPy → Scheme | 极低开销 |
 
 **关键洞察**：所有计算密集型操作（conv2d, matmul, attention, norm）都运行在 PyTorch C++/GPU 上。StaticPy 只负责高层管线编排——控制流、参数组合、模型间数据传递。性能与原生 PyTorch 基本等价。
+
+## 部署方式
+
+### 部署要求（最低）
+
+| 依赖 | 要求 |
+|------|------|
+| OS | Linux x86_64（glibc） |
+| GPU | NVIDIA GPU + 驱动（≥CUDA 12.0 兼容） |
+| 磁盘 | ~3GB（ELF + PyTorch/CUDA lib/ 目录） |
+| Python | **不需要** |
+| PyTorch | **不需要安装**（lib/ 目录自带） |
+
+### 部署步骤
+
+```bash
+# 在构建机上
+./build.sh sd_runtime/*.static.py   # 编译 StaticPy → runtime.so
+./deliver.sh                         # 打包 → build_out/deploy/
+
+# 把 deploy/ 整个目录复制到目标机器
+scp -r build_out/deploy/ target:/app/
+
+# 在目标机器上直接运行
+/app/deploy/sd_generate.elf
+```
+
+### 工作原理
+
+1. `sd_generate.elf` 是 C launcher，内嵌了 Chez Scheme 二进制 + boot 文件 + StaticPy 编译的 `runtime.so`
+2. 同目录的 `lib/` 包含全部 PyTorch/CUDA 运行时 .so（`libtorch.so`, `libc10.so`, `libcudart.so.12`, `libcublas.so.12`, `libcudnn.so.9` 等）
+3. ELF 的 RPATH 设置为 `$ORIGIN/lib`，运行时自动找到这些 .so
+4. 目标机器只需 NVIDIA 驱动（供 CUDA 运行时调用），无需安装 Python 或 PyTorch
