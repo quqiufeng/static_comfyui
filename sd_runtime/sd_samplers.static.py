@@ -112,11 +112,11 @@ def sample_euler(unet_fn, x: ptr, sigmas: ptr,
     
     Returns: denoised latent
     """
-    n_steps = int(tensor_shape(sigmas, 0)) - 1
+    n_steps = int(torch_std_size(sigmas, 0)) - 1
     
     for i in range(n_steps):
-        sigma_t = tensor_slice(sigmas, 0, i, 1)      # scalar tensor
-        sigma_next = tensor_slice(sigmas, 0, i + 1, 1)  # scalar tensor
+        sigma_t = torch_std_narrow(sigmas, 0, i, 1)      # scalar tensor
+        sigma_next = torch_std_narrow(sigmas, 0, i + 1, 1)  # scalar tensor
         
         # CFG noise prediction
         noise_pred = cfg_predict(unet_fn, x, sigma_t,
@@ -132,11 +132,11 @@ def sample_euler_ancestral(unet_fn, x: ptr, sigmas: ptr,
                             text_emb_cond: ptr, text_emb_uncond: ptr,
                             cfg_scale: float = 7.0) -> ptr:
     """Euler Ancestral sampler loop."""
-    n_steps = int(tensor_shape(sigmas, 0)) - 1
+    n_steps = int(torch_std_size(sigmas, 0)) - 1
     
     for i in range(n_steps):
-        sigma_t = tensor_slice(sigmas, 0, i, 1)
-        sigma_next = tensor_slice(sigmas, 0, i + 1, 1)
+        sigma_t = torch_std_narrow(sigmas, 0, i, 1)
+        sigma_next = torch_std_narrow(sigmas, 0, i + 1, 1)
         
         noise_pred = cfg_predict(unet_fn, x, sigma_t,
                                   text_emb_cond, text_emb_uncond, cfg_scale)
@@ -154,12 +154,12 @@ def sample_dpmpp_2m(unet_fn, x: ptr, sigmas: ptr,
                      text_emb_cond: ptr, text_emb_uncond: ptr,
                      cfg_scale: float = 7.0) -> ptr:
     """DPM++ 2M sampler loop (second-order multi-step)."""
-    n_steps = int(tensor_shape(sigmas, 0)) - 1
+    n_steps = int(torch_std_size(sigmas, 0)) - 1
     old_denoised: ptr = null
     
     for i in range(n_steps):
-        sigma_t = tensor_slice(sigmas, 0, i, 1)
-        sigma_next = tensor_slice(sigmas, 0, i + 1, 1)
+        sigma_t = torch_std_narrow(sigmas, 0, i, 1)
+        sigma_next = torch_std_narrow(sigmas, 0, i + 1, 1)
         
         noise_pred = cfg_predict(unet_fn, x, sigma_t,
                                   text_emb_cond, text_emb_uncond, cfg_scale)
@@ -169,8 +169,8 @@ def sample_dpmpp_2m(unet_fn, x: ptr, sigmas: ptr,
             old_denoised, 1 if old_denoised == null else 0)
         
         # DPM++ 2M returns stacked [x_prev, denoised]
-        x = tensor_slice(result, 0, 0, 1)
-        old_denoised = tensor_slice(result, 0, 1, 1)
+        x = torch_std_narrow(result, 0, 0, 1)
+        old_denoised = torch_std_narrow(result, 0, 1, 1)
     
     return x
 
@@ -187,11 +187,11 @@ def sample_ddim(unet_fn, x: ptr, sigmas: ptr,
     Uses torch_std_sample_ddim_from_sigma which converts sigmas to
     alpha_bar = 1/(1+sigma^2) internally.
     """
-    n_steps = int(tensor_shape(sigmas, 0)) - 1
+    n_steps = int(torch_std_size(sigmas, 0)) - 1
     
     for i in range(n_steps):
-        sigma_t = tensor_slice(sigmas, 0, i, 1)
-        sigma_next = tensor_slice(sigmas, 0, i + 1, 1)
+        sigma_t = torch_std_narrow(sigmas, 0, i, 1)
+        sigma_next = torch_std_narrow(sigmas, 0, i + 1, 1)
         
         noise_pred = cfg_predict(unet_fn, x, sigma_t,
                                   text_emb_cond, text_emb_uncond, cfg_scale)
