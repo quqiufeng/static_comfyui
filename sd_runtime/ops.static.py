@@ -194,3 +194,21 @@ extern fn torch_std_safetensors_name(sd: ptr, idx: int) -> str from "torch_std_h
 extern fn torch_std_safetensors_tensor(sd: ptr, idx: int) -> ptr from "torch_std_helper"
 extern fn torch_std_safetensors_get_tensor_by_name(sd: ptr, name: str) -> ptr from "torch_std_helper"
 extern fn torch_std_safetensors_free(sd: ptr) -> void from "torch_std_helper"
+
+# ==============================================================================
+# SD UNet forward (C++ 完整 UNet 实现)
+# ==============================================================================
+
+extern fn torch_std_sd15_unet_forward_dict(
+    sd_dict: ptr, input: ptr, timestep: ptr,
+    text_emb: ptr,
+    lora_A: ptr, lora_B: ptr,
+    lora_indices: ptr, n_lora: int,
+    lora_scale: float) -> ptr from "torch_std_helper"
+
+extern fn torch_std_sdxl_unet_forward(
+    weight_dict: ptr, input: ptr, timestep: ptr,
+    text_emb: ptr, pooled_emb: ptr,
+    os_h: float, os_w: float,
+    crop_t: float, crop_l: float,
+    ts_h: float, ts_w: float) -> ptr from "torch_std_helper"

@@ -71,10 +71,11 @@ libtorch_std_helper 已有 SD1.5/SDXL UNet forward，StaticPy 侧做权重管理
 
 | 状态 | 模块 | 源文件 | 行数 | 策略 |
 |------|------|--------|------|------|
-| [ ] | **UNet 基础块** | `openaimodel.py` | 300 | timestep embedding, ResBlock |
-| [ ] | **UNet 结构** | `openaimodel.py` | 400 | down/mid/up + skip routing |
-| [ ] | **UNet forward** | `openaimodel.py` | 227 | 完整 forward 管线 |
-| [ ] | **SDXL 尺寸嵌入** | `model_base.py` | — | original_size, crop, target_size |
+| [x] | **SD1.5 UNet forward** | `sd_runtime/sd_unet.static.py` + C++ | 120 | C++ 完整实现 (ResBlock+Transformer+Attention)，StaticPy 包装 |
+| [x] | **SDXL UNet forward** | `sd_runtime/sd_unet.static.py` + C++ | 120 | C++ 完整实现 (含尺寸嵌入)，StaticPy 包装 |
+| [x] | **SD1.5 权重别名映射** | `libtorch_std_helper.cpp` | 200+ | 221 个 weight name→index 映射 + sd15_get_weight 搜索 |
+| [x] | **SDXL 尺寸嵌入** | C++ `torch_std_sdxl_unet_forward` | — | original_size, crop, target_size 已内置 |
+| [ ] | **SD3/FLUX 额外装调** | (后续) | — | C++ 已有 torch_std_flux_forward |
 
 ## Phase 5: VAE
 
@@ -214,7 +215,7 @@ Phase 0: 基础设施   ██████████  6/6
 Phase 1: 张量基元   ██████████  4/4
 Phase 2: Attention  █████░░░░░  5/7
 Phase 3: CLIP       █████░░░░░  4/6
-Phase 4: SD UNet    ░░░░░░░░░░  0/4
+Phase 4: SD UNet    ██████████  4/4
 Phase 5: VAE        ░░░░░░░░░░  0/4
 Phase 6: K-Samplers ░░░░░░░░░░  0/9
 Phase 7: Comfy Samplers ░░░░░░  0/5
