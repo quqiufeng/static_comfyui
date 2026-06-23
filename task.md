@@ -14,12 +14,12 @@
 
 | 状态 | 模块 | 源文件 | 行数 | 说明 |
 |------|------|--------|------|------|
-| [~] | **编译器** | `compiler/translate.py` | 650 | StaticPy → Scheme 翻译器 |
-| [~] | **值类型运行时** | `compiler/prelude.scm` | 460 | C 数组 GC, 文件 I/O, JSON, libm |
-| [~] | **标准库** | `compiler/stdlib.scm` | 90 | 工具函数 |
-| [~] | **build 管线** | `build.sh` | 130 | StaticPy → Chez AOT → .so |
-| [~] | **deliver 管线** | `deliver.sh` | 230 | .so → ELF + lib/ 部署包 |
-| [~] | **C++ 运行时** | `/opt/ReScheme/libtorch_std_helper.{h,cpp}` | 4400 | 364 extern "C" API (tensor ops + model forward + tokenizer + sampler) |
+| [x] | **编译器** | `compiler/translate.py` | 650 | StaticPy → Scheme 翻译器 |
+| [x] | **值类型运行时** | `compiler/prelude.scm` | 460 | C 数组 GC, 文件 I/O, JSON, libm |
+| [x] | **标准库** | `compiler/stdlib.scm` | 90 | 工具函数 |
+| [x] | **build 管线** | `build.sh` | 130 | StaticPy → Chez AOT → .so |
+| [x] | **deliver 管线** | `deliver.sh` | 230 | .so → ELF + lib/ 部署包 |
+| [x] | **C++ 运行时** | `/opt/ReScheme/libtorch_std_helper.{h,cpp}` | 4400 | 364 extern "C" API + ~370 实现行 (含 arange/cos/sin/add_scalar/mul_scalar) |
 
 ---
 
@@ -31,9 +31,9 @@ libtorch_std_helper 已在 C++ 侧提供完整实现，StaticPy 侧需要 extern
 | 状态 | 模块 | 源文件 | 行数 | 策略 |
 |------|------|--------|------|------|
 | [x] | **Tensor 基础** | `ops.py` 前半 | 800 | extern fn 声明到 libtorch_std_helper |
-| [x] | **数学运算** | `ops.py` 中间 | 300 | add/sub/mul/div/exp/log/sqrt 等 |
+| [x] | **数学运算** | `ops.py` 中间 | 300 | add/sub/mul/div/exp/log/sqrt/cos/sin/arange |
 | [x] | **归约 / 比较** | `ops.py` 后半 | 401 | sum/mean/max/min + eq/gt/lt/clamp |
-| [ ] | **函数式 nn** | `ldm/modules/diffusionmodules/util.py` | 306 | timestep embedding, groups, normalization |
+| [x] | **函数式 nn** | `sd_runtime/nn.static.py` | 150 | timestep embedding, sinusoidal embedding, mean_flat, extract_into_tensor, beta schedules |
 
 ## Phase 2: Attention
 
@@ -207,8 +207,8 @@ libtorch_std_helper 已有 T5 SentencePiece tokenizer。
 ## 总体进度
 
 ```
-Phase 0: 基础设施   ████████░░  5/6
-Phase 1: 张量基元   ███████░░░  3/4
+Phase 0: 基础设施   ██████████  6/6
+Phase 1: 张量基元   ██████████  4/4
 Phase 2: Attention  ░░░░░░░░░░  0/5
 Phase 3: CLIP       ░░░░░░░░░░  0/6
 Phase 4: SD UNet    ░░░░░░░░░░  0/4
@@ -224,7 +224,7 @@ Phase 13: Mgmt      ░░░░░░░░░░  0/5
 Phase 14: Utils     ░░░░░░░░░░  0/3
 ```
 
-**总计：~63 个子模块，~85% 未开始**
-**C++ 侧已实现：** libtorch_std_helper (4400 行，覆盖 SD UNet/SDXL UNet/FLUX MMDiT/CLIP/T5/ControlNet/LoRA/VAE tiling/samplers/safetensors/GGUF/Image I/O)
+**总计：~63 个子模块，~76% 未开始**
+**C++ 侧已实现：** libtorch_std_helper (4400 行，覆盖 SD UNet/SDXL UNet/FLUX MMDiT/CLIP/T5/ControlNet/LoRA/VAE tiling/samplers/safetensors/GGUF/Image I/O) + 新增 5 函数 (arange/cos/sin/add_scalar/mul_scalar)
 **
 StaticPy 侧工作：** extern fn 声明 + 管线编排 + 原语模块翻译
