@@ -56,10 +56,11 @@ libtorch_std_helper 已有 CLIP BPE tokenizer + text forward，StaticPy 侧编�
 
 | 状态 | 模块 | 源文件 | 行数 | 策略 |
 |------|------|--------|------|------|
-| [ ] | **CLIP BPE Tokenizer** | `sd1_tokenizer/vocab.json + merges.txt` | — | 调用 `torch_std_clip_tokenizer_*` |
-| [ ] | **CLIP 基础模型** | `clip_model.py` | 331 | transformer 层 + 池化 |
-| [ ] | **SD1.5 CLIP** | `sd1_clip.py` | 744 | 完整 text encoder 管线 |
-| [ ] | **SDXL Dual CLIP** | `sdxl_clip.py` | 95 | CLIP-L + CLIP-G 并联 |
+| [x] | **CLIP BPE Tokenizer** | `sd_runtime/clip_tokenizer.static.py` | 55 | 包装 `torch_std_clip_tokenizer_*` (C++ BPE) |
+| [x] | **CLIP 基础模型** | `sd_runtime/clip_model.static.py` | 55 | 包装 `torch_std_clip_text_forward` + `torch_std_jit_load` |
+| [x] | **SD1.5 CLIP** | `sd_runtime/sd1_clip.static.py` | 110 | tokenize → forward → pooled, 状态管理 |
+| [x] | **SDXL Dual CLIP** | `sd_runtime/sdxl_clip.static.py` | 80 | 双 CLIP (L+G) 管线编排 |
+| [x] | **CLIP extern fn** | `sd_runtime/ops.static.py` | +25 | tokenizer/text_forward/jit_load/safetensors |
 | [ ] | **CLIP Vision** | `clip_vision.py` | 163 | ViT 视觉编码器 |
 | [ ] | **Long CLIP-L** | `text_encoders/long_clipl.py` | — | 长序列 CLIP |
 
@@ -212,7 +213,7 @@ libtorch_std_helper 已有 T5 SentencePiece tokenizer。
 Phase 0: 基础设施   ██████████  6/6
 Phase 1: 张量基元   ██████████  4/4
 Phase 2: Attention  █████░░░░░  5/7
-Phase 3: CLIP       ░░░░░░░░░░  0/6
+Phase 3: CLIP       █████░░░░░  4/6
 Phase 4: SD UNet    ░░░░░░░░░░  0/4
 Phase 5: VAE        ░░░░░░░░░░  0/4
 Phase 6: K-Samplers ░░░░░░░░░░  0/9
