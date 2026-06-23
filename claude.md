@@ -1,6 +1,39 @@
 # static_comfyui — 开发最佳实践（2026-06-23 复盘总结）
 
-## 0. 核心架构
+## 0. 项目定位
+
+**面对 AI 的 ML 开发语言和运行时。**
+
+不是"又一个 ML 框架"，而是一个完整的静态编译栈：
+
+```
+StaticPy (写模型) → 翻译成 Scheme → Chez AOT → 单文件 ELF
+    ↑                    ↑                 ↑
+ Python 语法         自举编译器         工业级 AOT
+ 静态类型                              零 Python 依赖
+ C++ libTorch 后端                     GPU 原生, 毫秒启动
+```
+
+跟 Mojo 的对比：
+
+| | Mojo | 这个项目 |
+|---|------|---------|
+| 语法基础 | Python 超集 | Python 子集 (StaticPy) |
+| 编译目标 | LLVM | Chez Scheme → ELF |
+| GPU 计算 | 自写 kernel | libTorch (PyTorch C++，工业级) |
+| 自举 | 规划中 | ✅ 已完成 (三环自举) |
+| 模型支持 | 演示级 | 35 模块, 8 个模型架构 |
+| 今日可用 | ❌ 还在改语法 | ✅ 可编译运行 |
+
+**关键洞察**：不重新发明编译器/运行时，而是**组合最优的现有工业级组件**：
+
+- Chez Scheme：世界级 AOT 编译器，比 LLVM 更快地生成 native code
+- libTorch：PyTorch 的 C++ 后端，工业级张量计算
+- Python 语法：开发者最熟悉的表达方式
+
+这就是"面对 AI 的 ML 开发语言"——不是从零造一个语言，而是用 Python 语法 + 自举编译器 + libTorch 后端，给 ML 开发者一个**没有 Python 生态依赖**的部署方案。
+
+## 1. 核心架构
 
 ```
 StaticPy (管线编排) → C++ libTorch (模型 forward) → Chez AOT (ELF 编译)
