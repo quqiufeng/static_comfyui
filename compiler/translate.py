@@ -377,6 +377,9 @@ def translate_expr(node):
                 # ml.method() — legacy ML module
                 if obj_name == "ml":
                     return f"(ml_{attr} {' '.join(args)})"
+                # math.method() — map to libm-*
+                if obj_name == "math":
+                    return f"(libm-{attr} {' '.join(args)})"
             # Complex obj expression: just dispatch as (obj attr args)
             obj_str = translate_expr(obj_expr)
             return f"({obj_str} {attr} {' '.join(args)})"
