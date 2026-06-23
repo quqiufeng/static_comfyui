@@ -428,3 +428,45 @@ extern fn torch_std_fm_sigmas(steps: int, sigma_min: float, sigma_max: float) ->
 
 # Save/load state dict
 extern fn torch_std_save_state_dict(module: ptr, path: str) -> void from "torch_std_helper"
+
+# ==============================================================================
+# Phase 15 新模型 (纯 libTorch C++ forward)
+# ==============================================================================
+
+# GLIGEN/IP-Adapter — UNet forward v2 with per-block attention hooks
+extern fn torch_std_sd_unet_forward_v2(
+    weight_ptrs: ptr, n_weights: int,
+    input_ptr: ptr, timestep_ptr: ptr, text_emb_ptr: ptr,
+    lora_A_ptrs: ptr, lora_B_ptrs: ptr, lora_target_indices: ptr, n_lora: int, lora_scale: float,
+    gligen_objs: ptr, gligen_alphas: ptr, gligen_block_indices: ptr, n_gligen_blocks: int,
+    ip_adapt_img: ptr, ip_adapt_scale: float) -> ptr from "torch_std_helper"
+
+# Stable Cascade Stage C
+extern fn torch_std_stable_cascade_stage_c(
+    weight_ptrs: ptr, n_weights: int,
+    x: ptr, r: ptr, timestep: ptr,
+    clip_text: ptr, clip_text_pooled: ptr, clip_img: ptr) -> ptr from "torch_std_helper"
+
+# PixArt DiT
+extern fn torch_std_pixart_forward(
+    weight_ptrs: ptr, n_weights: int,
+    x: ptr, timestep: ptr, y: ptr,
+    height: int, width: int, patch_size: int) -> ptr from "torch_std_helper"
+
+# Hunyuan Video 3D UNet
+extern fn torch_std_hunyuan_video_forward(
+    weight_ptrs: ptr, n_weights: int,
+    x: ptr, timestep: ptr, text_emb: ptr,
+    n_frames: int, height: int, width: int) -> ptr from "torch_std_helper"
+
+# Wan Video 3D UNet
+extern fn torch_std_wan_video_forward(
+    weight_ptrs: ptr, n_weights: int,
+    x: ptr, timestep: ptr, text_emb: ptr,
+    n_frames: int, height: int, width: int) -> ptr from "torch_std_helper"
+
+# Cosmos Video
+extern fn torch_std_cosmos_forward(
+    weight_ptrs: ptr, n_weights: int,
+    x: ptr, timestep: ptr, text_emb: ptr,
+    n_frames: int, height: int, width: int) -> ptr from "torch_std_helper"
