@@ -24,7 +24,9 @@
         (loop)))))
 
 ;; 注册 GC hook: Chez Scheme 每次 GC 后自动调用 gc-drain
-(collect-rendezvous (lambda () (gc-drain)))
+;; 使用 guard 兼容不支持 collect-rendezvous 的旧版本
+(guard (ex (else (display "Warning: collect-rendezvous not available, C arrays may leak\n") (newline)))
+  (collect-rendezvous (lambda () (gc-drain))))
 
 ;; ====== 浮点数组 ======
 

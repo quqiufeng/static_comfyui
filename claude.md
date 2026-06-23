@@ -159,16 +159,16 @@ cat file1.py file2.py ... | python3 translate.py > output.ss
 
 ---
 
-## 3. 已知运行时问题 (待修复)
+## 3. 运行时说明
 
 ### prelude.scm GC guardian
 - `make_int_array` / `make_float_array` / `make_ptr_array` 注册到 guardian
-- `collect-rendezvous` 在 GC 后自动 drain
-- 如果 Chez 版本不支持 `collect-rendezvous`，需手动调用 `gc-drain`
+- `collect-rendezvous` 在 GC 后自动 drain (✅ 已修复, 有 guard fallback)
+- 不支持 `collect-rendezvous` 的旧 Chez 版本会打印警告，C 数组可能泄漏
 
 ### prelude.scm 文件 I/O
-- `file-read-all` 用 `pointer->string` + `display` 到 string port
-- 依赖 `/proc/self/exe` 在 launcher 中确定运行目录
+- `file-read-all` 用 `pointer->string` + `display` 到 string port, O(n) (✅ 已修复)
+- 依赖 `/proc/self/exe` 在 C launcher 中确定运行目录 (有 `"."` fallback)
 
 ---
 
