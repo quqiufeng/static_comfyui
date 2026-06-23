@@ -18,6 +18,10 @@ extern fn torch_std_clone(t: ptr) -> ptr from "torch_std_helper"
 extern fn torch_std_to_dtype(t: ptr, dtype: int) -> ptr from "torch_std_helper"
 extern fn torch_std_delete_tensor(t: ptr) -> void from "torch_std_helper"
 extern fn torch_std_arange(start: int, end: int, step: int, dtype: int) -> ptr from "torch_std_helper"
+
+# Tensor 切片与元数据
+extern fn torch_std_narrow(a: ptr, dim: int, start: int, length: int) -> ptr from "torch_std_helper"
+extern fn torch_std_size(a: ptr, dim: int) -> int from "torch_std_helper"
  
 # 数据类型常量
 DTYPE_FLOAT32: int = 0
