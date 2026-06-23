@@ -74,25 +74,27 @@ def to_alpha_bar(sigma: float) -> float:
 
 def cfg_predict(unet_fn, x: ptr, sigma: ptr, text_emb_cond: ptr,
                 text_emb_uncond: ptr, cfg_scale: float) -> ptr:
-    """Combined CFG noise prediction.
+    """CFG-combined denoised prediction.
     
-    unet_fn: function(sd_dict, x, timestep, text_emb) -> noise_pred
-    x: current noisy latent (B, C, H, W)
-    sigma: noise level (scalar tensor)
-    text_emb_cond: conditioned text embeddings
-    text_emb_uncond: unconditioned text embeddings (empty)
-    cfg_scale: guidance scale
+    UNet outputs epsilon (noise). We combine cond/uncond in epsilon space
+    and convert to denoised for the sampler: denoised = x - sigma * eps_cfg.
     
-    Returns: CFG-combined noise prediction
+    Returns: CFG-combined DENOISED prediction (x0 estimate).
     """
-    # Cond prediction
-    cond_noise = unet_fn(x, sigma, text_emb_cond)
+    # Cond / uncond epsilon predictions
+    cond_eps = unet_fn(x, sigma, text_emb_cond)
+    uncond_eps = unet_fn(x, sigma, text_emb_uncond)
     
-    # Uncond prediction
-    uncond_noise = unet_fn(x, sigma, text_emb_uncond)
+    # CFG in epsilon space: eps_cfg = uncond + cfg * (cond - uncond)
+    eps_diff = torch_std_sub(cond_eps, uncond_eps)
+    eps_scaled = torch_std_mul_scalar(eps_diff, cfg_scale)
+    eps_cfg = torch_std_add(uncond_eps, eps_scaled)
     
-    # CFG: eps = uncond + cfg * (cond - uncond)
-    return uncond_noise + cfg_scale * (cond_noise - uncond_noise)
+    # Convert epsilon to denoised: denoised = x - sigma * eps_cfg
+    sigma_eps = torch_std_mul(sigma, eps_cfg)
+    denoised = torch_std_sub(x, sigma_eps)
+    
+    return denoised
 
 
 # ==============================================================================
