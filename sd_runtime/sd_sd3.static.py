@@ -82,18 +82,24 @@ def sd3_generate(prompt: str, steps: int, cfg: float, seed: int,
     txt = sd3_encode_prompt(prompt)
     
     # 2. Prepare noise
-    sigmas = flow_match_sigmas(steps, 0.002, 30.0)
+    sigmas = torch_std_fm_sigmas(steps, 0.002, 30.0)
     latent_h = height // 8
     latent_w = width // 8
     x = torch_std_randn(latent_h * 16, latent_w, seed)
     x = torch_std_unsqueeze(x, 0)
     
-    # 3. Flow matching sampling (reuse FLUX sampler)
+    # 3. Flow matching sampling (reuse FLUX C++ step)
+    dt = 1.0 / float(steps)
     for i in range(steps):
-        t = torch_std_full_scalar(1, sigmas[i])
-        guidance_tensor = torch_std_full_scalar(1, cfg)
+        t_scalar = float(i) * dt
+        t_shape = make_int_array(1)
+        int_array_set(t_shape, 0, 1)
+        t = torch_std_full(t_shape, 1, t_scalar, 0)
+        guidance_shape = make_int_array(1)
+        int_array_set(guidance_shape, 0, 1)
+        guidance_tensor = torch_std_full(guidance_shape, 1, cfg, 0)
         v = sd3_forward(x, txt, t, guidance_tensor)
-        x = flow_match_step(x, v, sigmas[i], sigmas[i+1], seed + i)
+        x = torch_std_fm_step(v, x, dt)
     
     # 4. VAE decode
     image = torch_std_vae_decode(x)

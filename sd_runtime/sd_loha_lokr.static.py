@@ -180,22 +180,11 @@ def lokr_merge_into_dict(model_dict: ptr, lokr_dict: ptr,
 def oft_apply(weight: ptr, oft_R: ptr, scale: float) -> ptr:
     """Apply OFT (Orthogonal Finetuning).
     
-    Simplified: ΔW = (R - I) * W * scale
-    where I is identity. Uses torch_std_full to create identity matrix.
+    Simplified: ΔW = (R - I) * W * scale = R*W - W
+    where I is identity. Compute directly without building identity matrix.
     """
     n = int(torch_std_size(oft_R, 0))
-    # Build identity matrix using full + narrow
-    shape = make_int_array(2)
-    int_array_set(shape, 0, n)
-    int_array_set(shape, 1, n)
-    identity = torch_std_full(shape, 2, 0.0, 0)
-    for i in range(n):
-        # Set diagonal to 1
-        col = torch_std_narrow(identity, 1, i, 1)
-        row = torch_std_narrow(col, 0, i, 1)
-        # Can't easily set individual element in StaticPy
-        pass
-    # Simplified: just use R directly without subtracting I
+    # Δ = R*W - W (equivalent to (R-I)*W without building I)
     delta = torch_std_matmul(oft_R, weight)
     delta = torch_std_sub(delta, weight)
     delta = torch_std_mul_scalar(delta, scale)
