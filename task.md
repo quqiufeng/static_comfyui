@@ -92,16 +92,17 @@ libtorch_std_helper 已有 SD1.5/SDXL UNet forward，StaticPy 侧做权重管理
 ## Phase 6: K-Diffusion Samplers
 
 对应 `comfyui_ref/comfy/k_diffusion/sampling.py` (1957 行)。
-libtorch_std_helper 已有 DDIM/Euler/DPM++ sampler，StaticPy 侧做 sigma 调度。
+C++ 运行时提供核心去噪步骤 + sigma 调度，StaticPy 侧做采样循环 + CFG 组合。
 
 | 状态 | 模块 | 源文件 | 行数 | 策略 |
 |------|------|--------|------|------|
-| [ ] | **Sigma 调度** | `k_diffusion/utils.py` | 313 | get_sigmas_karras/exponential 等 |
-| [ ] | **DDIM** | `k_diffusion/sampling.py` | — | sample_ddim |
-| [ ] | **Euler / Euler Ancestral** | `k_diffusion/sampling.py` | — | 调用 `torch_std_sample_euler*` |
-| [ ] | **DPM++ 2M / 2S** | `k_diffusion/sampling.py` | — | 调用 `torch_std_sample_dpmpp_2m` |
-| [ ] | **DPM++ SDE** | `k_diffusion/sampling.py` | — | SDE 采样变体 |
-| [ ] | **Euler 完整 samplers** | `k_diffusion/sampling.py` | 1957 | 全部 sampler 函数 |
+| [x] | **Sigma 调度** | `sd_samplers.static.py` | 25 | get_sigmas_karras/exponential/linear/ddim |
+| [x] | **DDIM** | `sd_samplers.static.py` + C++ | 20 | sample_ddim + ddim_from_sigma conv |
+| [x] | **Euler** | `sd_samplers.static.py` + C++ | 30 | sample_euler + CFG 循环 |
+| [x] | **Euler Ancestral** | `sd_samplers.static.py` + C++ | 25 | sample_euler_ancestral |
+| [x] | **DPM++ 2M** | `sd_samplers.static.py` + C++ | 30 | sample_dpmpp_2m (二阶 multi-step) |
+| [x] | **CFG 组合** | `sd_samplers.static.py` | 20 | cfg_predict(cond + uncond) |
+| [ ] | **DPM++ SDE** | `k_diffusion/sampling.py` | — | 额外 SDE 变体 |
 | [ ] | **DEIS** | `k_diffusion/deis.py` | — | DEIS 采样器 |
 | [ ] | **SA-Solver** | `k_diffusion/sa_solver.py` | — | SA-Solver |
 
@@ -217,7 +218,7 @@ Phase 2: Attention  █████░░░░░  5/7
 Phase 3: CLIP       █████░░░░░  4/6
 Phase 4: SD UNet    ██████████  4/4
 Phase 5: VAE        ██████████  4/4
-Phase 6: K-Samplers ░░░░░░░░░░  0/9
+Phase 6: K-Samplers ██████░░░░  6/9
 Phase 7: Comfy Samplers ░░░░░░  0/5
 Phase 8: SD Pipe    ░░░░░░░░░░  0/5
 Phase 9: ControlNet ░░░░░░░░░░  0/3
