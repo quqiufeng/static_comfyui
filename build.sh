@@ -27,6 +27,9 @@ TRANSLATE="${COMPILER_DIR}/translate.py"
 
 mkdir -p "${BUILD_DIR}" "${LIBS_DIR}"
 
+# ====== 配置 libtorch_std_helper.so 路径 (供 translate.py 生成 load-shared-object) ======
+export STATICPY_TORCH_STD_SO="${STATICPY_TORCH_STD_SO:-${TORCH_STD}/build/libtorch_std_helper.so}"
+
 # ====== 编译 StaticPy → .ss ======
 echo "=== Step 1: StaticPy → Scheme ==="
 

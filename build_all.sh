@@ -2,8 +2,14 @@
 # build_all.sh — Compile ALL StaticPy modules into .so, then deliver ELF
 # Usage: bash build_all.sh
 # Pre-requisite: Chez Scheme + libtorch + CUDA
+# 
+# 部署时 libtorch_std_helper.so 通过 LD_LIBRARY_PATH 查找,
+# STATICPY_TORCH_STD_SO 设为纯文件名（不含路径）
 
 set -euo pipefail
+
+# 部署模式下: load-shared-object 使用纯文件名, 运行时通过 LD_LIBRARY_PATH 查找
+export STATICPY_TORCH_STD_SO="libtorch_std_helper.so"
 
 FILES=" \
   sd_runtime/ops.static.py \
