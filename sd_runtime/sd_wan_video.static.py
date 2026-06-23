@@ -6,20 +6,13 @@
 from ops import *
 
 
-_wan_weight_ptrs: ptr
-_wan_n_weights: int
+_wan_dict: ptr
 _wan_vae: ptr
 
 
 def wan_video_init(safetensors_path: str, vae_path: str) -> void:
-    global _wan_weight_ptrs, _wan_n_weights, _wan_vae
-    sd_dict = torch_std_safetensors_load(safetensors_path)
-    n = torch_std_safetensors_count(sd_dict)
-    w = make_ptr_array(n)
-    for i in range(n):
-        ptr_array_set(w, i, torch_std_safetensors_tensor(sd_dict, i))
-    _wan_weight_ptrs = w
-    _wan_n_weights = n
+    global _wan_dict, _wan_vae
+    _wan_dict = torch_std_safetensors_load(safetensors_path)
     _wan_vae = torch_std_jit_load(vae_path)
 
 
@@ -35,9 +28,9 @@ def wan_video_decode(latent: ptr) -> ptr:
 
 def wan_video_forward(latent: ptr, timestep: ptr, text_emb: ptr,
                        n_frames: int, height: int, width: int) -> ptr:
-    global _wan_weight_ptrs, _wan_n_weights
+    global _wan_dict
     return torch_std_wan_video_forward(
-        _wan_weight_ptrs, _wan_n_weights,
+        _wan_dict,
         latent, timestep, text_emb,
         n_frames, height, width)
 

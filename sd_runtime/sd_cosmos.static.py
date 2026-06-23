@@ -6,20 +6,13 @@
 from ops import *
 
 
-_cosmos_weight_ptrs: ptr
-_cosmos_n_weights: int
+_cosmos_dict: ptr
 _cosmos_vae: ptr
 
 
 def cosmos_init(safetensors_path: str, vae_path: str) -> void:
-    global _cosmos_weight_ptrs, _cosmos_n_weights, _cosmos_vae
-    sd_dict = torch_std_safetensors_load(safetensors_path)
-    n = torch_std_safetensors_count(sd_dict)
-    w = make_ptr_array(n)
-    for i in range(n):
-        ptr_array_set(w, i, torch_std_safetensors_tensor(sd_dict, i))
-    _cosmos_weight_ptrs = w
-    _cosmos_n_weights = n
+    global _cosmos_dict, _cosmos_vae
+    _cosmos_dict = torch_std_safetensors_load(safetensors_path)
     _cosmos_vae = torch_std_jit_load(vae_path)
 
 
@@ -35,9 +28,9 @@ def cosmos_decode(latent: ptr) -> ptr:
 
 def cosmos_forward(latent: ptr, timestep: ptr, text_emb: ptr,
                     n_frames: int, height: int, width: int) -> ptr:
-    global _cosmos_weight_ptrs, _cosmos_n_weights
+    global _cosmos_dict
     return torch_std_cosmos_forward(
-        _cosmos_weight_ptrs, _cosmos_n_weights,
+        _cosmos_dict,
         latent, timestep, text_emb,
         n_frames, height, width)
 
