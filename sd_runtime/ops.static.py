@@ -17,7 +17,8 @@ extern fn torch_std_full(shape: ptr, ndim: int, value: float, dtype: int) -> ptr
 extern fn torch_std_clone(t: ptr) -> ptr from "torch_std_helper"
 extern fn torch_std_to_dtype(t: ptr, dtype: int) -> ptr from "torch_std_helper"
 extern fn torch_std_delete_tensor(t: ptr) -> void from "torch_std_helper"
-
+extern fn torch_std_arange(start: int, end: int, step: int, dtype: int) -> ptr from "torch_std_helper"
+ 
 # 数据类型常量
 DTYPE_FLOAT32: int = 0
 DTYPE_FLOAT64: int = 1
@@ -56,7 +57,9 @@ extern fn torch_std_log(a: ptr) -> ptr from "torch_std_helper"
 extern fn torch_std_sqrt(a: ptr) -> ptr from "torch_std_helper"
 extern fn torch_std_neg(a: ptr) -> ptr from "torch_std_helper"
 extern fn torch_std_abs(a: ptr) -> ptr from "torch_std_helper"
-
+extern fn torch_std_cos(a: ptr) -> ptr from "torch_std_helper"
+extern fn torch_std_sin(a: ptr) -> ptr from "torch_std_helper"
+ 
 # ==============================================================================
 # 激活函数
 # ==============================================================================
@@ -153,11 +156,4 @@ extern fn torch_std_batch_norm2d(input: ptr, weight: ptr, bias: ptr,
 # ==============================================================================
 
 extern fn torch_std_mul_scalar(t: ptr, s: float) -> ptr from "torch_std_helper"
-
-def torch_std_add_scalar(t: ptr, s: float) -> ptr:
-    """t + s  (通过 full + add 实现)"""
-    shape_arr: ptr = make_int_array(1)
-    n: int = torch_std_numel(t)
-    int_array_set(shape_arr, 0, n)
-    scalar_t: ptr = torch_std_full(shape_arr, 1, s, DTYPE_FLOAT32)
-    return torch_std_add(t, scalar_t)
+extern fn torch_std_add_scalar(t: ptr, s: float) -> ptr from "torch_std_helper"
