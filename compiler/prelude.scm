@@ -149,17 +149,15 @@
 (define (file-read-all fp)
   (let* ((buf-size 4096)
          (buf (foreign-alloc buf-size))
-         (result '()))
+         (out (open-output-string)))
     (let loop ()
       (let ((n (libc-fread buf 1 (- buf-size 1) fp)))
         (when (> n 0)
-          (let ((bv (make-bytevector n 0)))
-            (do ((i 0 (+ i 1))) ((= i n))
-              (bytevector-u8-set! bv i (foreign-ref 'unsigned-8 buf i)))
-            (set! result (cons (utf8->string bv) result)))
+          (foreign-set! 'unsigned-8 buf n 0)  ;; null-terminate
+          (display (pointer->string buf) out)
           (loop))))
     (foreign-free buf)
-    (apply string-append (reverse result))))
+    (get-output-string out)))
 
 (define (file-read-floats path n)
   "读取 n 个 float32 到 float-array"
@@ -339,12 +337,14 @@
   (string->number s))
 
 (define (string_join parts sep)
-  (let loop ((p parts) (first #t))
-    (if (null? p)
-        ""
-        (if first
-            (string-append (car p) (loop (cdr p) #f))
-            (string-append sep (car p) (loop (cdr p) #f))))))
+  "连接字符串列表, O(n) 通过 string port"
+  (let ((out (open-output-string)))
+    (let loop ((p parts) (first #t))
+      (when (not (null? p))
+        (unless first (display sep out))
+        (display (car p) out)
+        (loop (cdr p) #f)))
+    (get-output-string out)))
 
 (define (string_trim s)
   (let ((len (string-length s)))
