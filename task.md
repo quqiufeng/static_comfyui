@@ -30,9 +30,9 @@ libtorch_std_helper 已在 C++ 侧提供完整实现，StaticPy 侧需要 extern
 
 | 状态 | 模块 | 源文件 | 行数 | 策略 |
 |------|------|--------|------|------|
-| [ ] | **Tensor 基础** | `ops.py` 前半 | 800 | extern fn 声明到 libtorch_std_helper |
-| [ ] | **数学运算** | `ops.py` 中间 | 300 | add/sub/mul/div/exp/log/sqrt 等 |
-| [ ] | **归约 / 比较** | `ops.py` 后半 | 401 | sum/mean/max/min + eq/gt/lt/clamp |
+| [x] | **Tensor 基础** | `ops.py` 前半 | 800 | extern fn 声明到 libtorch_std_helper |
+| [x] | **数学运算** | `ops.py` 中间 | 300 | add/sub/mul/div/exp/log/sqrt 等 |
+| [x] | **归约 / 比较** | `ops.py` 后半 | 401 | sum/mean/max/min + eq/gt/lt/clamp |
 | [ ] | **函数式 nn** | `ldm/modules/diffusionmodules/util.py` | 306 | timestep embedding, groups, normalization |
 
 ## Phase 2: Attention
@@ -208,7 +208,7 @@ libtorch_std_helper 已有 T5 SentencePiece tokenizer。
 
 ```
 Phase 0: 基础设施   ████████░░  5/6
-Phase 1: 张量基元   ░░░░░░░░░░  0/4
+Phase 1: 张量基元   ███████░░░  3/4
 Phase 2: Attention  ░░░░░░░░░░  0/5
 Phase 3: CLIP       ░░░░░░░░░░  0/6
 Phase 4: SD UNet    ░░░░░░░░░░  0/4
