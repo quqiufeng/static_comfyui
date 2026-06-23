@@ -19,7 +19,7 @@
 | [x] | **标准库** | `compiler/stdlib.scm` | 90 | 工具函数 |
 | [x] | **build 管线** | `build.sh` | 130 | StaticPy → Chez AOT → .so |
 | [x] | **deliver 管线** | `deliver.sh` | 230 | .so → ELF + lib/ 部署包 |
-| [x] | **C++ 运行时** | `/opt/ReScheme/libtorch_std_helper.{h,cpp}` | 4400 | 364 extern "C" API + ~370 实现行 (含 arange/cos/sin/add_scalar/mul_scalar) |
+| [x] | **C++ 运行时** | `/opt/ReScheme/libtorch_std_helper.{h,cpp}` | 4400+ | 380+ extern "C" API (含 attention/layer_norm/rms_norm/group_norm/flux_embed_nd/arange/cos/sin/add_scalar/mul_scalar) |
 
 ---
 
@@ -41,11 +41,13 @@ libtorch_std_helper 已在 C++ 侧提供完整实现，StaticPy 侧需要 extern
 
 | 状态 | 模块 | 源文件 | 行数 | 策略 |
 |------|------|--------|------|------|
-| [ ] | **CrossAttention** | `attention.py` | 200 | QKV → sdpa → proj |
-| [ ] | **BasicTransformerBlock** | `attention.py` | 300 | attn + norm + FF |
-| [ ] | **SpatialTransformer** | `attention.py` | 200 | 2D 位置编码 + transformer |
-| [ ] | **MemoryEfficientCrossAttention** | `attention.py` | 150 | sub-quadratic / xformers |
-| [ ] | **FLUX 双流注意力** | `ldm/flux/layers.py` | 372 | joint img/txt attention |
+| [x] | **注意力核心** | `sd_runtime/attention.static.py` | 120 | torch_std_attention (C++ multi-head SDPA + skip_reshape) |
+| [x] | **CrossAttention 函数式** | `sd_runtime/attention.static.py` | 30 | 线性投影 + attention + 输出投影 |
+| [x] | **GEGLU / FeedForward** | `sd_runtime/attention.static.py` | 40 | chunk + gelu + 线性层 |
+| [x] | **FLUX RoPE + EmbedND** | `sd_runtime/flux_attention.static.py` | 70 | torch_std_flux_embed_nd (C++, 多轴旋转位置编码) |
+| [x] | **C++ 新增** | `libtorch_std_helper.{h,cpp}` | 120+ | attention, layer_norm, rms_norm, group_norm, flux_embed_nd |
+| [ ] | **BasicTransformerBlock 函数式** | (待确认是否必需的独立模块) | — | C++ UNet forward 已内部处理 |
+| [ ] | **SpatialTransformer 函数式** | (待确认) | — | C++ UNet forward 已内部处理 |
 
 ## Phase 3: CLIP Text Encoder
 
@@ -209,7 +211,7 @@ libtorch_std_helper 已有 T5 SentencePiece tokenizer。
 ```
 Phase 0: 基础设施   ██████████  6/6
 Phase 1: 张量基元   ██████████  4/4
-Phase 2: Attention  ░░░░░░░░░░  0/5
+Phase 2: Attention  █████░░░░░  5/7
 Phase 3: CLIP       ░░░░░░░░░░  0/6
 Phase 4: SD UNet    ░░░░░░░░░░  0/4
 Phase 5: VAE        ░░░░░░░░░░  0/4

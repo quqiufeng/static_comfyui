@@ -126,6 +126,7 @@ extern fn torch_std_squeeze(a: ptr, dim: int) -> ptr from "torch_std_helper"
 extern fn torch_std_unsqueeze(a: ptr, dim: int) -> ptr from "torch_std_helper"
 extern fn torch_std_cat(tensors: ptr, n: int, dim: int) -> ptr from "torch_std_helper"
 extern fn torch_std_stack(tensors: ptr, n: int, dim: int) -> ptr from "torch_std_helper"
+extern fn torch_std_slice(a: ptr, dim: int, start: int, end: int, step: int) -> ptr from "torch_std_helper"
 
 # ==============================================================================
 # 神经网络层
@@ -133,6 +134,7 @@ extern fn torch_std_stack(tensors: ptr, n: int, dim: int) -> ptr from "torch_std
 
 extern fn torch_std_matmul(a: ptr, b: ptr) -> ptr from "torch_std_helper"
 extern fn torch_std_linear(input: ptr, weight: ptr, bias: ptr) -> ptr from "torch_std_helper"
+extern fn torch_std_attention(q: ptr, k: ptr, v: ptr, heads: int, mask: ptr, skip_reshape: int) -> ptr from "torch_std_helper"
 extern fn torch_std_conv1d(input: ptr, weight: ptr, bias: ptr,
     stride: int, padding: int, dilation: int, groups: int) -> ptr from "torch_std_helper"
 extern fn torch_std_conv2d(input: ptr, weight: ptr, bias: ptr,
@@ -150,7 +152,10 @@ extern fn torch_std_avg_pool2d(input: ptr, kernel_h: int, kernel_w: int,
 extern fn torch_std_batch_norm2d(input: ptr, weight: ptr, bias: ptr,
     running_mean: ptr, running_var: ptr,
     training: int, momentum: float, eps: float) -> ptr from "torch_std_helper"
-
+extern fn torch_std_layer_norm(input: ptr, weight: ptr, bias: ptr, eps: float) -> ptr from "torch_std_helper"
+extern fn torch_std_rms_norm(input: ptr, weight: ptr, eps: float) -> ptr from "torch_std_helper"
+extern fn torch_std_group_norm(input: ptr, weight: ptr, bias: ptr, num_groups: int, eps: float) -> ptr from "torch_std_helper"
+ 
 # ==============================================================================
 # 标量运算辅助
 # ==============================================================================
