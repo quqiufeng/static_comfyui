@@ -1,18 +1,25 @@
-# sd_runtime/sd_wan_video.static.py — Wan Video 扩散 (Phase 15)
+# sd_runtime/sd_wan_video.static.py — Wan Video 扩散 (libTorch C++)
 #
 # Wan Video: 3D UNet with RoPE position encoding.
-# 使用 JIT TorchScript 前向.
+# 使用 torch_std_wan_video_forward (纯 libTorch).
 
 from ops import *
 
 
-_wan_jit: ptr
+_wan_weight_ptrs: ptr
+_wan_n_weights: int
 _wan_vae: ptr
 
 
-def wan_video_init(jit_model_path: str, vae_path: str) -> void:
-    global _wan_jit, _wan_vae
-    _wan_jit = torch_std_jit_load(jit_model_path)
+def wan_video_init(safetensors_path: str, vae_path: str) -> void:
+    global _wan_weight_ptrs, _wan_n_weights, _wan_vae
+    sd_dict = torch_std_safetensors_load(safetensors_path)
+    n = torch_std_safetensors_count(sd_dict)
+    w = make_ptr_array(n)
+    for i in range(n):
+        ptr_array_set(w, i, torch_std_safetensors_tensor(sd_dict, i))
+    _wan_weight_ptrs = w
+    _wan_n_weights = n
     _wan_vae = torch_std_jit_load(vae_path)
 
 
@@ -26,10 +33,13 @@ def wan_video_decode(latent: ptr) -> ptr:
     return torch_std_jit_forward(_wan_vae, latent)
 
 
-def wan_video_forward(latent: ptr, timestep: ptr,
-                       text_emb: ptr) -> ptr:
-    global _wan_jit
-    return torch_std_jit_forward(_wan_jit, latent, timestep, text_emb)
+def wan_video_forward(latent: ptr, timestep: ptr, text_emb: ptr,
+                       n_frames: int, height: int, width: int) -> ptr:
+    global _wan_weight_ptrs, _wan_n_weights
+    return torch_std_wan_video_forward(
+        _wan_weight_ptrs, _wan_n_weights,
+        latent, timestep, text_emb,
+        n_frames, height, width)
 
 
 def wan_video_generate(prompt: str, steps: int,
@@ -51,13 +61,11 @@ def wan_video_generate(prompt: str, steps: int,
         t_shape = make_int_array(1)
         int_array_set(t_shape, 0, 1)
         t = torch_std_full(t_shape, 1, t_scalar, 0)
-        noise_pred = wan_video_forward(x, t, null)
+        noise_pred = wan_video_forward(x, t, null, n_frames, height, width)
         x = torch_std_sub(x, torch_std_mul_scalar(noise_pred, dt))
     
     return wan_video_decode(x)
 
 
 def wan_video_free() -> void:
-    global _wan_jit, _wan_vae
-    torch_std_jit_module_delete(_wan_jit)
-    torch_std_jit_module_delete(_wan_vae)
+    pass
