@@ -61,6 +61,12 @@ def get_sigmas_ddim(steps: int, sigma_min: float = 0.03,
 # 辅助函数
 # ==============================================================================
 
+def tensor_scalar(t: ptr) -> float:
+    """Extract scalar value from 1-element tensor."""
+    out = make_float_array(1)
+    torch_std_to_float_array(t, out, 1)
+    return float_array_ref(out, 0)
+
 def to_alpha_bar(sigma: float) -> float:
     """Convert sigma to alpha_cumprod (needed for DDIM)."""
     # sigma^2 = (1 - alpha_bar) / alpha_bar
@@ -200,5 +206,44 @@ def sample_ddim(unet_fn, x: ptr, sigmas: ptr,
         
         x = torch_std_sample_ddim_from_sigma(
             noise_pred, x, sigma_t, sigma_next, eta)
+    
+    return x
+
+
+# ==============================================================================
+# 采样器循环（DPM++ SDE — simplified）
+# ==============================================================================
+
+def sample_dpmpp_sde(unet_fn, x: ptr, sigmas: ptr,
+                      text_emb_cond: ptr, text_emb_uncond: ptr,
+                      cfg_scale: float = 7.0, eta: float = 1.0) -> ptr:
+    """DPM++ SDE sampler loop (stochastic).
+    
+    Simplified: Euler step + stochastic noise injection.
+    Full DPM++ SDE uses a more complex second-order solver.
+    """
+    n_steps = int(torch_std_size(sigmas, 0)) - 1
+    shape = make_int_array(4)
+    int_array_set(shape, 0, int(torch_std_size(x, 0)))
+    int_array_set(shape, 1, int(torch_std_size(x, 1)))
+    int_array_set(shape, 2, int(torch_std_size(x, 2)))
+    int_array_set(shape, 3, int(torch_std_size(x, 3)))
+    
+    for i in range(n_steps):
+        sigma_t = torch_std_narrow(sigmas, 0, i, 1)
+        sigma_next = torch_std_narrow(sigmas, 0, i + 1, 1)
+        
+        noise_pred = cfg_predict(unet_fn, x, sigma_t,
+                                  text_emb_cond, text_emb_uncond, cfg_scale)
+        
+        # Euler step
+        x_euler = torch_std_sample_euler(noise_pred, x, sigma_t, sigma_next)
+        
+        # Add stochastic noise (SDE correction)
+        noise = torch_std_randn(shape, 4, 0)
+        sigma_t_val = tensor_scalar(sigma_t)
+        sigma_n_val = tensor_scalar(sigma_next)
+        noise_scale = math.sqrt(sigma_t_val * sigma_t_val - sigma_n_val * sigma_n_val) * eta
+        x = torch_std_add(x_euler, torch_std_mul_scalar(noise, noise_scale))
     
     return x

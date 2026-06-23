@@ -30,18 +30,21 @@ mkdir -p "${BUILD_DIR}" "${LIBS_DIR}"
 # ====== 编译 StaticPy → .ss ======
 echo "=== Step 1: StaticPy → Scheme ==="
 
-# 拼接所有输入 .static.py，通过 translate.py
+# 拼接所有输入 .static.py → 一次 translate.py 调用 (共享 extern fn 声明)
 INPUT_SS="${BUILD_DIR}/input.ss"
+TMPPY="${BUILD_DIR}/combined_input.py"
 {
     for f in "$@"; do
         if [ -f "$f" ]; then
-            python3 "${TRANSLATE}" < "$f"
+            cat "$f"
+            echo ""
         else
             echo "Error: file not found: $f" >&2
             exit 1
         fi
     done
-} > "${INPUT_SS}"
+} > "${TMPPY}"
+python3 "${TRANSLATE}" < "${TMPPY}" > "${INPUT_SS}"
 
 echo "  → ${INPUT_SS}"
 
