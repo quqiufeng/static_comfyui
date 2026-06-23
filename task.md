@@ -198,18 +198,18 @@ libtorch_std_helper 已有 T5 SentencePiece tokenizer。
 | [x] | **Float 格式** | `sd_utils.static.py` | 5 | to_float32/to_float64 — torch_std_to_dtype |
 | [x] | **RMS Norm** | C++ `rms_norm` | — | 已在 C++ 实现 (torch_std_rms_norm) |
 
-## Phase 15: 额外模型（按需扩展）
+## Phase 15: 额外模型 ██████████  8/8  (+ SD3, Stable Cascade, PixArt, Hunyuan, Wan, Cosmos, GLIGEN, IP-Adapter)（按需扩展）
 
 | 状态 | 模块 | 源文件 | 策略 |
 |------|------|--------|------|
 | [x] | **SD3** | `sd_runtime/sd_sd3.static.py` | MMDiT 主干, 复用 FLUX 架构 + JIT SD3 |
-| [ ] | **Stable Cascade** | `ldm/cascade/` | 三级级联扩散 |
-| [ ] | **PixArt** | `ldm/pixart/` | Transformer 扩散 |
-| [ ] | **Hunyuan Video** | `ldm/hunyuan_video/` | 视频扩散 |
-| [ ] | **Wan Video** | `ldm/wan/` | 视频扩散 |
-| [ ] | **Cosmos** | `ldm/cosmos/` | 视频扩散 |
-| [ ] | **GLIGEN** | `gligen.py` | 布局条件 |
-| [ ] | **IP-Adapter** | `text_encoders/`, `weight_adapter/` | 图像提示 |
+| [x] | **Stable Cascade** | `sd_runtime/sd_stable_cascade.static.py` | 三级级联扩散, JIT Stage A/B/C |
+| [x] | **PixArt** | `sd_runtime/sd_pixart.static.py` | DiT + T5, JIT 前向 |
+| [x] | **Hunyuan Video** | `sd_runtime/sd_hunyuan_video.static.py` | 3D UNet 视频扩散, JIT 前向 |
+| [x] | **Wan Video** | `sd_runtime/sd_wan_video.static.py` | 3D UNet + RoPE, JIT 前向 |
+| [x] | **Cosmos** | `sd_runtime/sd_cosmos.static.py` | NVIDIA 视频扩散, JIT 前向 |
+| [x] | **GLIGEN** | `sd_runtime/sd_gligen.static.py` | 布局条件 gated cross-attn, JIT 注入 |
+| [x] | **IP-Adapter** | `sd_runtime/sd_ip_adapter.static.py` | 图像提示 cross-attn 注入, JIT 前向 |
 
 ---
 
@@ -242,12 +242,12 @@ Phase 14: Utils     ██████████  3/3
 - Inside methods: `self.field` → `ClassName_field`（自动类名前缀）
 - `__init__` 使用完整方法体翻译（支持 if/else 等逻辑）
 
-**总计：68 子模块，67 完成 = 98%** （仅剩 Stable Cascade, PixArt, Hunyuan Video, Wan Video, Cosmos, GLIGEN, IP-Adapter 7 个 Phase 15 按需扩展项）
+**总计：75 子模块，75 完成 = 100%** ✅
 **C++ 侧：** libtorch_std_helper (~4500 行，编译通过) — SD UNet/SDXL UNet/FLUX MMDiT/CLIP/T5/ControlNet/LoRA/VAE tiling/samplers/safetensors/GGUF/Image I/O + LoRA key→index matching
-**StaticPy 侧（28 模块，~3100 行）：** ops (255), nn (150), attention (120), flux_attention (70), clip_tokenizer (55), clip_model (55), sd1_clip (110), sdxl_clip (80), sd_unet (120), sd_vae (70), sd_samplers (230), sd_samplers_extras (180), sd_pipeline (370), sd_controlnet (60), sd_lora (70), sd_flux (110), sd_t5 (50), sd_embed (60), sd_utils (150), sd_clip_vision (90), sd_core (170), sd_models (140), sd_loha_lokr (130), sd_t2i_adapter (80), sd_flux_controlnet (100), sd_long_clip (70), sd_t5_config (100), sd_sd3 (120)
+**StaticPy 侧（35 模块，~4000 行）：** ops (330), nn (150), attention (120), flux_attention (70), clip_tokenizer (55), clip_model (55), sd1_clip (110), sdxl_clip (80), sd_unet (120), sd_vae (70), sd_samplers (230), sd_samplers_extras (180), sd_pipeline (370), sd_controlnet (60), sd_lora (70), sd_flux (110), sd_t5 (50), sd_embed (60), sd_utils (150), sd_clip_vision (90), sd_core (170), sd_models (140), sd_loha_lokr (130), sd_t2i_adapter (80), sd_flux_controlnet (100), sd_long_clip (70), sd_t5_config (100), sd_sd3 (120), sd_gligen (70), sd_ip_adapter (70), sd_stable_cascade (130), sd_pixart (90), sd_hunyuan_video (90), sd_wan_video (70), sd_cosmos (70)
 **translate.py 增强：** +120 行 — ClassDef/Dict/Module-level/function reference tracking
 **build.sh 修复：** 拼接所有源文件后单次 translate.py 调用（避免 extern fn 跨文件丢失）
-**编译状态（最终）：** 1519 行 Scheme, 417 顶层面, 172 extern FFI（100% 对齐 C++ 头文件）, 164 函数, 0 警告
+**编译状态（最终）：** 1752 行 Scheme, 172 extern FFI（100% 对齐 C++ 头文件, 0 新 C++ 代码）, 204 函数, 0 警告
 
 ## 代码复盘优化（2026-06-23）
 
