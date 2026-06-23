@@ -271,8 +271,9 @@ def my_forward(x: ptr, t: ptr) -> ptr:
 
 | 文件 | 职责 | 语言 |
 |------|------|------|
-| `cpp_runtime/libtorch_std_helper.h` | extern "C" API 声明 | C |
-| `cpp_runtime/libtorch_std_helper.cpp` | 所有模型 forward 实现 | C++ (libTorch) |
+| `cpp_runtime/` → `/opt/ReScheme/` | **符号链接**到规范 C++ 运行时 | — |
+| `cpp_runtime/libtorch_std_helper.h` | extern "C" API 声明 (规范源: ReScheme) | C |
+| `cpp_runtime/libtorch_std_helper.cpp` | 所有模型 forward 实现 (规范源: ReScheme) | C++ (libTorch) |
 | `ops.static.py` | 所有 extern fn 声明 | StaticPy |
 | `sd_runtime/*.static.py` | 管线编排 + 模型封装 | StaticPy |
 | `compiler/translate.py` | StaticPy → Scheme 翻译 | Python |
