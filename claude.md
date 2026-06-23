@@ -346,6 +346,40 @@ grep "要用的函数" sd_runtime/ops.static.py
 
 ### 9.2 源码优先，禁止脑补
 
+### 9.3 怎么熟悉 StaticPy 语法
+
+没有独立语法文档。通过**三方互证**来理解：
+
+```
+1. translate.py           → 支持哪些 AST 节点、类型映射、函数翻译规则
+2. sd_runtime/*.static.py → 现有的 35 个模块怎么用
+3. 编译后 Scheme 输出      → 最终生成了什么代码
+```
+
+**具体做法：**
+```bash
+# 1. 看类型系统
+grep "TYPE_MAP" compiler/translate.py  # int→int, ptr→void*, float→double...
+
+# 2. 看模型声明
+grep "^extern fn" sd_runtime/ops.static.py | head -5
+
+# 3. 看模块模式
+head -20 sd_runtime/sd_flux.static.py   # 全局 ptr + init + forward + free
+
+# 4. 看翻译结果
+echo "def foo(x: ptr) -> ptr:\n    return x" | python3 compiler/translate.py
+```
+
+**StaticPy 核心规则：**
+- `def name(args) -> ret_type:` → 翻译为 `(define (static_name args) ...)`
+- `extern fn name(params) -> ret from "lib"` → 翻译为 `(define name (foreign-procedure ...))`
+- `global _var` → Scheme 的 `(define _var #f)` + 函数内 `(set! _var ...)`
+- `ptr` = `void*` = 不透明张量指针
+- `int/float/bool/str` = 值类型，直接映射到 Scheme fixnum/flonum/boolean/string
+- `from ops import *` → 被编译器忽略，仅用于 IDE 类型检查
+- 不支持: 默认参数、lambda、列表推导、闭包捕获、decorator
+
 ### 9.3 生态飞轮
 
 这个项目的真正价值不是"一个 ComfyUI 二进制版"，而是**用应用驱动语言运行时成长**：
