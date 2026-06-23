@@ -8,7 +8,7 @@
 # 环境变量:
 #   CHEZ_SCHEME=scheme        Chez Scheme 可执行文件路径 (默认: scheme)
 #   BUILD_DIR=build_out       输出目录 (默认: build_out)
-#   TORCH_STD_HELPER=cpp_runtime      libtorch_std_helper 目录 (默认: cpp_runtime)
+#   TORCH_STD_HELPER=cpp_runtime       libtorch_std_helper 目录 (默认: cpp_runtime → /opt/ReScheme)
 #   CLEAN=1                   先清理 build 目录
 
 set -euo pipefail
@@ -17,7 +17,8 @@ set -euo pipefail
 CHEZ="${CHEZ_SCHEME:-scheme}"
 BUILD_DIR="${BUILD_DIR:-build_out}"
 LIBS_DIR="${BUILD_DIR}/libs"
-TORCH_STD="${TORCH_STD_HELPER:-$(cd "$(dirname "$0")" && pwd)/cpp_runtime}"
+BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
+TORCH_STD="${TORCH_STD_HELPER:-${BASE_DIR}/cpp_runtime}"
 
 COMPILER_DIR="$(cd "$(dirname "$0")/compiler" && pwd)"
 PRELUDE="${COMPILER_DIR}/prelude.scm"
