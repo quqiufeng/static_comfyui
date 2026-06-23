@@ -455,19 +455,19 @@ extern fn torch_std_pixart_forward(
 
 # Hunyuan Video 3D UNet
 extern fn torch_std_hunyuan_video_forward(
-    weight_ptrs: ptr, n_weights: int,
+    sd_dict: ptr,
     x: ptr, timestep: ptr, text_emb: ptr,
     n_frames: int, height: int, width: int) -> ptr from "torch_std_helper"
 
 # Wan Video 3D UNet
 extern fn torch_std_wan_video_forward(
-    weight_ptrs: ptr, n_weights: int,
+    sd_dict: ptr,
     x: ptr, timestep: ptr, text_emb: ptr,
     n_frames: int, height: int, width: int) -> ptr from "torch_std_helper"
 
 # Cosmos Video
 extern fn torch_std_cosmos_forward(
-    weight_ptrs: ptr, n_weights: int,
+    sd_dict: ptr,
     x: ptr, timestep: ptr, text_emb: ptr,
     n_frames: int, height: int, width: int) -> ptr from "torch_std_helper"
 

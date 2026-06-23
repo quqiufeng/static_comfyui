@@ -6,21 +6,14 @@
 from ops import *
 
 
-_hunyuan_weight_ptrs: ptr
-_hunyuan_n_weights: int
+_hunyuan_dict: ptr
 _hunyuan_vae: ptr
 
 
 def hunyuan_video_init(safetensors_path: str, vae_path: str) -> void:
     """加载 Hunyuan Video 权重 + VAE."""
-    global _hunyuan_weight_ptrs, _hunyuan_n_weights, _hunyuan_vae
-    sd_dict = torch_std_safetensors_load(safetensors_path)
-    n = torch_std_safetensors_count(sd_dict)
-    w = make_ptr_array(n)
-    for i in range(n):
-        ptr_array_set(w, i, torch_std_safetensors_tensor(sd_dict, i))
-    _hunyuan_weight_ptrs = w
-    _hunyuan_n_weights = n
+    global _hunyuan_dict, _hunyuan_vae
+    _hunyuan_dict = torch_std_safetensors_load(safetensors_path)
     _hunyuan_vae = torch_std_jit_load(vae_path)
 
 
@@ -37,9 +30,9 @@ def hunyuan_video_decode(latent: ptr) -> ptr:
 def hunyuan_video_forward(latent: ptr, timestep: ptr, text_emb: ptr,
                            n_frames: int, height: int, width: int) -> ptr:
     """Hunyuan Video 3D UNet forward via libTorch C++."""
-    global _hunyuan_weight_ptrs, _hunyuan_n_weights
+    global _hunyuan_dict
     return torch_std_hunyuan_video_forward(
-        _hunyuan_weight_ptrs, _hunyuan_n_weights,
+        _hunyuan_dict,
         latent, timestep, text_emb,
         n_frames, height, width)
 
