@@ -90,15 +90,18 @@
 (define (vec-ref v i)
   (vector-ref v i))
 
-(define (os-getcwd)
-  (let ((buf (foreign-alloc 1024)))
-    (let ((ptr ((foreign-procedure "getcwd" (void* unsigned-64) void*) buf 1024)))
-      (let ((result (pointer->string ptr)))
-        (foreign-free buf)
-        result))))
+;; Helper: convert C char* (as void*) to Scheme string
+(define (c-pointer->string ptr)
+  (if (and ptr (not (eq? ptr 0)))
+      ((foreign-procedure "strdup" (void*) string) ptr)
+      #f))
 
-(define (os-getenv name)
-  (let ((ptr ((foreign-procedure "getenv" (string) void*) name)))
-    (if ptr
-        (pointer->string ptr)
-        #f)))
+(define (os_getcwd)
+  (let ((buf (foreign-alloc 1024)))
+    ((foreign-procedure "getcwd" (void* unsigned-64) void*) buf 1024)
+    (let ((result (c-pointer->string buf)))
+      (foreign-free buf)
+      result)))
+
+(define (os_getenv name)
+  (c-pointer->string ((foreign-procedure "getenv" (string) void*) name)))

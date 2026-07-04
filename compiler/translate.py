@@ -34,6 +34,7 @@ CLASS_INSTANCES = {}    # var_name -> class_name (propagated from constructors)
 _IN_CLASS = None        # current class name being translated
 _IN_METHOD = None       # current method name being translated
 DEFINED_FUNCTIONS = set()  # set of static function names (w/o prefix)
+_CURRENT_PARAMS = set()  # current function's parameter names (to avoid static_ prefix)
 
 # Scheme 预置函数（不是 C 函数，不走 foreign-procedure）
 MATH_FUNCTIONS = {
@@ -187,18 +188,27 @@ def translate_stmt(node, bindings=None):
 
 
 def translate_block(stmts):
+    global _CURRENT_PARAMS
     exprs = []
     for s in stmts:
         if isinstance(s, (ast.Assign, ast.AnnAssign)):
             target = None
             val = None
+            val_expr = None  # for class instance tracking
             if isinstance(s, ast.AnnAssign):
                 target = s.target.id if isinstance(s.target, ast.Name) else None
                 val = translate_expr(s.value) if s.value else "#f"
+                val_expr = s.value
             else:
                 if len(s.targets) == 1 and isinstance(s.targets[0], ast.Name):
                     target = s.targets[0].id
                     val = translate_expr(s.value)
+                    val_expr = s.value
+            # Track class instances from constructors (for method dispatch)
+            if target and val_expr and isinstance(val_expr, ast.Call) and isinstance(val_expr.func, ast.Name):
+                cname = val_expr.func.id
+                if cname in CLASS_METHODS:
+                    CLASS_INSTANCES[target] = cname
             if target and val:
                 exprs.append(f"(set! {target} {val})")
             else:
@@ -246,6 +256,29 @@ def translate_block(stmts):
             pass  # Python global declaration → Scheme define handles this
         elif isinstance(s, ast.Continue):
             exprs.append("(continue)")  # will be wrapped in call/cc
+        elif isinstance(s, ast.FunctionDef):
+            # Nested function definition — translate as a letrec-bound lambda
+            # But we can't emit letrec here since we're in a flat expression list.
+            # Instead, wrap the entire block in letrec. We signal this by prepending
+            # a special marker that translate_function can detect.
+            inner_args = [a.arg for a in s.args.args]
+            func_args = ' '.join(inner_args)
+            # Translate body
+            fbody_start = 0
+            if (len(s.body) > fbody_start and isinstance(s.body[fbody_start], ast.Expr)
+                    and isinstance(s.body[fbody_start].value, ast.Constant)
+                    and isinstance(s.body[fbody_start].value.value, str)):
+                fbody_start = 1
+            old_cp = _CURRENT_PARAMS
+            _CURRENT_PARAMS = set(a.arg for a in s.args.args)
+            inner_exprs = translate_block(s.body[fbody_start:])
+            _CURRENT_PARAMS = old_cp
+            if len(inner_exprs) == 1:
+                fbody = f"    {inner_exprs[0]}"
+            else:
+                fexprs_str = "\n      ".join(inner_exprs)
+                fbody = f"    (begin\n      {fexprs_str}\n    )"
+            exprs.append(f"__LETREC_BIND__{s.name}__=(lambda ({func_args})\n{fbody})")
         else:
             exprs.append(f";; {type(s).__name__}: {ast.dump(s)}")
     return exprs
@@ -276,6 +309,9 @@ def translate_expr(node):
             return '"{}"'.format(node.value.replace('"', '\\"'))
         return repr(node.value)
     elif isinstance(node, ast.Name):
+        # If this name is a parameter of the current function, use as-is
+        if node.id in _CURRENT_PARAMS:
+            return node.id
         # If this name refers to a user-defined function, add static_ prefix
         # This ensures dict values referencing functions work correctly
         if node.id in DEFINED_FUNCTIONS:
@@ -323,9 +359,9 @@ def translate_expr(node):
             elif isinstance(ops[0], ast.GtE):
                 return f"(>= {left} {right})"
             elif isinstance(ops[0], ast.Eq):
-                return f"(= {left} {right})"
+                return f"(equal? {left} {right})"
             elif isinstance(ops[0], ast.NotEq):
-                return f"(not (= {left} {right}))"
+                return f"(not (equal? {left} {right}))"
         return f"(and {left} ... cmp)"
     elif isinstance(node, ast.BoolOp):
         op = "or" if isinstance(node.op, ast.Or) else "and"
@@ -360,6 +396,8 @@ def translate_expr(node):
             if name == "float":
                 return f"(inexact {args[0]})" if args else "0.0"
             if name in PRELUDE_FUNCTIONS:
+                return f"({name} {' '.join(args)})"
+            if name in _CURRENT_PARAMS:
                 return f"({name} {' '.join(args)})"
             return f"(static_{name} {' '.join(args)})"
         elif isinstance(func, ast.Attribute):
@@ -455,7 +493,16 @@ def wrap_body_with_continue(body_parts, stmts):
 
 
 def translate_function(node, source_file=""):
-    name = f"static_{node.name}"
+    global _CURRENT_PARAMS
+    # Record current function's parameters to avoid static_ prefix
+    old_params = _CURRENT_PARAMS
+    _CURRENT_PARAMS = set(a.arg for a in node.args.args)
+
+    # Entry point functions should not get the static_ prefix
+    if node.name == 'static_main':
+        name = 'static_main'
+    else:
+        name = f"static_{node.name}"
     args = [arg.arg for arg in node.args.args]
     # Warn about default parameter values (not supported)
     if node.args.defaults:
@@ -472,11 +519,43 @@ def translate_function(node, source_file=""):
             and isinstance(node.body[body_start].value.value, str)):
         body_start = 1
     body_exprs = translate_block(node.body[body_start:])
-    if len(body_exprs) == 1:
+
+    # Extract letrec bindings (nested function defs)
+    letrec_bindings = {}
+    filtered_exprs = []
+    for e in body_exprs:
+        if isinstance(e, str) and e.startswith("__LETREC_BIND__"):
+            # Format: __LETREC_BIND__func_name__=(lambda (...) ...)
+            rest = e[len("__LETREC_BIND__"):]
+            name_end = rest.find("__=")
+            if name_end > 0:
+                fname = rest[:name_end]
+                flambda = rest[name_end + 3:]
+                letrec_bindings[fname] = flambda
+        else:
+            filtered_exprs.append(e)
+    body_exprs = filtered_exprs
+
+    if letrec_bindings:
+        # Add nested function names to current params so they're not prefixed with static_
+        for fname in letrec_bindings:
+            _CURRENT_PARAMS.add(fname)
+        bindings_str = "\n    ".join(f"({name} {lam})" for name, lam in letrec_bindings.items())
+        if len(body_exprs) == 0:
+            body = f"  (letrec ({bindings_str})\n    (void))"
+        elif len(body_exprs) == 1:
+            body = f"  (letrec ({bindings_str})\n    {body_exprs[0]})"
+        else:
+            exprs_str = "\n    ".join(body_exprs)
+            body = f"  (letrec ({bindings_str})\n    (begin\n      {exprs_str}\n    ))"
+    elif len(body_exprs) == 0:
+        body = "  (void)"
+    elif len(body_exprs) == 1:
         body = f"  {body_exprs[0]}"
     else:
         exprs_str = "\n    ".join(body_exprs)
         body = f"  (begin\n    {exprs_str}\n  )"
+    _CURRENT_PARAMS = old_params
     return f"(define ({name} {' '.join(args)})\n{body})"
 
 
@@ -486,7 +565,7 @@ def generate_extern_ffi():
     loaded_libs = set()
     # .so 路径优先从环境变量读取, 用于 deploy 时指向 lib/ 目录
     torch_std_so = os.environ.get("STATICPY_TORCH_STD_SO",
-                                   "cpp_runtime/build/libtorch_std_helper.so")
+                                   "libtorch_std_helper.so")
     for name, info in EXTERN_FUNCTIONS.items():
         lib = info["lib"]
         if lib == "torch_std_helper" and lib not in loaded_libs:
@@ -598,6 +677,9 @@ def translate_stmt_method(node, class_name, field_classes=None):
 
 def translate_method_body(node, class_name):
     """Translate class method body — handles self.field patterns."""
+    global _CURRENT_PARAMS
+    old_params = _CURRENT_PARAMS
+    _CURRENT_PARAMS = set(a.arg for a in node.args.args)
     # Track field → class mappings (from constructor calls in __init__)
     field_classes = {}  # field_name -> class_name
     start_idx = 0
@@ -626,15 +708,48 @@ def translate_method_body(node, class_name):
                     if ctor_name in CLASS_METHODS:
                         field_classes[target_name] = ctor_name
     
-    body_parts = []
+    # Extract nested function definitions (they must be letrec-bound, not top-level define)
+    nested_funcs = {}  # name -> translated lambda
+    remaining_stmts = []
     for s in node.body[start_idx:]:
         if isinstance(s, ast.FunctionDef):
-            body_parts.append(translate_function(s))
-            continue
-        # Pass field_classes to translate_stmt_method
+            func_name = s.name
+            func_args = [a.arg for a in s.args.args]
+            # Save/restore params for nested function
+            old_nested_params = _CURRENT_PARAMS
+            _CURRENT_PARAMS = set(a.arg for a in s.args.args)
+            # Translate nested function body (skip its docstring)
+            fbody_start = 0
+            if (len(s.body) > fbody_start and isinstance(s.body[fbody_start], ast.Expr)
+                    and isinstance(s.body[fbody_start].value, ast.Constant)
+                    and isinstance(s.body[fbody_start].value.value, str)):
+                fbody_start = 1
+            fbody_exprs = translate_block(s.body[fbody_start:])
+            _CURRENT_PARAMS = old_nested_params
+            if len(fbody_exprs) == 1:
+                fbody = f"    {fbody_exprs[0]}"
+            else:
+                fexprs_str = "\n      ".join(fbody_exprs)
+                fbody = f"    (begin\n      {fexprs_str}\n    )"
+            nested_funcs[func_name] = f"(lambda ({' '.join(func_args)})\n{fbody})"
+        else:
+            remaining_stmts.append(s)
+    
+    body_parts = []
+    for s in remaining_stmts:
         tr = translate_stmt_method(s, class_name, field_classes)
         if tr:
             body_parts.append(tr)
+    
+    # Wrap in letrec if there are nested functions
+    if nested_funcs:
+        bindings = "\n    ".join(f"({name} {lam})" for name, lam in nested_funcs.items())
+        if len(body_parts) == 1:
+            return f"  (letrec ({bindings})\n    {body_parts[0]})"
+        body_str = "\n    ".join(body_parts)
+        return f"  (letrec ({bindings})\n    (begin\n      {body_str}\n    ))"
+    
+    _CURRENT_PARAMS = old_params
     if len(body_parts) == 1:
         return f"  {body_parts[0]}"
     body_str = "\n    ".join(body_parts)
@@ -705,15 +820,20 @@ def main():
             global _IN_CLASS
             _IN_CLASS = cname
             for item in node.body:
-                if isinstance(item, ast.FunctionDef):
+                if isinstance(item, (ast.AnnAssign, ast.Expr, ast.Pass)):
+                    # Skip type annotations and bare name expressions in class body
+                    pass
+                elif isinstance(item, ast.FunctionDef):
                     # Class method: rename to ClassName_method, add self param
                     method_name = item.name
                     if method_name == '__init__':
                         # Use full method body translation (handles if/else etc.)
+                        user_args = [a.arg for a in item.args.args if a.arg != 'self']
+                        all_params = ' '.join(['self'] + user_args)
                         body = translate_method_body(item, cname)
                         output_parts.append(f";; {cname} init from __init__")
                         output_parts.append(
-                            f"(define ({cname}_init self)\n{body})")
+                            f"(define ({cname}_init {all_params})\n{body})")
                     else:
                         # Has self as first arg
                         user_args = [a.arg for a in item.args.args if a.arg != 'self']
@@ -721,6 +841,21 @@ def main():
                         body = translate_method_body(item, cname)
                         output_parts.append(
                             f"(define ({cname}_{method_name} {all_params})\n{body})")
+            # Generate constructor function: static_ClassName = (lambda args... -> instance)
+            # Find __init__ to get constructor params
+            init_method = None
+            for item in node.body:
+                if isinstance(item, ast.FunctionDef) and item.name == '__init__':
+                    init_method = item
+                    break
+            if init_method:
+                init_user_args = [a.arg for a in init_method.args.args if a.arg != 'self']
+                init_params = ' '.join(init_user_args)
+                output_parts.append(
+                    f"(define (static_{cname} {init_params})\n"
+                    f"  ({cname}_init '{cname} {init_params})\n"
+                    f"  '{cname})"
+                )
             _IN_CLASS = None
         elif isinstance(node, ast.Assign):
             # Module-level assignment

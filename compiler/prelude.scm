@@ -7,6 +7,9 @@
 
 (import (chezscheme))
 
+;; null = Python None
+(define null #f)
+
 ;; ====== GC 跟踪：自动释放 C 内存 ======
 (define *gc-guardian* (make-guardian))
 
@@ -30,19 +33,14 @@
 
 ;; ====== 浮点数组 ======
 
-(define (make-float-array n)
-  "创建 n 个 float 的 C 数组，自动 GC 回收"
-  (let ((ptr (foreign-alloc (* n 4))))
-    (do ((i 0 (+ i 1))) ((= i n))
-      (foreign-set! 'float ptr (* i 4) 0.0))
-    (gc-register-ptr ptr)
-    ptr))
+(define make-float-array
+  (foreign-procedure "make_float_array" (int) void*))
 
-(define (float-array-set ptr i val)
-  (foreign-set! 'float ptr (* i 4) val))
+(define float-array-set
+  (foreign-procedure "float_array_set" (void* int float) void))
 
-(define (float-array-ref ptr i)
-  (foreign-ref 'float ptr (* i 4)))
+(define float-array-ref
+  (foreign-procedure "float_array_ref" (void* int) float))
 
 (define (float-array-offset ptr n)
   "按 float 元素个数偏移指针 (n*4 bytes)"
@@ -54,35 +52,25 @@
 
 ;; ====== 指针数组（用于保存中间张量指针） ======
 
-(define (make-ptr-array n)
-  "创建 n 个 void* 的 C 数组，自动 GC 回收"
-  (let ((ptr (foreign-alloc (* n 8))))
-    (do ((i 0 (+ i 1))) ((= i n))
-      (foreign-set! 'void* ptr (* i 8) 0))
-    (gc-register-ptr ptr)
-    ptr))
+(define make-ptr-array
+  (foreign-procedure "make_ptr_array" (int) void*))
 
-(define (ptr-array-set ptr i val)
-  (foreign-set! 'void* ptr (* i 8) val))
+(define ptr-array-set
+  (foreign-procedure "ptr_array_set" (void* int void*) void))
 
-(define (ptr-array-ref ptr i)
-  (foreign-ref 'void* ptr (* i 8)))
+(define ptr-array-ref
+  (foreign-procedure "ptr_array_ref" (void* int) void*))
 
 ;; ====== 整数数组（用于 shape / index） ======
 
-(define (make-int-array n)
-  "创建 n 个 int64 的 C 数组，自动 GC 回收"
-  (let ((ptr (foreign-alloc (* n 8))))
-    (do ((i 0 (+ i 1))) ((= i n))
-      (foreign-set! 'signed-64 ptr (* i 8) 0))
-    (gc-register-ptr ptr)
-    ptr))
+(define make-int-array
+  (foreign-procedure "make_int_array" (int) void*))
 
-(define (int-array-set ptr i val)
-  (foreign-set! 'signed-64 ptr (* i 8) val))
+(define int-array-set
+  (foreign-procedure "int_array_set" (void* int integer-64) void))
 
-(define (int-array-ref ptr i)
-  (foreign-ref 'signed-64 ptr (* i 8)))
+(define int-array-ref
+  (foreign-procedure "int_array_ref" (void* int) integer-64))
 
 ;; ====== 字典（hashtable） ======
 
@@ -112,6 +100,7 @@
 (define ptr_array_ref (lambda (ptr i) (ptr-array-ref ptr i)))
 (define make_int_array (lambda (n) (make-int-array n)))
 (define int_array_set (lambda (ptr i val) (int-array-set ptr i val)))
+(define int_array_ref (lambda (ptr i) (int-array-ref ptr i)))
 (define make_dict (lambda () (make-dict)))
 (define dict_get (lambda (d key) (dict-get d key)))
 (define dict_set (lambda (d key val) (dict-set! d key val)))
@@ -156,7 +145,7 @@
       (let ((n (libc-fread buf 1 (- buf-size 1) fp)))
         (when (> n 0)
           (foreign-set! 'unsigned-8 buf n 0)  ;; null-terminate
-          (display (pointer->string buf) out)
+          (display (utf8->string buf) out)
           (loop))))
     (foreign-free buf)
     (get-output-string out)))
@@ -366,7 +355,13 @@
   (string-upcase s))
 
 (define (string_contains s substr)
-  (if (string-contains s substr) #t #f))
+  (let ((n (string-length s))
+        (m (string-length substr)))
+    (let loop ((i 0))
+      (cond
+        ((> i (- n m)) #f)
+        ((string=? (substring s i (+ i m)) substr) #t)
+        (else (loop (+ i 1)))))))
 
 (define (string_starts_with s prefix)
   (let ((plen (string-length prefix)))

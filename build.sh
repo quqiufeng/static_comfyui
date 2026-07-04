@@ -75,7 +75,11 @@ OUTPUT_SO="${BUILD_DIR}/runtime.so"
 rm -f "${OUTPUT_SO}" "${BUILD_DIR}/merged.so"
 
 # compile-file 生成 merged.so (文件名基于源文件)
-(cd "${BUILD_DIR}" && "${CHEZ}" --compile-file "../${MERGED_SS}")
+cat > "${BUILD_DIR}/compile.ss" << EOF
+(import (chezscheme))
+(compile-file "../${MERGED_SS}")
+EOF
+(cd "${BUILD_DIR}" && "${CHEZ}" --quiet "compile.ss")
 
 # 检查输出
 if [ -f "${BUILD_DIR}/merged.so" ]; then
