@@ -828,6 +828,18 @@
 (define (format_float f digits)
   (format "~,vf" digits (inexact f)))
 
+(define (is_link x)
+  "Check if x is a workflow link: [node_id_string, output_index_number]"
+  (and (vector? x) (= (vector-length x) 2) (string? (vector-ref x 0)) (number? (vector-ref x 1))))
+
+(define (tensor_shape t)
+  "Get tagged tensor shape vector"
+  (tagged-tensor-shape t))
+
+(define (tensor_shape_dim t i)
+  "Get tagged tensor dimension i"
+  (tagged-tensor-dim t i))
+
 (define (list_length v)
   (cond ((string? v) (string-length v))
         ((vector? v) (vector-length v))

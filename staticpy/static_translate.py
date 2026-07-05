@@ -832,7 +832,7 @@ PRELUDE_FUNCTIONS = {
     "re_match", "re_search",
     "random_seed", "random_int", "random_float", "random_range",
     "random_uniform", "random_choice",
-    "string_to_float", "string_to_int", "string_of_int", "format_float", "list_length", "list_ref", "vec_ref", "tuple_ref",
+    "string_to_float", "string_to_int", "string_of_int", "format_float", "list_length", "list_ref", "vec_ref", "tuple_ref", "is_link", "tensor_shape", "tensor_shape_dim",
     "cuda_gemm", "cuda_gemm_tn", "cuda_axpy", "cuda_dot", "cuda_copy",
     "sleep", "clock",
     "argv", "exit_program", "exit",
