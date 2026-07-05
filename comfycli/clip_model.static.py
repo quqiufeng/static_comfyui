@@ -70,8 +70,8 @@ def encode_sdxl(clip_l_dict, clip_g_dict, tokenizer_l, tokenizer_g, text: str):
     emb_g = torch.clip_text_forward_from_dict(clip_g_dict, tokens_l, 1280, 32, 20, 5120)
     result_list = py_list(emb_l, emb_g)
     text_emb = torch.cat(result_list, 2)
-    # Pooled: extract at position 76 (last position, after padding)
-    pooled = torch.narrow(emb_g, 1, 76, 1)
+    # Pooled: approximate EOS is at position 60 (after text, before padding)
+    pooled = torch.narrow(emb_g, 1, 60, 1)
     pooled = torch.squeeze(pooled, 1)
     return text_emb, pooled
 

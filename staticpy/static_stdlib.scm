@@ -1248,7 +1248,7 @@
     (let* ((shape (vector 1))
            (shape-ptr (make-ffi-shape shape)))
       (make-tagged-tensor
-        (torch-std-full shape-ptr 1 x 1)  ;; dtype=1 = float64
+        (torch-std-full shape-ptr 1 (inexact x) 1)  ;; dtype=1 = float64
         shape))
     x))
 
@@ -1839,10 +1839,11 @@
         (torch-std-where (tagged-tensor-ptr condition) (tagged-tensor-ptr x) (tagged-tensor-ptr y))))))
 
 (define (torch-eq a b)
-  "逐元素 =="
+  "逐元素 == (b 可为 number)"
   (torch-check "torch not available"
     (lambda ()
-      (make-tagged-tensor (torch-std-eq (tagged-tensor-ptr a) (tagged-tensor-ptr b)) (tagged-tensor-shape a)))))
+      (let ((tb (torch-to-tensor b)))
+        (make-tagged-tensor (torch-std-eq (tagged-tensor-ptr a) (tagged-tensor-ptr tb)) (tagged-tensor-shape a))))))
 
 (define (torch-gt a b)
   "逐元素 >"
