@@ -153,6 +153,15 @@ LD_LIBRARY_PATH=cpp/:/data/venv/lib/python3.12/site-packages/torch/lib \
 
 ---
 
+## 依赖的开源项目
+
+| 项目 | 协议 | 说明 |
+|------|------|------|
+| [Chez Scheme](https://github.com/cisco/ChezScheme) | Apache 2.0 | AOT 编译后端，将 Scheme 编译为机器码 |
+| [PyTorch](https://github.com/pytorch/pytorch) | BSD | C++ 推理运行时 (libtorch) |
+
+---
+
 ## 部署
 
 部署（打包依赖 .so、GLIBC 兼容层、SCP 到远程）请见 [deploy.md](./deploy.md)。

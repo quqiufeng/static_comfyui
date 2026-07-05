@@ -146,6 +146,44 @@ cache_query "model config detect unet architecture" --repo /code/comfyui --type 
 - 2.6k+ 函数调用关系图
 - 语义搜索而非关键词匹配
 
+## 可行性
+
+### 架构
+
+分层架构（StaticPy 编排 → C++ FFI 推理 → libtorch/CUDA）在生产项目中已有验证。
+`libtorch_std_helper.so` 已覆盖 UNet、VAE、CLIP、T5、Sampler、ControlNet、LoRA 等核心推理操作，
+编排层翻译是机械工作，不存在根本性技术障碍。
+
+### 工作量
+
+重写 ComfyUI 的 200+ 节点是数量问题而非难度问题。每节点：
+- 用 code search 定位对应源码（秒级）
+- 翻译为 StaticPy 的 `@register` + `extern fn` 模式（分钟级）
+
+复杂节点（model_config 多架构检测、sampler 步进逻辑）需更多关注，但核心路径已有 C++ helper 覆盖。
+
+### code search 的作用
+
+传统翻译的最大成本是手工在源码树中导航定位。本项目的 code search 系统（my_db）
+已对 ComfyUI 做了全量语义索引（656 文件、20,141 chunks、2,633 函数、864 调用边）：
+
+```
+cache_query "model_config_from_unet" --type context --depth 3
+  → 一次展示所有架构检测分支
+  → 每个分支的 key pattern + 对应 config 结构
+  → 调用链完整可见，无需手动翻文件
+```
+
+**源码定位成本接近于零，翻译变为纯粹的机械工作。**
+
+### 风险点
+
+| 风险 | 等级 | 应对 |
+|------|------|------|
+| 冷门节点缺 C++ helper | 低 | libtorch_std_helper 覆盖 90% 场景，剩余用 StaticPy 纯逻辑实现 |
+| model_config 多架构兼容 | 中 | code search 可快速定位各架构检测逻辑，C++ 侧需对应新增接口 |
+| 异常处理缺失 | 低 | StaticPy 无 try/except，用返回值检查 + Result 类型替代 |
+
 ## 当前状态
 
 | 模块 | 状态 |
@@ -194,3 +232,4 @@ cache_query "model config detect unet architecture" --repo /code/comfyui --type 
 ### 参考
 
 - [ComfyUI 源码](https://github.com/comfyanonymous/ComfyUI)
+- [Chez Scheme (Cisco)](https://github.com/cisco/ChezScheme) — Apache 2.0 开源，AOT 编译后端
