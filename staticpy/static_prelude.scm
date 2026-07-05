@@ -794,8 +794,8 @@
 (define True #t)
 (define False #f)
 (define (argv)
-  "返回命令行参数列表"
-  (command-line))
+  "返回命令行参数列表（vector，兼容 py-list）"
+  (list->vector (command-line)))
 
 (define libc-exit (foreign-procedure "exit" (int) void))
 

@@ -56,10 +56,14 @@ else
 fi
 
 # Step 2: Compute content hash for caching
+FFI_FILES=""
+if [ -n "$FFI_SCM" ] && [ -f "$FFI_SCM" ]; then
+    FFI_FILES="$FFI_SCM"
+fi
 if [ "$IS_SCM" = "1" ]; then
-    PRELUDE_HASH=$(md5sum static_prelude.scm static_stdlib.scm "$FFI_SCM" "$CACHE_DIR/${STEM}_code.ss" 2>/dev/null | md5sum | cut -d' ' -f1)
+    PRELUDE_HASH=$(md5sum static_prelude.scm static_stdlib.scm $FFI_FILES "$CACHE_DIR/${STEM}_code.ss" 2>/dev/null | md5sum | cut -d' ' -f1)
 else
-    PRELUDE_HASH=$(md5sum static_prelude.scm static_stdlib.scm "$FFI_SCM" static_translate.py "$CACHE_DIR/${STEM}_code.ss" 2>/dev/null | md5sum | cut -d' ' -f1)
+    PRELUDE_HASH=$(md5sum static_prelude.scm static_stdlib.scm $FFI_FILES static_translate.py "$CACHE_DIR/${STEM}_code.ss" 2>/dev/null | md5sum | cut -d' ' -f1)
 fi
 CACHED_SO="$CACHE_DIR/${STEM}_${PRELUDE_HASH}.so"
 CACHED_ELF="$CACHE_DIR/${STEM}_${PRELUDE_HASH}"

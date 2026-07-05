@@ -12,7 +12,7 @@ class CliArgs:
     lowvram: bool
 
 
-def parse_args() -> CliArgs:
+def parse_cli_args() -> dict:
     args_list: list[str] = argv()
     argc: int = py_list_length(args_list)
 
@@ -65,7 +65,18 @@ def parse_args() -> CliArgs:
                 workflow = arg
         i = i + 1
 
-    return CliArgs(checkpoint, prompt, output, output_dir, workflow, show_help, cpu, cuda_device, highvram, lowvram)
+    result = make_dict()
+    dict_set(result, "checkpoint", checkpoint)
+    dict_set(result, "prompt", prompt)
+    dict_set(result, "output", output)
+    dict_set(result, "output_dir", output_dir)
+    dict_set(result, "workflow", workflow)
+    dict_set(result, "show_help", show_help)
+    dict_set(result, "cpu", cpu)
+    dict_set(result, "cuda_device", cuda_device)
+    dict_set(result, "highvram", highvram)
+    dict_set(result, "lowvram", lowvram)
+    return result
 
 
 def print_help():

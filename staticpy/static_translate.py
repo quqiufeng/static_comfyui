@@ -838,6 +838,8 @@ PRELUDE_FUNCTIONS = {
     "argv", "exit_program", "exit",
     "pi", "e",
     "py_list", "py_list_append", "py_list_ref", "py_list_length", "list_to_py_list", "list_append_str",
+    "make_dict_from", "dict_keys", "dict_contains",
+    "slice_string", "slice_array",
 } | MATH_FUNCTIONS
 
 def parse_extern_functions(code):
@@ -1416,7 +1418,7 @@ def translate_block(stmts):
                 val = translate_expr(s.value) if s.value else "#f"
             else:
                 if len(s.targets) == 1 and isinstance(s.targets[0], ast.Name):
-                    target = s.targets[0].id
+                    target = mangle_name(s.targets[0].id)
                     val = translate_expr(s.value)
                 elif len(s.targets) == 1 and isinstance(s.targets[0], ast.Tuple):
                     # 元组解构：a, b = expr → (let ((tmp expr)) (set! a (vector-ref tmp 0)) ...)
@@ -1469,8 +1471,23 @@ def translate_block(stmts):
                 exprs.append(f"(if {test}\n        (begin {' '.join(inner_then)}))")
         elif isinstance(s, ast.While):
             test = translate_expr(s.test)
-            body = translate_block(s.body)
-            exprs.append(f"(let loop () (if {test} (begin {' '.join(body)} (loop))))")
+            body_parts = translate_block(s.body)
+            body_str = " ".join(body_parts)
+            # Check for break in direct body (not nested while loops)
+            def has_direct_break(stmts):
+                for st in stmts:
+                    if isinstance(st, ast.Break):
+                        return True
+                    if isinstance(st, ast.While) or isinstance(st, ast.For):
+                        continue  # skip nested loops
+                    if isinstance(st, ast.If):
+                        if has_direct_break(st.body) or (st.orelse and has_direct_break(st.orelse)):
+                            return True
+                return False
+            if has_direct_break(s.body):
+                exprs.append(f"(let ((__done #f)) (let loop () (if (and {test} (not __done)) (begin {body_str} (loop)))))")
+            else:
+                exprs.append(f"(let loop () (if {test} (begin {body_str} (loop))))")
         elif isinstance(s, ast.With):
             # with 在 block 内简化为直接执行 body
             exprs.extend(translate_block(s.body))
@@ -1503,6 +1520,10 @@ def translate_block(stmts):
             exprs.append("(void)")
         elif isinstance(s, ast.Delete):
             exprs.append(f";; del: {ast.dump(s)}")
+        elif isinstance(s, ast.Continue):
+            exprs.append("(loop)")
+        elif isinstance(s, ast.Break):
+            exprs.append("(set! __done #t)")
         elif isinstance(s, ast.Call):
             exprs.append(translate_expr(s))
         else:
@@ -2106,6 +2127,9 @@ def translate_expr(node):
                     return f"(np-array (vector {inner}) {len(node.args[0].elts)})"
                 return f"(np-array {' '.join(args)})"
             if scheme_fn:
+                # 用户模块（非 BUILTIN_MODULES）的函数调用加 static_ 前缀
+                if module and module not in BUILTIN_MODULES:
+                    return f"(static_{scheme_fn} {' '.join(args)})"
                 return f"({scheme_fn} {' '.join(args)})"
             # Pythonic from import: from math import sin
             if name in MATH_FUNCTIONS:
@@ -2591,7 +2615,7 @@ def translate_function(node, source_file=""):
                 if len(stmt.targets) == 1:
                     t = stmt.targets[0]
                     if isinstance(t, ast.Name):
-                        target = t.id
+                        target = mangle_name(t.id)
                         val = translate_expr(stmt.value)
                     elif isinstance(t, ast.Tuple):
                         # 元组解构：a, b = expr → (let ((tmp expr)) (set! a (vector-ref tmp 0)) ...)
@@ -2703,7 +2727,20 @@ def translate_function(node, source_file=""):
             test = translate_expr(stmt.test)
             body_parts = translate_block(stmt.body)
             body_str = " ".join(body_parts)
-            body_exprs.append(f"(let loop () (if {test} (begin {body_str} (loop))))")
+            def has_direct_break(stmts):
+                for st in stmts:
+                    if isinstance(st, ast.Break):
+                        return True
+                    if isinstance(st, (ast.While, ast.For)):
+                        continue
+                    if isinstance(st, ast.If):
+                        if has_direct_break(st.body) or (st.orelse and has_direct_break(st.orelse)):
+                            return True
+                return False
+            if has_direct_break(stmt.body):
+                body_exprs.append(f"(let ((__done #f)) (let loop () (if (and {test} (not __done)) (begin {body_str} (loop)))))")
+            else:
+                body_exprs.append(f"(let loop () (if {test} (begin {body_str} (loop))))")
         elif isinstance(stmt, ast.Expr):
             body_exprs.append(translate_expr(stmt.value))
         elif isinstance(stmt, ast.With):
@@ -2738,6 +2775,10 @@ def translate_function(node, source_file=""):
         elif isinstance(stmt, ast.Delete):
             # del a[i] → (dict-set! / vector-set! ...) 暂不支持
             body_exprs.append(f";; del: {ast.dump(stmt)}")
+        elif isinstance(stmt, ast.Continue):
+            body_exprs.append("(loop)")
+        elif isinstance(stmt, ast.Break):
+            body_exprs.append("(set! __done #t)")
         else:
             body_exprs.append(f";; {type(stmt).__name__}: {ast.dump(stmt)}")
         si += 1

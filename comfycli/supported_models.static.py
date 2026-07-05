@@ -4,6 +4,7 @@ from supported_models_base import *
 SDXL = make_bac(
     make_dict_from("model_channels", 320, "use_linear_in_transformer", True, "transformer_depth", py_list(0, 0, 2, 2, 10, 10), "context_dim", 2048, "adm_in_channels", 2816, "use_temporal_attention", False),
     py_list(),
+    py_list(),
     "SDXL",
     1
 )
@@ -11,6 +12,7 @@ SDXL = make_bac(
 # SDXL Refiner
 SDXL_REFINER = make_bac(
     make_dict_from("model_channels", 384, "use_linear_in_transformer", True, "transformer_depth", py_list(0, 0, 4, 4), "context_dim", 2560, "adm_in_channels", 2560, "use_temporal_attention", False),
+    py_list(),
     py_list(),
     "SDXL",
     1
@@ -20,6 +22,7 @@ SDXL_REFINER = make_bac(
 SD15 = make_bac(
     make_dict_from("context_dim", 768, "model_channels", 320, "use_linear_in_transformer", False, "adm_in_channels", 0, "use_temporal_attention", False),
     py_list(),
+    py_list(),
     "SD15",
     1
 )
@@ -27,6 +30,7 @@ SD15 = make_bac(
 # SD2.0
 SD20 = make_bac(
     make_dict_from("context_dim", 1024, "model_channels", 320, "use_linear_in_transformer", False, "adm_in_channels", 0, "use_temporal_attention", False),
+    py_list(),
     py_list(),
     "SD15",
     1
@@ -36,6 +40,7 @@ SD20 = make_bac(
 SD3 = make_bac(
     make_dict_from("in_channels", 16, "pos_embed_scaling_factor", 0),
     py_list(),
+    py_list(),
     "SD3",
     6
 )
@@ -44,6 +49,7 @@ SD3 = make_bac(
 FLUX = make_bac(
     make_dict_from("image_model", "flux", "guidance_embed", True),
     py_list(),
+    py_list(),
     "Flux",
     8
 )
@@ -51,6 +57,7 @@ FLUX = make_bac(
 # Flux Schnell (no guidance)
 FLUX_SCHNELL = make_bac(
     make_dict_from("image_model", "flux", "guidance_embed", False),
+    py_list(),
     py_list(),
     "Flux",
     8

@@ -4,11 +4,15 @@ from execution import execute_prompt
 
 def main():
     args = parse_cli_args()
+    show_help: bool = dict_get(args, "show_help")
+    if show_help:
+        print_help()
+        exit_program(0)
     output_dir = dict_get(args, "output_dir")
     if output_dir is None:
         output_dir = "./output"
     workflow_path = dict_get(args, "workflow")
-    if workflow_path is not None:
+    if workflow_path is not None and str_length(workflow_path) > 0:
         content = file_read_all(workflow_path)
         result = execute_prompt(content, output_dir)
     else:
