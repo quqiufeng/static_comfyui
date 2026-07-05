@@ -45,6 +45,11 @@ ssh user@remote_host "bash /opt/comfycli/run.sh workflow.json --output-dir ./out
 
 注意：`build.sh` 只编译不部署，`deploy.sh` 负责打包 + 传输，职责分离。
 
+## 了解最近开发日志
+
+进入项目后先运行 `git log --oneline -20` 查看近期提交记录，
+了解最新进展和正在开发的功能。提交信息使用中文书写。
+
 ## CLI 接口（main.static.py）
 ```
 # 模式 1：直接命令行出图
