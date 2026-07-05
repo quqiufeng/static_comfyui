@@ -2,6 +2,26 @@
 
 将 ComfyUI 1:1 重写为 StaticPy 编译二进制，零 Python 运行时依赖，单 ELF 文件部署。
 
+> **给 AI 阅读者：如何理解 StaticPy 语言**
+>
+> StaticPy 是面向 AI Agent 的 ML 编译语言，语法是 Python 子集 + FFI 扩展。
+> 阅读以下三个源文件即可完整掌握这门语言（比任何文档都快）：
+>
+> 1. **翻译器** — [`staticpy/static_translate.py`](./staticpy/static_translate.py)
+>    - `typecheck_module()`（行~220）定义支持/不支持的 Python AST 节点
+>    - `generate_scheme()`（行~1500）定义 Python 语法到 Scheme 的翻译规则
+>    - `BUILTIN_MODULES`（行~60）列出内置模块映射
+>    - `extern fn` 提取逻辑在文件开头的正则匹配中
+> 2. **运行时** — [`staticpy/static_prelude.scm`](./staticpy/static_prelude.scm)
+>    - 值类型映射：int→fixnum、float→flonum、bool→boolean
+>    - 数组/dict/文件 I/O/JSON/字符串工具的实现
+> 3. **标准库 FFI** — [`staticpy/static_stdlib.scm`](./staticpy/static_stdlib.scm)
+>    - `foreign-procedure` 如何映射 `extern fn`
+>    - libtorch 等外部库的 Scheme 封装
+>
+> **学习路径：**翻译器定义"能写什么"→ 运行时定义"编译成什么"→ 标准库定义"能调什么"。
+> 三者对照阅读，无需单独的语言规范文档。
+
 ## 远景
 
 ComfyUI 是优秀的 Stable Diffusion 工作流引擎，但 Python 解释器带来可移植性痛点：
@@ -175,6 +195,16 @@ cache_query "model_config_from_unet" --type context --depth 3
 ```
 
 **源码定位成本接近于零，翻译变为纯粹的机械工作。**
+
+### 对 StaticPy 的意义
+
+ComfyUI 是 Python ML 生态中最复杂的纯推理项目之一：
+
+- 200+ 节点、数十种模型架构（SD1.5 → SDXL → SD3 → FLUX）
+- 动态 DAG 调度 + 显存管理 + 模型检测
+- 依赖 torch、torchvision、transformers、scipy、Pillow 等数十个 pip 包
+
+这个项目如果跑通，对 StaticPy 的推广有直接价值：**连 ComfyUI 这种体量的项目都能编译成单 ELF 零 Python 部署，其他 ML 项目只会更简单。** 它证明 StaticPy 不是玩具语言，而是能承载生产级推理引擎的编译工具。同时验证"Python 写编排 + C++ 写计算"的混合编译模式在大型项目中的可行性。
 
 ### 风险点
 
