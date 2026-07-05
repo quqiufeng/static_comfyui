@@ -214,17 +214,44 @@ ComfyUI 是 Python ML 生态中最复杂的纯推理项目之一：
 | model_config 多架构兼容 | 中 | code search 可快速定位各架构检测逻辑，C++ 侧需对应新增接口 |
 | 异常处理缺失 | 低 | StaticPy 无 try/except，用返回值检查 + Result 类型替代 |
 
-## 当前状态
+## 开发进度
 
-| 模块 | 状态 |
-|------|------|
-| 架构设计 | ✅ design.md 完成 |
-| 源码索引 | ✅ ComfyUI 全量索引 (656 文件, 20,141 chunks) |
-| execution 引擎 | 🔄 翻译中 |
-| nodes 定义 | ⏳ 待开始 |
-| model_config | ⏳ 待开始 |
-| model_management | ⏳ 待开始 |
-| CLI 入口 | ⏳ 待开始 |
+```
+Phase 0: 基础设施 (无 GPU 需求)
+  [ ] folder_paths.static.py     路径管理
+  [ ] cli_args.static.py         CLI 参数解析
+  [ ] comfy_types.static.py      Node 类型定义
+
+Phase 1: 模型检测 (纯逻辑, 可直接翻译)
+  [ ] supported_models_base.static.py   模型基类
+  [ ] supported_models.static.py        模型注册表
+  [ ] model_detection.static.py         state_dict → 架构识别
+  [ ] model_sampling.static.py          sigma 调度
+  [ ] latent_formats.static.py          潜空间缩放
+
+Phase 2: 模型加载 + 显存管理
+  [ ] sd.static.py              safetensors 加载 → 模型对象
+  [ ] model_base.static.py      模型基类
+  [ ] model_management.static.py GPU 调度 (load/offload)
+  [ ] lora.static.py            LoRA 合并
+
+Phase 3: 组件级推理
+  [ ] clip_model.static.py      CLIP encode
+  [ ] k_diffusion/sampling.static.py  采样器
+  [ ] sample.static.py          采样入口
+  [ ] controlnet.static.py      ControlNet
+
+Phase 4: 节点 → DAG → 入口
+  [ ] nodes.static.py           200+ 节点定义
+  [ ] execution.static.py       PromptExecutor
+  [ ] main.static.py            CLI 入口
+
+Phase 5: 端到端验证
+  [ ] workflow SDXL → 图片输出
+  [ ] --prompt 命令行模式验证
+```
+
+各阶段产出可独立编译、单独测试。Phase 0–1 甚至不需要 GPU。
 
 ## 局限
 
