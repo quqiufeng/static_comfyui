@@ -74,9 +74,9 @@ def load_checkpoint(ckpt_path: str) -> LoadResult:
     if not has_vae:
         has_vae = dict_contains(state_dict, "conditioner.embedders.3.decoder.conv_in.weight")
 
-    model_type_val: int = 1
+    model_type_val: int = 0
     if has_unet:
-        model_type_val = 0
+        model_type_val = 1
 
     model_mp: ModelPatcher = make_model_patcher(sd_ptr, model_type_val, 0, -1)
     clip_obj = None

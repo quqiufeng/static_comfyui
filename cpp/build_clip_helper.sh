@@ -9,6 +9,7 @@ CUDA_LIB="/data/cuda/lib64"
 
 echo "=== Building clip_helper.so (CLIP from safetensors) ==="
 g++ -O2 -shared -fPIC -std=c++17 -D_GLIBCXX_USE_CXX11_ABI=1 \
+    -L/opt/ReScheme -ltorch -ltorch_cpu -lc10 -l:libtorch_std_helper.so \
     clip_helper.cpp \
     -I"$TORCH_INCLUDE" \
     -I"$TORCH_INCLUDE/torch/csrc/api/include" \

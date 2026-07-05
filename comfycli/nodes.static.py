@@ -139,13 +139,26 @@ def k_sampler_inner(inputs):
     sigma_min = 0.029
     sigma_max = 14.615
     sigmas = torch.sampler_sigmas(steps, sigma_min, sigma_max, scheduler)
+    print("model ok")
     sd_handle = model.sd_handle
+    print("start sampling")
+    if sd_handle is None:
+        print("ERROR: sd_handle is None")
+    if cond is None:
+        print("ERROR: cond is None")
+    if uncond is None:
+        print("ERROR: uncond is None")
+    if pooled_pos is None:
+        print("ERROR: pooled_pos is None")
+    if pooled_neg is None:
+        print("ERROR: pooled_neg is None")
     n = 0
     while n < steps:
         sigma_t = torch.narrow(sigmas, 0, n, 1)
         sigma_prev = torch.narrow(sigmas, 0, n + 1, 1)
         s_in = sigma_t
         cond_out = model_fn(sd_handle, x, s_in, cond, pooled_pos)
+        uncond_out = model_fn(sd_handle, x, s_in, uncond, pooled_neg)
         uncond_out = model_fn(sd_handle, x, s_in, uncond, pooled_neg)
         # CFG: denoised = uncond + cfg * (cond - uncond)
         # Use scale tensor for cfg value

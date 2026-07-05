@@ -29,7 +29,7 @@ fi
 CUDA_INC="/data/cuda/include"
 CUDA_LIB="/data/cuda/lib64"
 
-g++ -O3 -shared -fPIC -std=c++17 -D_GLIBCXX_USE_CXX11_ABI=0 \
+g++ -O3 -shared -fPIC -std=c++17 -D_GLIBCXX_USE_CXX11_ABI=1 \
     libtorch_std_helper.cpp \
     -I"$TORCH_INCLUDE" \
     -I"$TORCH_INCLUDE/torch/csrc/api/include" \

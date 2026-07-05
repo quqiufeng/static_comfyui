@@ -2,6 +2,8 @@
 #include <torch/torch.h>
 #include <torch/script.h>
 #include <ATen/ATen.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <cuda_runtime.h>
 #include <vector>
 #include <string>
 #include <stdexcept>
@@ -110,7 +112,7 @@ void* torch_std_tensor_from_blob_3d(void* data, int d0, int d1, int d2, int dtyp
 
 void* torch_std_zeros(int64_t* shape, int ndim, int dtype) {
     try {
-        return wrap(torch::zeros(to_shape(shape, ndim), torch::TensorOptions().dtype(torch::kHalf).device(torch::kCUDA)));
+        return wrap(torch::zeros(to_shape(shape, ndim), make_options(dtype).device(torch::kCUDA)));
     } catch (const std::exception& e) {
         std::cerr << "torch_std_zeros error: " << e.what() << std::endl;
         return nullptr;
@@ -137,7 +139,7 @@ void* torch_std_empty(int64_t* shape, int ndim, int dtype) {
 
 void* torch_std_full(int64_t* shape, int ndim, double value, int dtype) {
     try {
-        return wrap(torch::full(to_shape(shape, ndim), value, torch::TensorOptions().dtype(torch::kHalf).device(torch::kCUDA)));
+        return wrap(torch::full(to_shape(shape, ndim), value, make_options(dtype).device(torch::kCUDA)));
     } catch (const std::exception& e) {
         std::cerr << "torch_std_full error: " << e.what() << std::endl;
         return nullptr;
@@ -146,7 +148,7 @@ void* torch_std_full(int64_t* shape, int ndim, double value, int dtype) {
 
 void* torch_std_randn(int64_t* shape, int ndim, int dtype) {
     try {
-        return wrap(torch::randn(to_shape(shape, ndim), torch::TensorOptions().dtype(torch::kHalf).device(torch::kCUDA)));
+        return wrap(torch::randn(to_shape(shape, ndim), make_options(dtype).device(torch::kCUDA)));
     } catch (const std::exception& e) {
         std::cerr << "torch_std_randn error: " << e.what() << std::endl;
         return nullptr;
