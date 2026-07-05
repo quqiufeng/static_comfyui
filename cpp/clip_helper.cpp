@@ -133,7 +133,7 @@ static at::Tensor clip_text_forward_from_dict(
 
     // Final layer norm
     x = at::layer_norm(x, {d_model}, final_ln_w, final_ln_b, 1e-5);
-    return x;
+    return x.clone();  // ensure owning tensor, no dangling views
 }
 
 // 公开 API：从 safetensors 权重执行 CLIP 文本编码

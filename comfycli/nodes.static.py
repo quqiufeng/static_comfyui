@@ -146,13 +146,9 @@ def k_sampler_inner(inputs):
         sigma_prev = torch.narrow(sigmas, 0, n + 1, 1)
         s_in = sigma_t
         cond_out = model_fn(sd_handle, x, s_in, cond, pooled_pos)
-        uncond_out = cond_out  # FIXME: second call crashes - likely tensor view lifetime issue
-        # CFG: denoised = uncond + cfg * (cond - uncond)
-        # Use scale tensor for cfg value
-        scale = torch.ones([1])
-        cfg_tensor = torch.mul(scale, cfg)
+        uncond_out = model_fn(sd_handle, x, s_in, uncond, pooled_neg)
         diff = torch.sub(cond_out, uncond_out)
-        scaled = torch.mul(diff, cfg_tensor)
+        scaled = torch.mul(diff, cfg)
         denoised = torch.add(uncond_out, scaled)
         x = torch.sample_euler(denoised, x, sigma_t, sigma_prev)
         n = n + 1

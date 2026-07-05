@@ -47,11 +47,11 @@ static void install_quiet_rnn_warning() {
 // ============================================================
 static torch::TensorOptions make_options(int dtype) {
     switch (dtype) {
-        case TORCH_DTYPE_FLOAT32: return torch::TensorOptions().dtype(torch::kFloat32);
-        case TORCH_DTYPE_FLOAT64: return torch::TensorOptions().dtype(torch::kFloat64);
-        case TORCH_DTYPE_INT32:   return torch::TensorOptions().dtype(torch::kInt32);
-        case TORCH_DTYPE_INT64:   return torch::TensorOptions().dtype(torch::kInt64);
-        default:                  return torch::TensorOptions().dtype(torch::kFloat32);
+        case TORCH_DTYPE_FLOAT32: return torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
+        case TORCH_DTYPE_FLOAT64: return torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCUDA);
+        case TORCH_DTYPE_INT32:   return torch::TensorOptions().dtype(torch::kInt32).device(torch::kCUDA);
+        case TORCH_DTYPE_INT64:   return torch::TensorOptions().dtype(torch::kInt64).device(torch::kCUDA);
+        default:                  return torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
     }
 }
 
@@ -121,7 +121,7 @@ void* torch_std_zeros(int64_t* shape, int ndim, int dtype) {
 
 void* torch_std_ones(int64_t* shape, int ndim, int dtype) {
     try {
-        return wrap(torch::ones(to_shape(shape, ndim), make_options(dtype)));
+        return wrap(torch::ones(to_shape(shape, ndim), make_options(dtype).device(torch::kCUDA)));
     } catch (const std::exception& e) {
         std::cerr << "torch_std_ones error: " << e.what() << std::endl;
         return nullptr;
@@ -2421,7 +2421,7 @@ void* torch_std_sampler_sigmas(int steps, double sigma_min, double sigma_max,
         // Append trailing 0 so samplers can denoise sigma_1 -> 0
         auto zero_cat = at::zeros(1, sigmas.options());
         sigmas = at::cat({sigmas, zero_cat}, 0);
-        return wrap(sigmas);
+        return wrap(sigmas.to(torch::kCUDA));
     } catch (const std::exception& e) {
         std::cerr << "torch_std_sampler_sigmas error: " << e.what() << std::endl;
         return nullptr;
