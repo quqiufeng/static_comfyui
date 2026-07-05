@@ -54,19 +54,32 @@ ssh user@remote_host "bash /opt/comfycli/run.sh workflow.json --output-dir ./out
 
 **原则**：翻译每个模块前，先语义搜索 ComfyUI 对应源码，理解实现细节后再 1:1 复刻。
 
+code search 工具位于 `/opt/my_db/tools/`，ComfyUI 索引在 `/opt/code_caches/comfyui_cache/`。
+
 ```bash
-# 语义搜索：找实现（推荐 vector_search，不需要 --analysis-dir）
-vector_search "PromptExecutor execution loop" --cache-dir /sqlite3/vdb
+# 语义搜索：用自然语言找对应实现（推荐）
+/opt/my_db/tools/cache_query "model_base BaseModel load_model_weights" \
+  --repo /code/comfyui \
+  --type search \
+  --analysis-dir /opt/code_caches/comfyui_cache
 
-# 语义搜索：cache_query 需要指定 repo 路径
-cache_query "folder_paths get_folder_paths" --repo /opt/static_comfyui/ComfyUI --type search
+# 查看函数上下文（调用者/被调用者）
+/opt/my_db/tools/cache_query "load_checkpoint_guess_config" \
+  --repo /code/comfyui \
+  --type context --depth 2
 
-# 查看调用链上下文
-cache_query "model_detection detect_unet_config" --repo /opt/static_comfyui/ComfyUI --type context --depth 2
+# 查看类定义
+/opt/my_db/tools/cache_query "class BaseModel" \
+  --repo /code/comfyui \
+  --type search \
+  --analysis-dir /opt/code_caches/comfyui_cache
 
-# 关键词搜索已知函数名
-cache_query "class KSampler" --repo /opt/static_comfyui/ComfyUI --type context --depth 1
+# 精确符号查找
+/opt/my_db/tools/cache_query "/code/comfyui/symbols/load_checkpoint_guess_config" \
+  --type exact
 ```
+
+> **注意**：`cache_query --type search` 必须加 `--analysis-dir` 参数；`--type context` 无需 `--analysis-dir` 但需要 KV 缓存已导入。`/opt/my_db/tools/vector_search` 是底层 C 搜索引擎，但需要独立 embedder 配置，推荐直接用 `cache_query`。
 
 搜索到对应源码后，按 `a.py → a.static.py` 模式 1:1 翻译。
 
@@ -108,22 +121,22 @@ comfycli workflow.json --output-dir ./output
 
 ## 开发顺序（bottom-up）
 
-### Phase 0: 基础设施（无 GPU 需求）
-- [ ] folder_paths.static.py    路径管理
-- [ ] cli_args.static.py        CLI 参数解析
-- [ ] comfy_types.static.py     Node 类型定义
+### Phase 0: 基础设施（已完成）
+- [x] folder_paths.static.py    路径管理（294 行，编译通过）
+- [x] cli_args.static.py        CLI 参数解析（95 行，编译通过）
+- [x] comfy_types.static.py     Node 类型定义（70+ 常量，编译通过）
 
-### Phase 1: 模型检测（纯逻辑，可直接翻译）
-- [ ] supported_models_base.static.py  模型基类
-- [ ] supported_models.static.py       模型注册表
-- [ ] model_detection.static.py        state_dict → 架构识别
-- [ ] model_sampling.static.py         sigma 调度
-- [ ] latent_formats.static.py         潜空间缩放
+### Phase 1: 模型检测（已完成）
+- [x] supported_models_base.static.py  模型基类（BAC + matches 匹配）
+- [x] supported_models.static.py       模型注册表（SDXL/SD1.5/SD3/Flux 等）
+- [x] model_detection.static.py        state_dict → 架构识别
+- [x] model_sampling.static.py         sigma 调度（采样类型枚举 + 映射）
+- [x] latent_formats.static.py         潜空间缩放（SD15/SDXL/Flux/Flux2 等）
 
-### Phase 2: 模型加载 + 显存管理
+### Phase 2: 模型加载 + 显存管理（开发中）
 - [ ] sd.static.py             safetensors 加载 → 模型对象
 - [ ] model_base.static.py     模型基类
-- [ ] model_management.static.py  GPU 调度
+- [ ] model_management.static.py  GPU 调调度
 - [ ] lora.static.py           LoRA 合并
 
 ### Phase 3: 组件级推理

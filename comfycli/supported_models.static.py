@@ -60,11 +60,11 @@ FLUX_SCHNELL = make_bac(
 ALL_MODELS: list = py_list(SDXL, SDXL_REFINER, SD15, SD20, SD3, FLUX, FLUX_SCHNELL)
 
 
-def find_model(unet_config: dict, state_dict_keys: list[str]) -> list:
+def find_model(unet_config: dict, state_dict: dict) -> list:
     i: int = 0
     while i < py_list_length(ALL_MODELS):
         m: list = py_list_ref(ALL_MODELS, i)
-        if bac_matches(m, unet_config, state_dict_keys):
+        if bac_matches(m, unet_config, state_dict):
             return m
         i = i + 1
     return py_list()

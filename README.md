@@ -229,11 +229,11 @@ Phase 1: 模型检测 (纯逻辑, 可直接翻译)
   [x] model_sampling.static.py          sigma 调度
   [x] latent_formats.static.py          潜空间缩放
 
-Phase 2: 模型加载 + 显存管理
-  [ ] sd.static.py              safetensors 加载 → 模型对象
-  [ ] model_base.static.py      模型基类
-  [ ] model_management.static.py GPU 调度 (load/offload)
-  [ ] lora.static.py            LoRA 合并
+Phase 2: 模型加载 + 显存管理 (编译通过)
+  [x] sd.static.py              safetensors 加载 → 模型对象
+  [x] model_base.static.py      模型基类 (BaseModel dataclass)
+  [x] model_management.static.py GPU 调度 (load/offload/清缓存)
+  [x] lora.static.py            LoRA 合并 (apply/merge_into)
 
 Phase 3: 组件级推理
   [ ] clip_model.static.py      CLIP encode
