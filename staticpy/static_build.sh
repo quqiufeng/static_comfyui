@@ -150,6 +150,17 @@ int main(int argc, char **argv) {
 CCODE
     sed "s/CSTEM/$STEM/g" "$BUILD_DIR/launcher.c" > "$BUILD_DIR/launcher_fixed.c"
 
+    GLIBC_SYSROOT="${GLIBC_SYSROOT:-}"
+    GLIBC_LDFLAGS=()
+    if [ -n "$GLIBC_SYSROOT" ]; then
+      GLIBC_LDFLAGS+=("-L$GLIBC_SYSROOT/lib")
+      GLIBC_LDFLAGS+=("-L$GLIBC_SYSROOT/lib/x86_64-linux-gnu")
+      GLIBC_LDFLAGS+=("-L$GLIBC_SYSROOT/usr/lib/x86_64-linux-gnu")
+      GLIBC_LDFLAGS+=("-Wl,-rpath-link,$GLIBC_SYSROOT/lib")
+      GLIBC_LDFLAGS+=("-Wl,-rpath-link,$GLIBC_SYSROOT/lib/x86_64-linux-gnu")
+      GLIBC_LDFLAGS+=("-Wl,-rpath-link,$GLIBC_SYSROOT/usr/lib/x86_64-linux-gnu")
+    fi
+
     gcc -o "$CACHED_ELF" \
         "$BUILD_DIR/launcher_fixed.c" \
         "$BUILD_DIR/petite_boot.o" \
@@ -160,6 +171,7 @@ CCODE
         "$SCHEME_DIR/lz4/lib/liblz4.a" \
         "$SCHEME_DIR/zlib/libz.a" \
         -ldl -lpthread -lm -ltinfo \
+        "${GLIBC_LDFLAGS[@]}" \
         -L/data/venv/lib/python3.12/site-packages/torch/lib \
         -Wl,--no-as-needed -lc10 -ltorch_cpu -ltorch -Wl,--as-needed \
         -Wl,-rpath,/data/venv/lib/python3.12/site-packages/torch/lib \

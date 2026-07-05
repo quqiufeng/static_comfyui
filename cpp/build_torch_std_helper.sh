@@ -15,10 +15,22 @@ TORCH_LIB="$TORCH_PATH/lib"
 
 echo "=== Building libtorch_std_helper.so ==="
 
+GLIBC_SYSROOT="${GLIBC_SYSROOT:-}"
+LDFLAGS=()
+if [ -n "$GLIBC_SYSROOT" ]; then
+  LDFLAGS+=("-L$GLIBC_SYSROOT/lib")
+  LDFLAGS+=("-L$GLIBC_SYSROOT/lib/x86_64-linux-gnu")
+  LDFLAGS+=("-L$GLIBC_SYSROOT/usr/lib/x86_64-linux-gnu")
+  LDFLAGS+=("-Wl,-rpath-link,$GLIBC_SYSROOT/lib")
+  LDFLAGS+=("-Wl,-rpath-link,$GLIBC_SYSROOT/lib/x86_64-linux-gnu")
+  LDFLAGS+=("-Wl,-rpath-link,$GLIBC_SYSROOT/usr/lib/x86_64-linux-gnu")
+fi
+
 g++ -O3 -shared -fPIC -std=c++17 -D_GLIBCXX_USE_CXX11_ABI=0 \
     libtorch_std_helper.cpp \
     -I"$TORCH_INCLUDE" \
     -I"$TORCH_INCLUDE/torch/csrc/api/include" \
+    "${LDFLAGS[@]}" \
     -L"$TORCH_LIB" \
     -ltorch -ltorch_cpu -lc10 \
     -Wl,-rpath,"$TORCH_LIB" \
