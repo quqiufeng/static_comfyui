@@ -736,6 +736,7 @@
 (define torch-std-sample-ddim #f)
 (define torch-std-sample-euler #f)
 (define torch-std-sample-euler-ancestral #f)
+(define torch-std-euler-step #f)
 (define torch-std-sample-dpmpp-2m #f)
 (define torch-std-sampler-sigmas #f)
 ;; Image processing
@@ -1052,6 +1053,8 @@
     (foreign-procedure "torch_std_sample_euler_ancestral" (void* void* void* void*) void*))
   (set! torch-std-sample-dpmpp-2m
     (foreign-procedure "torch_std_sample_dpmpp_2m" (void* void* void* void* void* int) void*))
+  (set! torch-std-euler-step
+    (foreign-procedure "torch_std_euler_step" (void* void* void* void* void* double) void*))
   (set! torch-std-sampler-sigmas
     (foreign-procedure "torch_std_sampler_sigmas" (int double double string) void*))
 
@@ -2103,6 +2106,19 @@ Returns (B,4,H,W) output latent (autograd graph built)"
           (tagged-tensor-ptr x-t)
           (tagged-tensor-ptr sigma-t)
           (tagged-tensor-ptr sigma-prev))))))
+
+(define (torch-euler-step x sigma-t sigma-next cond uncond cfg)
+  "CFG + Euler 一步融合（内部处理 device 兼容）"
+  (torch-check "torch not available"
+    (lambda ()
+      (make-tagged-tensor-auto
+        (torch-std-euler-step
+          (tagged-tensor-ptr x)
+          (tagged-tensor-ptr sigma-t)
+          (tagged-tensor-ptr sigma-next)
+          (tagged-tensor-ptr cond)
+          (tagged-tensor-ptr uncond)
+          cfg)))))
 
 (define (torch-sample-dpmpp-2m noise-pred x-t sigma-t sigma-prev old-denoisd is-first-step)
   "DPM++ 2M 二阶采样步"

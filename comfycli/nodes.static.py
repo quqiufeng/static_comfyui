@@ -18,12 +18,15 @@ def register_node(class_type: str, display: str, func_name: str, ret_types: list
 
 
 def checkpoint_loader_simple(inputs):
+    print("ckpt start")
     ckpt_name = dict_get(inputs, "ckpt_name")
     if str_starts_with(ckpt_name, "/"):
         ckpt_path = ckpt_name
     else:
         ckpt_path = "/data/models/image/" + ckpt_name
+    print("loading")
     result = load_checkpoint(ckpt_path)
+    print("loaded")
     return (result.model, result.clip, result.vae)
 
 
@@ -146,11 +149,11 @@ def k_sampler_inner(inputs):
         sigma_prev = torch.narrow(sigmas, 0, n + 1, 1)
         s_in = sigma_t
         cond_out = model_fn(sd_handle, x, s_in, cond, pooled_pos)
+        print("m1")
         uncond_out = model_fn(sd_handle, x, s_in, uncond, pooled_neg)
-        diff = torch.sub(cond_out, uncond_out)
-        scaled = torch.mul(diff, cfg)
-        denoised = torch.add(uncond_out, scaled)
-        x = torch.sample_euler(denoised, x, sigma_t, sigma_prev)
+        print("m2")
+        x = torch.euler_step(x, sigma_t, sigma_prev, cond_out, uncond_out, cfg)
+        print("st")
         n = n + 1
     result = make_dict()
     dict_set(result, "samples", x)

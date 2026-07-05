@@ -2282,8 +2282,11 @@ void* torch_std_sample_euler(void* noise_pred, void* x_t, void* sigma_t, void* s
         auto& xt = unwrap(x_t);
         auto& sig_t = unwrap(sigma_t);
         auto& sig_prev = unwrap(sigma_prev);
-        auto d = (xt - eps) / sig_t;
-        auto step = sig_prev - sig_t;
+        auto dev = xt.device();
+        auto sig_t_d = sig_t.to(dev);
+        auto sig_prev_d = sig_prev.to(dev);
+        auto d = (xt - eps) / sig_t_d;
+        auto step = sig_prev_d - sig_t_d;
         auto x_prev = xt + step * d;
         return wrap(x_prev);
     } catch (const std::exception& e) {

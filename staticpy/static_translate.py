@@ -404,6 +404,7 @@ MODULE_FN_RETURN_TYPES = {
     "torch-sample-ddim": Type("torch-tensor"),
     "torch-sample-euler": Type("torch-tensor"),
     "torch-sample-euler-ancestral": Type("torch-tensor"),
+    "torch-euler-step": Type("torch-tensor"),
     "torch-sample-dpmpp-2m": Type("torch-tensor"),
     "torch-sampler-sigmas": Type("torch-tensor"),
     "torch-image-resize": Type("torch-tensor"),
@@ -728,8 +729,10 @@ BUILTIN_MODULES = {
         "lora_merge_into": "torch-lora-merge-into",
         # Samplers
         "sample_ddim": "torch-sample-ddim",
-        "sample_euler": "torch-sample-euler",
-        "sample_euler_ancestral": "torch-sample-euler-ancestral",
+                     "sample_euler": "torch-sample-euler",
+                     "sample_euler_ancestral": "torch-sample-euler-ancestral",
+                     "euler_step": "torch-euler-step",
+        "euler_step": "torch-euler-step",
         "sample_dpmpp_2m": "torch-sample-dpmpp-2m",
         "sampler_sigmas": "torch-sampler-sigmas",
         # Image processing
