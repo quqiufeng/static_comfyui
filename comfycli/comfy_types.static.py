@@ -1,0 +1,82 @@
+class ModelType:
+    EPS = 1
+    V_PREDICTION = 2
+    V_PREDICTION_EDM = 3
+    STABLE_CASCADE = 4
+    EDM = 5
+    FLOW = 6
+    V_PREDICTION_CONTINUOUS = 7
+    FLUX = 8
+    IMG_TO_IMG = 9
+    FLOW_COSMOS = 10
+    IMG_TO_IMG_FLOW = 11
+    V_PREDICTION_DDPM = 12
+
+
+class CLIPType:
+    STABLE_DIFFUSION = 1
+    STABLE_CASCADE = 2
+    SD3 = 3
+    STABLE_AUDIO = 4
+    HUNYUAN_DIT = 5
+    FLUX = 6
+    MOCHI = 7
+    LTXV = 8
+    HUNYUAN_VIDEO = 9
+    PIXART = 10
+    COSMOS = 11
+    LUMINA2 = 12
+    WAN = 13
+    HIDREAM = 14
+    CHROMA = 15
+    ACE = 16
+    OMNIGEN2 = 17
+    QWEN_IMAGE = 18
+    HUNYUAN_IMAGE = 19
+    HUNYUAN_VIDEO_15 = 20
+    OVIS = 21
+    KANDINSKY5 = 22
+    KANDINSKY5_IMAGE = 23
+    NEWBIE = 24
+    FLUX2 = 25
+    LONGCAT_IMAGE = 26
+    COGVIDEOX = 27
+    LENS = 28
+    PIXELDIT = 29
+    IDEOGRAM4 = 30
+    BOOGU = 31
+    KREA2 = 32
+
+
+class TEModel:
+    CLIP_L = 1
+    CLIP_H = 2
+    CLIP_G = 3
+    T5_XXL = 4
+    T5_XL = 5
+    T5_BASE = 6
+    LLAMA3_8 = 7
+    T5_XXL_OLD = 8
+    GEMMA_2_2B = 9
+    QWEN25_3B = 10
+    QWEN25_7B = 11
+    BYT5_SMALL_GLYPH = 12
+    GEMMA_3_4B = 13
+    MISTRAL3_24B = 14
+    MISTRAL3_24B_PRUNED_FLUX2 = 15
+    QWEN3_4B = 16
+    QWEN3_2B = 17
+    GEMMA_3_12B = 18
+    JINA_CLIP_2 = 19
+    QWEN3_8B = 20
+    QWEN3_06B = 21
+    GEMMA_3_4B_VISION = 22
+    QWEN35_08B = 23
+    QWEN35_2B = 24
+    QWEN35_4B = 25
+    QWEN35_9B = 26
+    QWEN35_27B = 27
+
+
+def main():
+    pass
