@@ -50,6 +50,26 @@ ssh user@remote_host "bash /opt/comfycli/run.sh workflow.json --output-dir ./out
 进入项目后先运行 `git log --oneline -20` 查看近期提交记录，
 了解最新进展和正在开发的功能。提交信息使用中文书写。
 
+## 使用 code search 辅助翻译
+
+**原则**：翻译每个模块前，先语义搜索 ComfyUI 对应源码，理解实现细节后再 1:1 复刻。
+
+```bash
+# 语义搜索：找实现（推荐 vector_search，不需要 --analysis-dir）
+vector_search "PromptExecutor execution loop" --cache-dir /sqlite3/vdb
+
+# 语义搜索：cache_query 需要指定 repo 路径
+cache_query "folder_paths get_folder_paths" --repo /opt/static_comfyui/ComfyUI --type search
+
+# 查看调用链上下文
+cache_query "model_detection detect_unet_config" --repo /opt/static_comfyui/ComfyUI --type context --depth 2
+
+# 关键词搜索已知函数名
+cache_query "class KSampler" --repo /opt/static_comfyui/ComfyUI --type context --depth 1
+```
+
+搜索到对应源码后，按 `a.py → a.static.py` 模式 1:1 翻译。
+
 ## CLI 接口（main.static.py）
 ```
 # 模式 1：直接命令行出图
