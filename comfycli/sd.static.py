@@ -64,9 +64,15 @@ def load_checkpoint(ckpt_path: str) -> LoadResult:
 
     has_clip_l: bool = dict_contains(state_dict, "text_model.encoder.layers.0.layer_norm.weight")
     has_clip_g: bool = dict_contains(state_dict, "text_model.encoder.layers.30.mlp.fc1.weight")
+    if not has_clip_l:
+        has_clip_l = dict_contains(state_dict, "conditioner.embedders.0.transformer.text_model.encoder.layers.0.layer_norm1.weight")
+    if not has_clip_g:
+        has_clip_g = dict_contains(state_dict, "conditioner.embedders.1.transformer.text_model.encoder.layers.30.mlp.fc1.weight")
     has_vae: bool = dict_contains(state_dict, "first_stage_model.decoder.conv_in.weight")
     if not has_vae:
         has_vae = dict_contains(state_dict, "decoder.conv_in.weight")
+    if not has_vae:
+        has_vae = dict_contains(state_dict, "conditioner.embedders.3.decoder.conv_in.weight")
 
     model_type_val: int = 1
     if has_unet:

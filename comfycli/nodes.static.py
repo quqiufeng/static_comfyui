@@ -35,14 +35,12 @@ def dual_clip_loader(inputs):
     clip_name1 = dict_get(inputs, "clip_name1")
     clip_name2 = dict_get(inputs, "clip_name2")
     base_path = "/data/models/image/"
-    # CLIP models as JIT format (.pt) — convert with convert_clip_to_jit3.py
-    clip_g_path = base_path + "clip_g_jit.pt"
-    clip_l_path = base_path + "clip_l_jit.pt"
-    clip_g_mod = torch.jit_load(clip_g_path)
-    clip_l_mod = torch.jit_load(clip_l_path)
+    clip_g_sd = torch.safetensors_load(base_path + clip_name1)
+    clip_l_sd = torch.safetensors_load(base_path + clip_name2)
     result = make_dict()
-    dict_set(result, "clip_g", clip_g_mod)
-    dict_set(result, "clip_l", clip_l_mod)
+    dict_set(result, "clip_g", clip_g_sd)
+    dict_set(result, "clip_l", clip_l_sd)
+    return (result,)
     return (result,)
 
 
@@ -118,7 +116,7 @@ register_node("VAEEncode", "VAE Encode",
 
 
 def k_sampler_inner(inputs):
-    model = dict_get(inputs, "model")
+    model: ModelPatcher = dict_get(inputs, "model")
     seed = dict_get(inputs, "seed")
     steps = dict_get(inputs, "steps")
     cfg = dict_get(inputs, "cfg")
@@ -144,12 +142,18 @@ def k_sampler_inner(inputs):
     sd_handle = model.sd_handle
     n = 0
     while n < steps:
-        sigma_t = sigmas[n]
-        sigma_prev = sigmas[n + 1]
+        sigma_t = torch.narrow(sigmas, 0, n, 1)
+        sigma_prev = torch.narrow(sigmas, 0, n + 1, 1)
         s_in = sigma_t
         cond_out = model_fn(sd_handle, x, s_in, cond, pooled_pos)
         uncond_out = model_fn(sd_handle, x, s_in, uncond, pooled_neg)
-        denoised = uncond_out + (cond_out - uncond_out) * cfg
+        # CFG: denoised = uncond + cfg * (cond - uncond)
+        # Use scale tensor for cfg value
+        scale = torch.ones([1])
+        cfg_tensor = torch.mul(scale, cfg)
+        diff = torch.sub(cond_out, uncond_out)
+        scaled = torch.mul(diff, cfg_tensor)
+        denoised = torch.add(uncond_out, scaled)
         x = torch.sample_euler(denoised, x, sigma_t, sigma_prev)
         n = n + 1
     result = make_dict()

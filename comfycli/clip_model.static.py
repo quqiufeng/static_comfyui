@@ -62,11 +62,17 @@ def encode_sd15(clip_module, tokenizer, text: str, cast_fp16: bool):
     return clip_text_forward(clip_module, token_ids, cast_fp16)
 
 
-def encode_sdxl(clip_l_module, clip_g_module, tokenizer_l, tokenizer_g, text: str):
+def encode_sdxl(clip_l_dict, clip_g_dict, tokenizer_l, tokenizer_g, text: str):
     tokens_l = clip_tokenizer_encode(tokenizer_l, text)
-    tokens_g = clip_tokenizer_encode(tokenizer_g, text)
-    text_emb = sdxl_dual_clip(clip_l_module, clip_g_module, tokens_l)
-    pooled = sdxl_get_pooled()
+    # CLIP-L: dim=768, layers=12, heads=12, ffn=3072
+    emb_l = torch.clip_text_forward_from_dict(clip_l_dict, tokens_l, 768, 12, 12, 3072)
+    # CLIP-G: dim=1280, layers=32, heads=20, ffn=5120
+    emb_g = torch.clip_text_forward_from_dict(clip_g_dict, tokens_l, 1280, 32, 20, 5120)
+    result_list = py_list(emb_l, emb_g)
+    text_emb = torch.cat(result_list, 2)
+    # Pooled: extract at position 76 (last position, after padding)
+    pooled = torch.narrow(emb_g, 1, 76, 1)
+    pooled = torch.squeeze(pooled, 1)
     return text_emb, pooled
 
 

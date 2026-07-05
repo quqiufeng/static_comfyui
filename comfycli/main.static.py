@@ -2,6 +2,9 @@ from cli_args import parse_cli_args
 from execution import execute_prompt
 
 
+def guard_main():
+    main()
+
 def main():
     args = parse_cli_args()
     show_help: bool = dict_get(args, "show_help")

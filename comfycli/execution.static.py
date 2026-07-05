@@ -21,10 +21,8 @@ def build_deps(prompt):
             val = dict_get(raw_inputs, key)
             if is_link(val):
                 src_id = val[0]
-                link_info = make_dict()
-                dict_set(link_info, "node_id", src_id)
-                dict_set(link_info, "output_index", val[1])
-                dict_set(resolved, key, link_info)
+                src_idx = val[1]
+                dict_set(resolved, key, val)  # keep original [src_id, src_idx] array
                 dep_list = py_list_append(dep_list, src_id)
             else:
                 dict_set(resolved, key, val)
@@ -44,8 +42,8 @@ def resolve_all(inputs, node_outputs):
         key = keys[k]
         val = dict_get(inputs, key)
         if is_link(val):
-            src_id = dict_get(val, "node_id")
-            src_idx = dict_get(val, "output_index")
+            src_id = val[0]
+            src_idx = val[1]
             src_outputs = dict_get(node_outputs, src_id)
             resolved_val = src_outputs[src_idx]
         else:

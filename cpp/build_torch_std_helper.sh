@@ -26,13 +26,20 @@ if [ -n "$GLIBC_SYSROOT" ]; then
   LDFLAGS+=("-Wl,-rpath-link,$GLIBC_SYSROOT/usr/lib/x86_64-linux-gnu")
 fi
 
+CUDA_INC="/data/cuda/include"
+CUDA_LIB="/data/cuda/lib64"
+
 g++ -O3 -shared -fPIC -std=c++17 -D_GLIBCXX_USE_CXX11_ABI=0 \
     libtorch_std_helper.cpp \
     -I"$TORCH_INCLUDE" \
     -I"$TORCH_INCLUDE/torch/csrc/api/include" \
+    -I"$CUDA_INC" \
+    -I/usr/local/cuda/include \
+    -I"$TORCH_INCLUDE/c10/cuda/.." \
     "${LDFLAGS[@]}" \
     -L"$TORCH_LIB" \
-    -ltorch -ltorch_cpu -lc10 -lpng \
+    -L"$CUDA_LIB" \
+    -ltorch -ltorch_cpu -lc10 -lcuda -lcudart -lpng \
     -Wl,-rpath,"$TORCH_LIB" \
     -o libtorch_std_helper.so
 

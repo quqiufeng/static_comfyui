@@ -585,6 +585,12 @@
         (return))
       (lambda ()
         (load-shared-object "libtorch_std_helper.so")
+        ;; 加载 CLIP-from-safetensors helper
+        ;; 先试相对路径，再试绝对路径
+        (or (guard (e (else #f)) (load-shared-object "clip_helper.so") #t)
+            (guard (e (else #f)) (load-shared-object "/opt/ReScheme/clip_helper.so") #t)
+            (guard (e (else #f)) (load-shared-object "/tmp/comfycli_bin/clip_helper.so") #t)
+            (display "WARNING: clip_helper.so not loaded, CLIP from safetensors disabled\n"))
         (set! *torch-available* #t)))))
 
 ;; dtype 常量
@@ -749,6 +755,7 @@
 (define torch-std-clip-tokenizer-free #f)
 ;; CLIP text encoder forward
 (define torch-std-clip-text-forward #f)
+(define torch-std-clip-text-forward-from-dict #f)
 ;; SDXL UNet forward (new)
 (define torch-std-sdxl-unet-forward #f)
 (define torch-std-sdxl-dual-clip #f)
@@ -1078,9 +1085,12 @@
   (set! torch-std-clip-tokenizer-free
     (foreign-procedure "torch_std_clip_tokenizer_free" (void*) void))
 
-  ;; ---- CLIP text encoder forward ----
+  ;; ---- CLIP text encoder forward (from safetensors dict) ----
   (set! torch-std-clip-text-forward
     (foreign-procedure "torch_std_clip_text_forward" (void* void* int) void*))
+  ;; ---- CLIP text encoder forward from safetensors dict (no JIT modules!) ----
+  (set! torch-std-clip-text-forward-from-dict
+    (foreign-procedure "torch_std_clip_text_forward_from_dict" (void* void* int int int int) void*))
 
   ;; ---- CUDA 显存管理 wrapper (可能无 CUDA 编译) ----
   (set! torch-std-cuda-get-free-memory
@@ -1095,7 +1105,7 @@
   ;; ---- SDXL UNet forward ----
   (set! torch-std-sdxl-unet-forward
     (foreign-procedure "torch_std_sdxl_unet_forward"
-      (void* void* double void* void* double double double double double double) void*))
+      (void* void* void* void* void* double double double double double double) void*))
   ;; ---- SDXL dual CLIP ----
   (set! torch-std-sdxl-dual-clip
     (foreign-procedure "torch_std_sdxl_dual_clip" (void* void* void*) void*))
@@ -1232,29 +1242,42 @@
           (torch-std-empty shape-ptr ndim *torch-dtype-float64*)
           shape-vec)))))
 
+(define (torch-to-tensor x)
+  "将 number 转成 1-element tensor，否则原样返回"
+  (if (number? x)
+    (let* ((shape (vector 1))
+           (shape-ptr (make-ffi-shape shape)))
+      (make-tagged-tensor
+        (torch-std-full shape-ptr 1 x 1)  ;; dtype=1 = float64
+        shape))
+    x))
+
 (define (torch-add a b)
   "逐元素相加，返回新的 tagged tensor"
   (torch-check "torch not available"
     (lambda ()
-      (make-tagged-tensor
-        (torch-std-add (tagged-tensor-ptr a) (tagged-tensor-ptr b))
-        (tagged-tensor-shape a)))))
+      (let ((tb (torch-to-tensor b)))
+        (make-tagged-tensor
+          (torch-std-add (tagged-tensor-ptr a) (tagged-tensor-ptr tb))
+          (tagged-tensor-shape a))))))
 
 (define (torch-mul a b)
   "逐元素相乘，返回新的 tagged tensor"
   (torch-check "torch not available"
     (lambda ()
-      (make-tagged-tensor
-        (torch-std-mul (tagged-tensor-ptr a) (tagged-tensor-ptr b))
-        (tagged-tensor-shape a)))))
+      (let ((tb (torch-to-tensor b)))
+        (make-tagged-tensor
+          (torch-std-mul (tagged-tensor-ptr a) (tagged-tensor-ptr tb))
+          (tagged-tensor-shape a))))))
 
 (define (torch-sub a b)
   "逐元素相减，返回新的 tagged tensor"
   (torch-check "torch not available"
     (lambda ()
-      (make-tagged-tensor
-        (torch-std-sub (tagged-tensor-ptr a) (tagged-tensor-ptr b))
-        (tagged-tensor-shape a)))))
+      (let ((tb (torch-to-tensor b)))
+        (make-tagged-tensor
+          (torch-std-sub (tagged-tensor-ptr a) (tagged-tensor-ptr tb))
+          (tagged-tensor-shape a))))))
 
 (define (torch-clone a)
   "拷贝 tensor，返回新的 tagged tensor"
@@ -1423,7 +1446,7 @@
 
 ;; 通用辅助：从裸 tensor 指针构造 tagged tensor，自动查询 shape
 (define (make-tagged-tensor-auto ptr)
-  (let* ((ndim (torch-std-ndim ptr))
+  (let* ((ndim (max 1 (torch-std-ndim ptr)))
          (shape-ptr (foreign-alloc (* ndim 8)))
          (shape (make-vector ndim)))
     (torch-std-shape ptr shape-ptr)
@@ -1536,6 +1559,13 @@
   (torch-check "torch not available"
     (lambda ()
       (make-tagged-tensor-auto (torch-std-unsqueeze (tagged-tensor-ptr t) dim)))))
+
+(define (torch-narrow t dim start len)
+  "张量切片: t[dim, start:start+len]"
+  (torch-check "torch not available"
+    (lambda ()
+      (make-tagged-tensor-auto
+        (torch-std-narrow (tagged-tensor-ptr t) dim start len)))))
 
 (define (torch-transpose t dim0 dim1)
   "交换两个维度"
@@ -2211,6 +2241,16 @@ cast-to-float16: 非零则输出转为 float16"
           clip-module
           (tagged-tensor-ptr token-ids)
           (if cast-to-float16 1 0))))))
+
+(define (torch-clip-text-forward-from-dict clip-dict token-ids d-model n-layers n-heads d-ffn)
+  "CLIP text encoder forward from safetensors dict: token_ids → (1,77,D) embeddings"
+  (torch-check "torch not available"
+    (lambda ()
+      (make-tagged-tensor-auto
+        (torch-std-clip-text-forward-from-dict
+          clip-dict
+          (tagged-tensor-ptr token-ids)
+          d-model n-layers n-heads d-ffn)))))
 
 ;; ====== nn 初始化辅助 ======
 

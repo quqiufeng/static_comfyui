@@ -418,6 +418,7 @@ MODULE_FN_RETURN_TYPES = {
         "torch-clip-tokenizer-encode": Type("torch-tensor"),
         "torch-clip-tokenizer-free": Type("void"),
         "torch-clip-text-forward": Type("torch-tensor"),
+        "torch-clip-text-forward-from-dict": Type("torch-tensor"),
         "torch-gguf-load": Type("ptr"),
         "torch-gguf-tensor-count": Type("int"),
         "torch-gguf-tensor-name": Type("string"),
@@ -449,6 +450,7 @@ MODULE_FN_RETURN_TYPES = {
     "torch-index-select": Type("torch-tensor"),
     "torch-squeeze": Type("torch-tensor"),
     "torch-unsqueeze": Type("torch-tensor"),
+    "torch-narrow": Type("torch-tensor"),
     "torch-transpose": Type("torch-tensor"),
     "nn-linear": Type("Any"),
     "nn-conv2d": Type("Any"),
@@ -632,6 +634,7 @@ BUILTIN_MODULES = {
         "index_select": "torch-index-select",
         "squeeze": "torch-squeeze",
         "unsqueeze": "torch-unsqueeze",
+        "narrow": "torch-narrow",
         "transpose": "torch-transpose",
         "div": "torch-div",
         "pow": "torch-pow",
@@ -712,6 +715,7 @@ BUILTIN_MODULES = {
         "clip_tokenizer_free": "torch-clip-tokenizer-free",
         # CLIP text encoder
         "clip_text_forward": "torch-clip-text-forward",
+        "clip_text_forward_from_dict": "torch-clip-text-forward-from-dict",
         # safetensors
         "safetensors_load": "torch-safetensors-load",
         "safetensors_count": "torch-safetensors-count",
@@ -2354,6 +2358,7 @@ def translate_expr(node):
                     "clip_tokenizer_free": "torch-clip-tokenizer-free",
                     # CLIP text encoder
                     "clip_text_forward": "torch-clip-text-forward",
+                    "clip_text_forward_from_dict": "torch-clip-text-forward-from-dict",
                     # safetensors
                     "safetensors_load": "torch-safetensors-load",
                     "safetensors_count": "torch-safetensors-count",
@@ -2517,8 +2522,9 @@ def translate_expr(node):
         # 记录字段访问：p.x -> (Point-x p)，若知道 p 的类型
         if isinstance(node.value, ast.Name):
             vtype = TYPE_ENV.get(node.value.id)
-            if vtype in RECORD_TYPES and node.attr in RECORD_TYPES[vtype]:
-                return f"({vtype}-{node.attr} {node.value.id})"
+            vtype_str = vtype.base if hasattr(vtype, 'base') else vtype
+            if vtype_str in RECORD_TYPES and node.attr in RECORD_TYPES[vtype_str]:
+                return f"({vtype_str}-{node.attr} {node.value.id})"
         value = translate_expr(node.value)
         # dict.copy() -> (dict-copy dict)
         if node.attr == "copy":
