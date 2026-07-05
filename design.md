@@ -16,6 +16,24 @@
 
 **注意**：`libtorch_std_helper.so` 已内置 `torch_std_safetensors_load` 和 `torch_std_gguf_load`，可直接加载上述任意格式。
 
+## CLI 接口
+
+```
+# 模式 1：直接命令行出图
+comfycli \
+  --checkpoint /data/models/image/sd_xl_base_1.0.safetensors \
+  --prompt "cat wearing hat" \
+  --output ./output.png
+
+# 模式 2：执行 ComfyUI workflow JSON
+comfycli workflow.json \
+  --output-dir ./output
+```
+
+两种模式共享同一推理引擎，区别仅在输入解析层：
+- **模式 1**：内部构造单节点 Workflow（CheckpointLoader → CLIPTextEncode → KSampler → VAEDecode → SaveImage）
+- **模式 2**：解析 ComfyUI 标准 workflow JSON，遍历 DAG 执行
+
 ## 目标
 
 用 StaticPy（Python 子集编译器）+ `libtorch_std_helper.so`（C++ libtorch 封装）1:1 重写 ComfyUI，编译为独立 ELF 二进制，消除 Python 解释器和 pip 依赖。
