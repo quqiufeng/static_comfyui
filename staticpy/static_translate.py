@@ -290,6 +290,41 @@ BUILTIN_FN_RETURN_TYPES = {
     "exit": Type("none"),
     "make_float_array": Type("list", [Type("float")]),
     "make_int_array": Type("list", [Type("int")]),
+    # dict
+    "make_dict": Type("dict"),
+    "dict_get": Type("Any"),
+    "dict_get_or_empty": Type("str"),
+    "dict_set": Type("void"),
+    "dict_contains": Type("bool"),
+    "dict_copy": Type("dict"),
+    # string
+    "str_length": Type("int"),
+    "str_ends_with": Type("bool"),
+    "str_starts_with": Type("bool"),
+    "str_replace": Type("str"),
+    "str_slice": Type("str"),
+    "str_join": Type("str"),
+    "str_split": Type("list", [Type("str")]),
+    "str_contains": Type("bool"),
+    "str_lower": Type("str"),
+    "str_upper": Type("str"),
+    "str_trim": Type("str"),
+    # list/vector
+    "py_list": Type("list", [Type("Any")]),
+    "py_list_append": Type("list", [Type("Any")]),
+    "py_list_ref": Type("Any"),
+    "py_list_length": Type("int"),
+    "list_to_py_list": Type("list", [Type("Any")]),
+    # os
+    "os_file_exists": Type("bool"),
+    "os_list_dir": Type("list", [Type("str")]),
+    "os_mkdir": Type("void"),
+    "os_getcwd": Type("str"),
+    "os_file_size": Type("int"),
+    # conversion
+    "string_of_int": Type("str"),
+    "string_to_int": Type("int"),
+    "string_to_float": Type("float"),
 }
 
 MODULE_FN_RETURN_TYPES = {
@@ -1213,6 +1248,10 @@ def translate_compare(op, left_node, right_node):
         "Eq":   "string=?",
         "NotEq":None,
     }
+    if isinstance(op, ast.Is):
+        return f"(eq? {left} {right})"
+    if isinstance(op, ast.IsNot):
+        return f"(not (eq? {left} {right}))"
     if type(op).__name__ == "NotEq":
         inner = translate_compare(ast.Eq(), left_node, right_node)
         return f"(not {inner})"
@@ -1913,8 +1952,8 @@ def typecheck_function(node, function_arities, module_env=None):
                     typecheck_error(stmt, f"return value of type '{val_t}' does not match declared return type '{ret_type}'")
         elif isinstance(stmt, ast.If):
             cond_t = check_expr(stmt.test)
-            if cond_t and cond_t.base != "bool":
-                typecheck_error(stmt, f"if condition must be bool, got '{cond_t}'")
+            if cond_t and cond_t.base not in ("bool", "Any", "none", "int", "float", "str", "list"):
+                typecheck_error(stmt, f"if condition must be bool/Any/value type, got '{cond_t}'")
             for s in stmt.body:
                 check_stmt(s)
             for s in stmt.orelse:
@@ -1972,6 +2011,11 @@ def typecheck_module(tree):
             for item in node.body:
                 if isinstance(item, ast.Assign) and len(item.targets) == 1 and isinstance(item.targets[0], ast.Name):
                     module_env[f"{node.name}_{item.targets[0].id}"] = Type("int")
+        # 收集模块级变量声明，使函数体能引用全局变量
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            t = parse_type(node.annotation)
+            if t:
+                module_env[node.target.id] = t
     for node in tree.body:
         if isinstance(node, ast.FunctionDef):
             typecheck_function(node, arities, module_env)
@@ -2687,8 +2731,13 @@ def translate_function(node, source_file=""):
         body = f"  (begin\n    {exprs_str}\n  )"
     
     # 将函数体内被赋值的变量绑定为局部变量，避免递归调用时覆盖全局变量
+    # global 声明的变量不受 let 遮蔽
+    global_names = set()
+    for stmt in node.body:
+        if isinstance(stmt, ast.Global):
+            global_names.update(stmt.names)
     param_names = {arg.arg for arg in node.args.args}
-    local_vars = collect_assigned_names(node.body) - param_names
+    local_vars = collect_assigned_names(node.body) - param_names - global_names
     if local_vars:
         bindings = " ".join(f"({mangle_name(v)} #f)" for v in sorted(local_vars))
         body = f"  (let ({bindings})\n{body}\n  )"
@@ -2828,12 +2877,24 @@ def _run_pipeline(input_files):
     output_parts.append(f";; Source: {source_filename}")
     output_parts.append("")
     
-    # 函数定义（跳过 import 语句）
-    output_parts.append(";; StaticPy functions")
+    # 模块级变量定义 + 函数定义（跳过 import 语句）
+    output_parts.append(";; StaticPy code")
     for node in tree.body:
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             continue
-        if isinstance(node, ast.ClassDef):
+        if isinstance(node, ast.AnnAssign):
+            target = mangle_name(node.target.id) if isinstance(node.target, ast.Name) else None
+            val = translate_expr(node.value) if node.value else "#f"
+            if target:
+                output_parts.append(f"(define {target} {val})")
+        elif isinstance(node, ast.Assign):
+            if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                target = mangle_name(node.targets[0].id)
+                val = translate_expr(node.value)
+                output_parts.append(f"(define {target} {val})")
+        elif isinstance(node, ast.Expr):
+            output_parts.append(translate_expr(node.value))
+        elif isinstance(node, ast.ClassDef):
             output_parts.append(translate_class(node))
         elif isinstance(node, ast.FunctionDef):
             output_parts.append(translate_function(node, source_filename))

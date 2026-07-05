@@ -218,7 +218,7 @@ ComfyUI 是 Python ML 生态中最复杂的纯推理项目之一：
 
 ```
 Phase 0: 基础设施 (无 GPU 需求)
-  [ ] folder_paths.static.py     路径管理
+  [x] folder_paths.static.py     路径管理
   [ ] cli_args.static.py         CLI 参数解析
   [ ] comfy_types.static.py      Node 类型定义
 
