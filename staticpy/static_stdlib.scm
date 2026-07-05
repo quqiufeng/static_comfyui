@@ -749,6 +749,20 @@
 (define torch-std-clip-tokenizer-free #f)
 ;; CLIP text encoder forward
 (define torch-std-clip-text-forward #f)
+;; SDXL UNet forward (new)
+(define torch-std-sdxl-unet-forward #f)
+(define torch-std-sdxl-dual-clip #f)
+(define torch-std-sdxl-get-pooled #f)
+(define torch-std-sdxl-get-pooled-l #f)
+;; T5 tokenizer (new)
+(define torch-std-t5-tokenizer-create #f)
+(define torch-std-t5-tokenizer-encode #f)
+(define torch-std-t5-tokenizer-free #f)
+;; FLUX forward (new)
+(define torch-std-flux-forward #f)
+;; Flow Matching (new)
+(define torch-std-fm-sigmas #f)
+(define torch-std-fm-step #f)
 
 (when *torch-available*
   (set! torch-std-tensor-from-blob
@@ -957,15 +971,15 @@
   (set! torch-std-is-cuda
     (foreign-procedure "torch_std_is_cuda" (void*) int))
 
-  ;; ---- CUDA 显存管理 ----
+  ;; ---- CUDA 显存管理 (可能无 CUDA 编译) ----
   (set! torch-std-cuda-get-free-memory
-    (foreign-procedure "torch_std_cuda_get_free_memory" () long))
+    (guard (e (else #f)) (foreign-procedure "torch_std_cuda_get_free_memory" () long)))
   (set! torch-std-cuda-load-model
-    (foreign-procedure "torch_std_cuda_load_model" (int void*) void*))
+    (guard (e (else #f)) (foreign-procedure "torch_std_cuda_load_model" (int void*) void*)))
   (set! torch-std-cuda-unload-model
-    (foreign-procedure "torch_std_cuda_unload_model" (void*) void))
+    (guard (e (else #f)) (foreign-procedure "torch_std_cuda_unload_model" (void*) void)))
   (set! torch-std-cuda-soft-empty-cache
-    (foreign-procedure "torch_std_cuda_soft_empty_cache" () void))
+    (guard (e (else #f)) (foreign-procedure "torch_std_cuda_soft_empty_cache" () void)))
 
   ;; ---- JIT module loading (new) ----
   (set! torch-std-jit-load
@@ -1068,15 +1082,44 @@
   (set! torch-std-clip-text-forward
     (foreign-procedure "torch_std_clip_text_forward" (void* void* int) void*))
 
-  ;; ---- CUDA 显存管理 wrapper ----
+  ;; ---- CUDA 显存管理 wrapper (可能无 CUDA 编译) ----
   (set! torch-std-cuda-get-free-memory
-    (foreign-procedure "torch_std_cuda_get_free_memory" () long))
+    (guard (e (else #f)) (foreign-procedure "torch_std_cuda_get_free_memory" () long)))
   (set! torch-std-cuda-load-model
-    (foreign-procedure "torch_std_cuda_load_model" (int void*) void*))
+    (guard (e (else #f)) (foreign-procedure "torch_std_cuda_load_model" (int void*) void*)))
   (set! torch-std-cuda-unload-model
-    (foreign-procedure "torch_std_cuda_unload_model" (void*) void))
+    (guard (e (else #f)) (foreign-procedure "torch_std_cuda_unload_model" (void*) void)))
   (set! torch-std-cuda-soft-empty-cache
-    (foreign-procedure "torch_std_cuda_soft_empty_cache" () void)))
+    (guard (e (else #f)) (foreign-procedure "torch_std_cuda_soft_empty_cache" () void)))
+
+  ;; ---- SDXL UNet forward ----
+  (set! torch-std-sdxl-unet-forward
+    (foreign-procedure "torch_std_sdxl_unet_forward"
+      (void* void* double void* void* double double double double double double) void*))
+  ;; ---- SDXL dual CLIP ----
+  (set! torch-std-sdxl-dual-clip
+    (foreign-procedure "torch_std_sdxl_dual_clip" (void* void* void*) void*))
+  ;; ---- SDXL pooled embeddings ----
+  (set! torch-std-sdxl-get-pooled
+    (foreign-procedure "torch_std_sdxl_get_pooled" () void*))
+  (set! torch-std-sdxl-get-pooled-l
+    (foreign-procedure "torch_std_sdxl_get_pooled_l" () void*))
+  ;; ---- T5 tokenizer ----
+  (set! torch-std-t5-tokenizer-create
+    (foreign-procedure "torch_std_t5_tokenizer_create" (string) void*))
+  (set! torch-std-t5-tokenizer-encode
+    (foreign-procedure "torch_std_t5_tokenizer_encode" (void* string int) void*))
+  (set! torch-std-t5-tokenizer-free
+    (foreign-procedure "torch_std_t5_tokenizer_free" (void*) void))
+  ;; ---- FLUX forward ----
+  (set! torch-std-flux-forward
+    (foreign-procedure "torch_std_flux_forward"
+      (void* void* void* double void* int int int int int) void*))
+  ;; ---- Flow Matching ----
+  (set! torch-std-fm-sigmas
+    (foreign-procedure "torch_std_fm_sigmas" (int double double) void*))
+  (set! torch-std-fm-step
+    (foreign-procedure "torch_std_fm_step" (void* void* double) void*)))
 
 ;; ============================================================
 ;; Part 11a: tagged tensor 抽象：#(ptr shape-vec)

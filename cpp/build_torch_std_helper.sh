@@ -32,7 +32,7 @@ g++ -O3 -shared -fPIC -std=c++17 -D_GLIBCXX_USE_CXX11_ABI=0 \
     -I"$TORCH_INCLUDE/torch/csrc/api/include" \
     "${LDFLAGS[@]}" \
     -L"$TORCH_LIB" \
-    -ltorch -ltorch_cpu -lc10 \
+    -ltorch -ltorch_cpu -lc10 -lpng \
     -Wl,-rpath,"$TORCH_LIB" \
     -o libtorch_std_helper.so
 

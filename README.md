@@ -235,20 +235,23 @@ Phase 2: 模型加载 + 显存管理 (编译通过)
   [x] model_management.static.py GPU 调度 (load/offload/清缓存)
   [x] lora.static.py            LoRA 合并 (apply/merge_into)
 
-Phase 3: 组件级推理
-  [ ] clip_model.static.py      CLIP encode
-  [ ] k_diffusion/sampling.static.py  采样器
-  [ ] sample.static.py          采样入口
-  [ ] controlnet.static.py      ControlNet
+Phase 3: 组件级推理 (编译通过)
+  [x] clip_model.static.py      CLIP encode (SD15/SDXL/Flux/T5)
+  [x] k_diffusion/sampling.static.py  采样器 (euler/euler_a/ddim/dpmpp_2m/FM)
+  [x] sample.static.py          采样入口 (CFG denoise + sigma 循环)
+  [x] controlnet.static.py      ControlNet (load/forward/apply)
 
-Phase 4: 节点 → DAG → 入口
-  [ ] nodes.static.py           200+ 节点定义
-  [ ] execution.static.py       PromptExecutor
-  [ ] main.static.py            CLI 入口
+Phase 4: 节点 → DAG → 入口 (编译通过, --help 正常)
+  [x] nodes.static.py           8 个核心节点 (CheckpointLoader/DualCLIP/CLIPTextEncode/EmptyLatent/VAE/KSampler/SaveImage)
+  [x] execution.static.py       DAG 执行引擎 (重复扫描拓扑排序)
+  [x] main.static.py            CLI 入口 (workflow.json / --checkpoint --prompt)
 
-Phase 5: 端到端验证
-  [ ] workflow SDXL → 图片输出
-  [ ] --prompt 命令行模式验证
+Phase 5: 端到端验证 (需 CUDA GPU)
+  [x] 编译器修复: continue/break/cond/import/mangle_name
+  [x] CLIP JIT 模块生成 (convert_clip_to_jit3.py)
+  [x] SDXL/T5/FLUX/FM FFI 声明补全
+  [ ] workflow SDXL → 图片输出   (需 CUDA GPU, C++ helper 中 cuda 硬编码)
+  [ ] --prompt 命令行模式验证    (需 CUDA GPU)
 ```
 
 各阶段产出可独立编译、单独测试。Phase 0–1 甚至不需要 GPU。

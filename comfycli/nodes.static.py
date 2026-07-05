@@ -19,7 +19,10 @@ def register_node(class_type: str, display: str, func_name: str, ret_types: list
 
 def checkpoint_loader_simple(inputs):
     ckpt_name = dict_get(inputs, "ckpt_name")
-    ckpt_path = "/data/models/image/" + ckpt_name
+    if str_starts_with(ckpt_name, "/"):
+        ckpt_path = ckpt_name
+    else:
+        ckpt_path = "/data/models/image/" + ckpt_name
     result = load_checkpoint(ckpt_path)
     return (result.model, result.clip, result.vae)
 
@@ -32,13 +35,14 @@ def dual_clip_loader(inputs):
     clip_name1 = dict_get(inputs, "clip_name1")
     clip_name2 = dict_get(inputs, "clip_name2")
     base_path = "/data/models/image/"
-    clip_g_path = base_path + clip_name1
-    clip_l_path = base_path + clip_name2
-    clip_g_sd = torch.safetensors_load(clip_g_path)
-    clip_l_sd = torch.safetensors_load(clip_l_path)
+    # CLIP models as JIT format (.pt) — convert with convert_clip_to_jit3.py
+    clip_g_path = base_path + "clip_g_jit.pt"
+    clip_l_path = base_path + "clip_l_jit.pt"
+    clip_g_mod = torch.jit_load(clip_g_path)
+    clip_l_mod = torch.jit_load(clip_l_path)
     result = make_dict()
-    dict_set(result, "clip_g", clip_g_sd)
-    dict_set(result, "clip_l", clip_l_sd)
+    dict_set(result, "clip_g", clip_g_mod)
+    dict_set(result, "clip_l", clip_l_mod)
     return (result,)
 
 

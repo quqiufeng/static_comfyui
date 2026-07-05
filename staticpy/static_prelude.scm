@@ -225,7 +225,14 @@
     d))
 (define file_open (lambda (path mode) (file-open path mode)))
 (define file_close (lambda (fp) (file-close fp)))
-(define file_read_all (lambda (fp) (file-read-all fp)))
+(define (file_read_all path)
+  "读取整个文件（自动打开和关闭）"
+  (let ((fp (libc-fopen path "r")))
+    (if fp
+        (let ((content (file-read-all fp)))
+          (libc-fclose fp)
+          content)
+        (begin (display "file_read_all: cannot open ") (display path) (newline) ""))))
 (define file_write (lambda (fp s) (file-write fp s)))
 (define file_exists (lambda (path) (file-exists? path)))
 (define http_get_simple (lambda (url) (http-get-simple url)))
