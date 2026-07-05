@@ -223,3 +223,15 @@ comfyui_ref/
 # StaticPy generated executables
 sd_generate*.elf
 *.elf
+
+# ComfyUI source (read-only reference, not part of this project)
+ComfyUI/
+
+# ML model files (binary)
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.gguf
+*.ggml
