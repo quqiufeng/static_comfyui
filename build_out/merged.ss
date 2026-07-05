@@ -705,6 +705,8 @@
   (foreign-procedure "torch_std_sd15_unet_forward_dict" (void* void* void* void* void* void* void* int double) void*))
 (define torch_std_sdxl_unet_forward
   (foreign-procedure "torch_std_sdxl_unet_forward" (void* void* void* void* void* double double double double double double) void*))
+(define torch_std_sdxl_unet_jit_forward
+  (foreign-procedure "torch_std_sdxl_unet_jit_forward" (void* void* void* void* void* double double double double double double) void*))
 (define torch_std_vae_encode
   (foreign-procedure "torch_std_vae_encode" (void* void*) void*))
 (define torch_std_vae_decode
@@ -1777,8 +1779,11 @@
     (torch_std_sd15_unet_forward_dict sd_dict x sigma text_emb null null null 0 0.0))))
     unet_fn))
 (define (static_make_sdxl_unet_fn sd_dict original_size_h original_size_w crop_top crop_left target_size_h target_size_w)
-  (letrec ((unet_fn (lambda (x sigma text_emb pooled_emb)
-    (torch_std_sdxl_unet_forward sd_dict x sigma text_emb pooled_emb (inexact original_size_h) (inexact original_size_w) (inexact crop_top) (inexact crop_left) (inexact target_size_h) (inexact target_size_w)))))
+  (letrec ((unet_jit (torch_std_jit_load (os_getenv "UNET_JIT")))
+           (unet_fn (lambda (x sigma text_emb pooled_emb)
+    (if unet_jit
+        (torch_std_sdxl_unet_jit_forward unet_jit x sigma text_emb pooled_emb (inexact original_size_h) (inexact original_size_w) (inexact crop_top) (inexact crop_left) (inexact target_size_h) (inexact target_size_w))
+        (torch_std_sdxl_unet_forward sd_dict x sigma text_emb pooled_emb (inexact original_size_h) (inexact original_size_w) (inexact crop_top) (inexact crop_left) (inexact target_size_h) (inexact target_size_w))))))
     unet_fn))
 ;; SD15Pipeline init from __init__
 (define (SD15Pipeline_init self sd_dict clip vae unet_fn)
