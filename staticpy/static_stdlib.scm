@@ -957,6 +957,16 @@
   (set! torch-std-is-cuda
     (foreign-procedure "torch_std_is_cuda" (void*) int))
 
+  ;; ---- CUDA 显存管理 ----
+  (set! torch-std-cuda-get-free-memory
+    (foreign-procedure "torch_std_cuda_get_free_memory" () long))
+  (set! torch-std-cuda-load-model
+    (foreign-procedure "torch_std_cuda_load_model" (int void*) void*))
+  (set! torch-std-cuda-unload-model
+    (foreign-procedure "torch_std_cuda_unload_model" (void*) void))
+  (set! torch-std-cuda-soft-empty-cache
+    (foreign-procedure "torch_std_cuda_soft_empty_cache" () void))
+
   ;; ---- JIT module loading (new) ----
   (set! torch-std-jit-load
     (foreign-procedure "torch_std_jit_load" (string) void*))
@@ -1056,7 +1066,17 @@
 
   ;; ---- CLIP text encoder forward ----
   (set! torch-std-clip-text-forward
-    (foreign-procedure "torch_std_clip_text_forward" (void* void* int) void*)))
+    (foreign-procedure "torch_std_clip_text_forward" (void* void* int) void*))
+
+  ;; ---- CUDA 显存管理 wrapper ----
+  (set! torch-std-cuda-get-free-memory
+    (foreign-procedure "torch_std_cuda_get_free_memory" () long))
+  (set! torch-std-cuda-load-model
+    (foreign-procedure "torch_std_cuda_load_model" (int void*) void*))
+  (set! torch-std-cuda-unload-model
+    (foreign-procedure "torch_std_cuda_unload_model" (void*) void))
+  (set! torch-std-cuda-soft-empty-cache
+    (foreign-procedure "torch_std_cuda_soft_empty_cache" () void)))
 
 ;; ============================================================
 ;; Part 11a: tagged tensor 抽象：#(ptr shape-vec)
@@ -1710,6 +1730,33 @@
   (torch-check "torch not available"
     (lambda ()
       (> (torch-std-is-cuda (tagged-tensor-ptr t)) 0))))
+
+(define (torch-cuda-get-free-memory)
+  "获取 CUDA 空闲显存（字节）"
+  (torch-check "torch not available"
+    (lambda ()
+      (torch-std-cuda-get-free-memory))))
+
+(define (torch-cuda-load-model device t)
+  "将模型 tensor 加载到指定 CUDA 设备，返回新 tensor"
+  (torch-check "torch not available"
+    (lambda ()
+      (make-tagged-tensor-auto
+        (torch-std-cuda-load-model device (tagged-tensor-ptr t))))))
+
+(define (torch-cuda-unload-model t)
+  "从 GPU 卸载模型 tensor（释放内存）"
+  (torch-check "torch not available"
+    (lambda ()
+      (torch-std-cuda-unload-model (tagged-tensor-ptr t))
+      #t)))
+
+(define (torch-cuda-soft-empty-cache)
+  "清空 CUDA 缓存"
+  (torch-check "torch not available"
+    (lambda ()
+      (torch-std-cuda-soft-empty-cache)
+      #t)))
 
 (define (torch-where condition x y)
   "按 condition 选择 x 或 y"

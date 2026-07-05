@@ -198,6 +198,12 @@ void* torch_std_to_cuda(void* t);
 void* torch_std_to_cpu(void* t);
 int torch_std_is_cuda(void* t);
 
+// CUDA 显存管理
+int64_t torch_std_cuda_get_free_memory(void);
+void*   torch_std_cuda_load_model(int device, void* tensor);
+void    torch_std_cuda_unload_model(void* tensor);
+void    torch_std_cuda_soft_empty_cache(void);
+
 // ============================================================
 // TorchScript JIT 模型加载与推理
 // ============================================================

@@ -743,6 +743,39 @@ int torch_std_is_cuda(void* t) {
 }
 
 // ============================================================
+// CUDA 显存管理
+// ============================================================
+int64_t torch_std_cuda_get_free_memory(void) {
+    try {
+        size_t free, total;
+        cudaMemGetInfo(&free, &total);
+        return static_cast<int64_t>(free);
+    } catch (...) { return 0; }
+}
+
+void* torch_std_cuda_load_model(int device, void* tensor) {
+    try {
+        auto t = unwrap(tensor).to(torch::Device(torch::kCUDA, device));
+        return wrap(t);
+    } catch (const std::exception& e) {
+        std::cerr << "torch_std_cuda_load_model error: " << e.what() << std::endl;
+        return nullptr;
+    }
+}
+
+void torch_std_cuda_unload_model(void* tensor) {
+    try {
+        delete static_cast<torch::Tensor*>(tensor);
+    } catch (...) {}
+}
+
+void torch_std_cuda_soft_empty_cache(void) {
+    try {
+        c10::cuda::CUDACachingAllocator::emptyCache();
+    } catch (...) {}
+}
+
+// ============================================================
 // TorchScript JIT 模型加载与推理
 // ============================================================
 void* torch_std_jit_load(const char* path) {
