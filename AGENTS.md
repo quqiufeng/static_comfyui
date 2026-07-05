@@ -4,6 +4,47 @@
 用 StaticPy（Python 子集编译器）+ `libtorch_std_helper.so`（C++ libtorch 封装）
 1:1 重写 ComfyUI，编译为独立 ELF 二进制，零 pip 依赖。
 
+## 理解 StaticPy 语言
+
+三文件对照阅读（无需单独文档）：
+
+| 文件 | 读什么 |
+|------|--------|
+| `staticpy/static_translate.py` | 支持/不支持哪些 Python 语法，`import torch` 如何映射为 `torch-*` |
+| `staticpy/static_prelude.scm` | int/float/bool 怎么编译为 fixnum/flonum，文件 I/O/dict/JSON 等内置函数 |
+| `staticpy/static_stdlib.scm` | `extern fn` 如何映射到 C++，`torch.add` 等 80+ 函数签名 |
+
+快速理解：
+- **值类型**：int→fixnum（机器整数）、float→flonum（64位浮点）、bool→boolean
+- **列表**：`list[int]` → Scheme vector，非 Python list
+- **字典**：`make_dict()` / `dict_get()` → Scheme hashtable
+- **异常**：不支持 try/except，用 `if` + 返回值检查替代
+- **类**：不支持继承，用 `@dataclass` + 组合替代
+- **FFI**：`torch.zeros([1,4,64,64])` → `(torch-zeros #(1 4 64 64))` → C++ `torch::zeros`
+
+## 编译与部署
+
+```bash
+# 编译 ELF + C++ .so（本地开发）
+./build.sh
+
+# 产物
+# ./comfycli          — 独立 ELF 二进制
+# ./comfycli.so       — Chez AOT 编译产物
+# ./cpp/libtorch_std_helper.so  — C++ 推理后端
+
+# 部署打包（依赖 .so + GLIBC 兼容层）
+GLIBC_TARGET=2.35 ./deploy.sh
+
+# 打包 + SCP 到远程
+GLIBC_TARGET=2.35 ./deploy.sh --scp user@remote_host
+
+# 远程运行（零 pip）
+ssh user@remote_host "bash /opt/comfycli/run.sh workflow.json --output-dir ./output"
+```
+
+注意：`build.sh` 只编译不部署，`deploy.sh` 负责打包 + 传输，职责分离。
+
 ## CLI 接口（main.static.py）
 ```
 # 模式 1：直接命令行出图
