@@ -4262,12 +4262,17 @@ void* torch_std_sdxl_unet_forward(
     try {
         torch::NoGradGuard no_grad;
         
+        if (!inp_ptr || !text_emb_ptr || !pooled_emb_ptr || !timestep_ptr) {
+            std::cerr << "sdxl_unet_forward: null pointer argument\n";
+            return nullptr;
+        }
         auto& inp_ref = unwrap(inp_ptr);
         auto dev = inp_ref.device();
         // All local tensors go in scope block for deterministic cleanup
         at::Tensor out_fp32;
         {
         // Fresh weight map every call (avoids stale CUDA handles across steps)
+        if (!wdict_ptr) { std::cerr << "sdxl_unet_forward: wdict_ptr is null\n"; return nullptr; }
         auto d = st_to_map(wdict_ptr);
         for (auto& kv : d) kv.second = kv.second.to(dev).detach();
         auto inp = inp_ref.to(torch::kHalf);  // input latent is FP16 from randn

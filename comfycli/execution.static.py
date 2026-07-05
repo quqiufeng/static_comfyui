@@ -81,7 +81,6 @@ def execute_prompt(prompt_json: str, output_dir: str):
                     class_type = dict_get(node, "class_type")
                     inputs = dict_get(inputs_cache, nid)
                     resolved = resolve_all(inputs, node_outputs)
-                    print(class_type)
                     outputs = call_node(class_type, resolved)
                     dict_set(node_outputs, nid, outputs)
                     dict_set(executed, nid, 1)

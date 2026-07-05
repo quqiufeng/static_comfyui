@@ -18,15 +18,12 @@ def register_node(class_type: str, display: str, func_name: str, ret_types: list
 
 
 def checkpoint_loader_simple(inputs):
-    print("ckpt start")
     ckpt_name = dict_get(inputs, "ckpt_name")
     if str_starts_with(ckpt_name, "/"):
         ckpt_path = ckpt_name
     else:
         ckpt_path = "/data/models/image/" + ckpt_name
-    print("loading")
     result = load_checkpoint(ckpt_path)
-    print("loaded")
     return (result.model, result.clip, result.vae)
 
 
@@ -119,65 +116,41 @@ register_node("VAEEncode", "VAE Encode",
 
 
 def k_sampler_inner(inputs):
-    print("s1")
     model: ModelPatcher = dict_get(inputs, "model")
-    print("s2")
     seed = dict_get(inputs, "seed")
-    print("s3")
     steps = dict_get(inputs, "steps")
-    print("s4")
     cfg = dict_get(inputs, "cfg")
-    print("s4a")
     sampler_name = dict_get(inputs, "sampler_name")
-    print("s4b")
     scheduler = dict_get(inputs, "scheduler")
-    print("s5")
     positive = dict_get(inputs, "positive")
-    print("s6")
     negative = dict_get(inputs, "negative")
-    print("s7")
     latent_image = dict_get(inputs, "latent_image")
-    print("s8")
+    denoise = dict_get(inputs, "denoise")
     cond = dict_get(positive, "crossattn")
-    print("s9")
     uncond = dict_get(negative, "crossattn")
-    print("s10")
     pooled_pos = dict_get(positive, "pooled_output")
-    print("s11")
     pooled_neg = dict_get(negative, "pooled_output")
-    print("s12")
     latent_tensor = dict_get(latent_image, "samples")
-    print("s13")
     h = tensor_shape_dim(latent_tensor, 2)
-    print("s14")
     w = tensor_shape_dim(latent_tensor, 3)
-    print("s15")
     torch.manual_seed(seed)
-    print("s16")
+    if cond is None: print("cond is None")
+    if uncond is None: print("uncond is None")
+    if pooled_pos is None: print("pooled_pos is None")
+    if pooled_neg is None: print("pooled_neg is None")
     noise = torch.randn([1, 4, h, w])
-    print("s17")
     x = noise
     sigma_min = 0.029
     sigma_max = 14.615
-    print("s18")
     sigmas = torch.sampler_sigmas(steps, sigma_min, sigma_max, scheduler)
-    print("s19")
     sd_handle = model.sd_handle
-    print("s20")
     n = 0
-    print("s21")
     while n < steps:
-        print("s22a")
         sigma_t = torch.narrow(sigmas, 0, n, 1)
-        print("s22b")
         sigma_prev = torch.narrow(sigmas, 0, n + 1, 1)
-        print("s22c")
         s_in = sigma_t
-        print("m0a")
         cond_out = model_fn(sd_handle, x, s_in, cond, pooled_pos)
-        print("m1")
         uncond_out = model_fn(sd_handle, x, s_in, uncond, pooled_neg)
-        print("m2")
         x = torch.euler_step(x, sigma_t, sigma_prev, cond_out, uncond_out, cfg)
         print("st")
         n = n + 1
