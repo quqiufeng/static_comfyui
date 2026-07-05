@@ -248,10 +248,12 @@ Phase 4: 节点 → DAG → 入口 (编译通过, --help 正常)
 
 Phase 5: 端到端验证 (需 CUDA GPU)
   [x] 编译器修复: continue/break/cond/import/mangle_name
-  [x] CLIP JIT 模块生成 (convert_clip_to_jit3.py)
-  [x] SDXL/T5/FLUX/FM FFI 声明补全
-  [ ] workflow SDXL → 图片输出   (需 CUDA GPU, C++ helper 中 cuda 硬编码)
-  [ ] --prompt 命令行模式验证    (需 CUDA GPU)
+  [x] CLIP-from-safetensors: 新增 C++ 函数直接构建 CLIP 前向
+  [x] SDXL/T5/FLUX/FM FFI 声明补全 + 签名修复
+  [x] DAG 执行引擎修复: is_link 检测、record 字段访问、tensor 算术
+  [x] 模型检测 SDXL 格式支持: conditioner.embedders.* 前缀
+  [ ] workflow SDXL → 图片输出   (CUDA OOM: dtype 映射问题待修复)
+  [ ] --prompt 命令行模式验证    (同上)
 ```
 
 各阶段产出可独立编译、单独测试。Phase 0–1 甚至不需要 GPU。
