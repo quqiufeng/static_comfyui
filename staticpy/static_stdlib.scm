@@ -2388,3 +2388,88 @@ cast-to-float16: 非零则输出转为 float16"
     ((nn-sequential? model) (nn-sequential-call model x))
     ((procedure? model) (model x))
     (else (display "nn-call: unsupported model type\n") x)))
+
+;; ====== SDXL UNet forward (weight dict + meta) ======
+
+(define (torch-sdxl-unet-forward wdict input timestep text-emb pooled-emb
+                                 os-h os-w crop-t crop-l ts-h ts-w)
+  "SDXL UNet forward: weight dict + latent + text_emb + pooled + size/crop/target meta.
+All returns auto-grad graph output latent tensor."
+  (torch-check "torch not available"
+    (lambda ()
+      (make-tagged-tensor-auto
+        (torch-std-sdxl-unet-forward
+          wdict
+          (tagged-tensor-ptr input)
+          (tagged-tensor-ptr timestep)
+          (tagged-tensor-ptr text-emb)
+          (tagged-tensor-ptr pooled-emb)
+          os-h os-w crop-t crop-l ts-h ts-w)))))
+
+(define (torch-sdxl-dual-clip clip-l clip-g token-ids)
+  "Run SDXL Dual CLIP (CLIP-L + CLIP-G) on token ids, returns cat([l_out, g_out], -1) = (1,77,2048)
+Also stores pooled embeddings internally for retrieval via torch-sdxl-get-pooled / torch-sdxl-get-pooled-l"
+  (torch-check "torch not available"
+    (lambda ()
+      (make-tagged-tensor-auto
+        (torch-std-sdxl-dual-clip clip-l clip-g (tagged-tensor-ptr token-ids))))))
+
+(define (torch-sdxl-get-pooled)
+  "返回上一次 sdxl_dual_clip 的 CLIP-G pooled embedding (1,1280)"
+  (torch-check "torch not available"
+    (lambda ()
+      (make-tagged-tensor-auto (torch-std-sdxl-get-pooled)))))
+
+(define (torch-sdxl-get-pooled-l)
+  "返回上一次 sdxl_dual_clip 的 CLIP-L pooled embedding (1,768)"
+  (torch-check "torch not available"
+    (lambda ()
+      (make-tagged-tensor-auto (torch-std-sdxl-get-pooled-l)))))
+
+;; ====== T5 tokenizer (for FLUX / SD3) ======
+
+(define (torch-t5-tokenizer-create model-path)
+  "加载 T5 tokenizer（sentencepiece model），返回 opaque 句柄"
+  (torch-std-t5-tokenizer-create model-path))
+
+(define (torch-t5-tokenizer-encode tokenizer text max-len)
+  "将文本编码为 token_ids tensor (max-len,) int64"
+  (torch-check "torch not available"
+    (lambda ()
+      (make-tagged-tensor-auto
+        (torch-std-t5-tokenizer-encode tokenizer text max-len)))))
+
+(define (torch-t5-tokenizer-free tokenizer)
+  "释放 T5 tokenizer"
+  (torch-std-t5-tokenizer-free tokenizer))
+
+;; ====== FLUX forward ======
+
+(define (torch-flux-forward wdict img txt t img-pos guidance n-blocks n-heads-img n-heads-txt head-dim)
+  "FLUX forward pass: weight dict + image latent + T5 text embeddings + timestep + optional pos embed"
+  (torch-check "torch not available"
+    (lambda ()
+      (let ((pos (if img-pos (tagged-tensor-ptr img-pos) (void* 0))))
+        (make-tagged-tensor-auto
+          (torch-std-flux-forward
+            wdict
+            (tagged-tensor-ptr img)
+            (tagged-tensor-ptr txt)
+            (tagged-tensor-ptr t)
+            pos
+            guidance n-blocks n-heads-img n-heads-txt head-dim))))))
+
+;; ====== Flow Matching scheduler ======
+
+(define (torch-fm-sigmas steps sigma-min sigma-max)
+  "生成 flow matching sigma 调度 (steps+1,)，从 1.0 (noise) 到 0.0 (clean)"
+  (torch-check "torch not available"
+    (lambda ()
+      (make-tagged-tensor-auto (torch-std-fm-sigmas steps sigma-min sigma-max)))))
+
+(define (torch-fm-step velocity x-t dt)
+  "Flow Matching ODE 步：x_{t+1} = x_t + dt * velocity"
+  (torch-check "torch not available"
+    (lambda ()
+      (make-tagged-tensor-auto
+        (torch-std-fm-step (tagged-tensor-ptr velocity) (tagged-tensor-ptr x-t) dt)))))

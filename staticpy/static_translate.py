@@ -432,6 +432,8 @@ MODULE_FN_RETURN_TYPES = {
         "torch-flux-forward": Type("torch-tensor"),
         "torch-fm-sigmas": Type("torch-tensor"),
         "torch-fm-step": Type("torch-tensor"),
+        "torch-sdxl-get-pooled": Type("torch-tensor"),
+        "torch-sdxl-get-pooled-l": Type("torch-tensor"),
     "torch-conv2d": Type("torch-tensor"),
     "torch-max-pool2d": Type("torch-tensor"),
     "torch-avg-pool2d": Type("torch-tensor"),
@@ -692,6 +694,8 @@ BUILTIN_MODULES = {
         # SDXL UNet
         "sdxl_unet_forward": "torch-sdxl-unet-forward",
         "sdxl_dual_clip": "torch-sdxl-dual-clip",
+        "sdxl_get_pooled": "torch-sdxl-get-pooled",
+        "sdxl_get_pooled_l": "torch-sdxl-get-pooled-l",
         # T5 tokenizer
         "t5_tokenizer_create": "torch-t5-tokenizer-create",
         "t5_tokenizer_encode": "torch-t5-tokenizer-encode",
@@ -2363,7 +2367,9 @@ def translate_expr(node):
                     # SDXL
                     "sdxl_unet_forward": "torch-sdxl-unet-forward",
                     "sdxl_dual_clip": "torch-sdxl-dual-clip",
-                    # T5
+                    "sdxl_get_pooled": "torch-sdxl-get-pooled",
+                    "sdxl_get_pooled_l": "torch-sdxl-get-pooled-l",
+                # T5
                     "t5_tokenizer_create": "torch-t5-tokenizer-create",
                     "t5_tokenizer_encode": "torch-t5-tokenizer-encode",
                     "t5_tokenizer_free": "torch-t5-tokenizer-free",
