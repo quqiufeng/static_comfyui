@@ -298,6 +298,8 @@ BUILTIN_FN_RETURN_TYPES = {
     "dict_get_or_empty": Type("str"),
     "dict_set": Type("void"),
     "dict_contains": Type("bool"),
+    "dict_keys": Type("list", [Type("str")]),
+    "make_dict_from": Type("dict"),
     "dict_copy": Type("dict"),
     # string
     "str_length": Type("int"),
@@ -1663,7 +1665,7 @@ def typecheck_function(node, function_arities, module_env=None):
                      "make_array", "make_float_array", "make_int_array",
                      "float_array_set", "float_array_ref",
                      "int_array_set", "int_array_ref",
-                     "make_dict", "dict_get", "dict_get_or_empty", "dict_set",
+    "make_dict", "dict_get", "dict_get_or_empty", "dict_set", "dict_contains", "dict_keys", "make_dict_from",
                      "to_list", "available", "Ok", "Error", "Some", "none",
                      "is_ok", "is_error", "is_some", "is_none",
                      "unwrap", "unwrap_or", "unwrap_error", "EConst", "EVar", "EBinop",

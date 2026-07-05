@@ -223,11 +223,11 @@ Phase 0: 基础设施 (无 GPU 需求)
   [x] comfy_types.static.py      Node 类型定义
 
 Phase 1: 模型检测 (纯逻辑, 可直接翻译)
-  [ ] supported_models_base.static.py   模型基类
-  [ ] supported_models.static.py        模型注册表
-  [ ] model_detection.static.py         state_dict → 架构识别
-  [ ] model_sampling.static.py          sigma 调度
-  [ ] latent_formats.static.py          潜空间缩放
+  [x] supported_models_base.static.py   模型基类
+  [x] supported_models.static.py        模型注册表
+  [x] model_detection.static.py         state_dict → 架构识别
+  [x] model_sampling.static.py          sigma 调度
+  [x] latent_formats.static.py          潜空间缩放
 
 Phase 2: 模型加载 + 显存管理
   [ ] sd.static.py              safetensors 加载 → 模型对象
