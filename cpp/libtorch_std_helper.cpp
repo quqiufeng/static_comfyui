@@ -112,7 +112,7 @@ void* torch_std_tensor_from_blob_3d(void* data, int d0, int d1, int d2, int dtyp
 
 void* torch_std_zeros(int64_t* shape, int ndim, int dtype) {
     try {
-        return wrap(torch::zeros(to_shape(shape, ndim), make_options(dtype).device(torch::kCUDA)));
+        return wrap(torch::zeros(to_shape(shape, ndim), torch::TensorOptions().dtype(torch::kHalf).device(torch::kCUDA)));
     } catch (const std::exception& e) {
         std::cerr << "torch_std_zeros error: " << e.what() << std::endl;
         return nullptr;
@@ -139,7 +139,7 @@ void* torch_std_empty(int64_t* shape, int ndim, int dtype) {
 
 void* torch_std_full(int64_t* shape, int ndim, double value, int dtype) {
     try {
-        return wrap(torch::full(to_shape(shape, ndim), value, make_options(dtype).device(torch::kCUDA)));
+        return wrap(torch::full(to_shape(shape, ndim), value, torch::TensorOptions().dtype(torch::kHalf).device(torch::kCUDA)));
     } catch (const std::exception& e) {
         std::cerr << "torch_std_full error: " << e.what() << std::endl;
         return nullptr;
@@ -148,7 +148,7 @@ void* torch_std_full(int64_t* shape, int ndim, double value, int dtype) {
 
 void* torch_std_randn(int64_t* shape, int ndim, int dtype) {
     try {
-        return wrap(torch::randn(to_shape(shape, ndim), make_options(dtype).device(torch::kCUDA)));
+        return wrap(torch::randn(to_shape(shape, ndim), torch::TensorOptions().dtype(torch::kHalf).device(torch::kCUDA)));
     } catch (const std::exception& e) {
         std::cerr << "torch_std_randn error: " << e.what() << std::endl;
         return nullptr;
@@ -3903,10 +3903,8 @@ static std::unordered_map<std::string, at::Tensor> st_to_map(void* safetensors_d
         auto& e = sd->entries[i];
         auto* t = static_cast<torch::Tensor*>(e.tensor);
         if (!t) continue;
-        // Store with full key
+        // Copy tensor by value (shallow refcounted copy — safe because STDict owns memory)
         m[e.name] = *t;
-        if (strstr(e.name, "time_embed.0.weight")) {
-        }
         // Also store with stripped prefixes
         for (int p = 0; prefixes[p][0]; p++) {
             size_t plen = strlen(prefixes[p]);
