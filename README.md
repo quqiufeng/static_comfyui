@@ -152,6 +152,7 @@ cache_query "model config detect unet architecture" --repo /code/comfyui --type 
 ## 参考
 
 - [ComfyUI 源码](https://github.com/comfyanonymous/ComfyUI)
-- [StaticPy 编译器](/opt/ReScheme)
-- [libtorch_std_helper](//opt/ReScheme/libtorch_std_helper.h)
-- [code search 分析报告](/opt/my_db/reports/comfyui_analysis.md)
+- [StaticPy 编译器](./staticpy/)
+- [构建流水线文档](./BUILD.md)
+- [libtorch_std_helper](./cpp/libtorch_std_helper.h)
+- [code search 分析报告](./comfyui_analysis.md)
