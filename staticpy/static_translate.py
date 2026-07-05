@@ -2525,9 +2525,14 @@ def translate_expr(node):
         # 记录字段访问：p.x -> (Point-x p)，若知道 p 的类型
         if isinstance(node.value, ast.Name):
             vtype = TYPE_ENV.get(node.value.id)
-            vtype_str = vtype.base if hasattr(vtype, 'base') else vtype
-            if vtype_str in RECORD_TYPES and node.attr in RECORD_TYPES[vtype_str]:
-                return f"({vtype_str}-{node.attr} {node.value.id})"
+            vtype_str = vtype
+            if vtype is not None:
+                if hasattr(vtype, 'base'):
+                    vtype_str = vtype.base
+                elif isinstance(vtype, str):
+                    vtype_str = vtype
+                if isinstance(vtype_str, str) and vtype_str in RECORD_TYPES and node.attr in RECORD_TYPES[vtype_str]:
+                    return f"({vtype_str}-{node.attr} {node.value.id})"
         value = translate_expr(node.value)
         # dict.copy() -> (dict-copy dict)
         if node.attr == "copy":
