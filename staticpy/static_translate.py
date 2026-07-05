@@ -288,6 +288,8 @@ BUILTIN_FN_RETURN_TYPES = {
     "range": Type("list", [Type("int")]),
     "print": Type("none"),
     "exit": Type("none"),
+    "argv": Type("list", [Type("str")]),
+    "exit_program": Type("none"),
     "make_float_array": Type("list", [Type("float")]),
     "make_int_array": Type("list", [Type("int")]),
     # dict
@@ -1039,7 +1041,10 @@ def infer_expr_type(node):
             return "str"
         return None
     if isinstance(node, ast.Name):
-        return TYPE_ENV.get(mangle_name(node.id))
+        t = TYPE_ENV.get(mangle_name(node.id))
+        if t:
+            return str(t)
+        return None
     if isinstance(node, ast.Subscript):
         vt = infer_expr_type(node.value)
         if vt == "list":
@@ -1429,10 +1434,14 @@ def translate_block(stmts):
                     exprs.append(f"(dict-set! {d} {k} {v})")
                     destructure_done = True
             if target and val:
-                # 从右侧表达式推断目标变量类型，仅用于辅助代码生成
-                inferred = infer_expr_type(s.value)
-                if inferred:
-                    TYPE_ENV[target] = inferred
+                # 优先用注释类型，否则从右侧表达式推断
+                ann_type = parse_type(s.annotation) if isinstance(s, ast.AnnAssign) else None
+                if ann_type:
+                    TYPE_ENV[target] = ann_type
+                else:
+                    inferred = infer_expr_type(s.value)
+                    if inferred:
+                        TYPE_ENV[target] = inferred
                 exprs.append(f"(set! {target} {val})")
             elif not destructure_done:
                 exprs.append(f";; {ast.dump(s)}")
@@ -2133,8 +2142,11 @@ def translate_expr(node):
             # 预置函数（Scheme 运行时，不走 FFI，无需 extern fn 声明）
             if name in PRELUDE_FUNCTIONS:
                 return f"({scheme_name(name)} {' '.join(args)})"
-            # IR / dataclass-style class constructors: EConst(x) -> (vector 'EConst x)
-            if name in RECORD_TYPES or name in ("EConst", "EVar", "EBinop", "EUnary", "ECall", "SLet", "SSet", "SReturn", "SExpr", "SIf", "SWhile", "SFor", "IRFunc"):
+            # dataclass-style class constructors: CliArgs(x) -> (make-CliArgs x)
+            if name in RECORD_TYPES:
+                return f"(make-{name} {' '.join(args)})"
+            # IR constructors: EConst(x) -> (vector 'EConst x)
+            if name in ("EConst", "EVar", "EBinop", "EUnary", "ECall", "SLet", "SSet", "SReturn", "SExpr", "SIf", "SWhile", "SFor", "IRFunc"):
                 return f"(vector '{name} {' '.join(args)})"
             # 参数可能是函数值（高阶函数），不加 static_ 前缀
             if isinstance(node, ast.FunctionDef):
@@ -2596,10 +2608,19 @@ def translate_function(node, source_file=""):
                         v = translate_expr(stmt.value)
                         body_exprs.append(f"(dict-set! {d} {k} {v})")
             if target and val and target != "__destructured__":
-                # 从右侧表达式推断目标变量类型，仅用于辅助代码生成（如 subscript 选择 accessor）
-                inferred = infer_expr_type(stmt.value)
-                if inferred:
-                    TYPE_ENV[mangle_name(target)] = inferred
+                # 优先用注释类型（AnnAssign），否则从右侧表达式推断
+                if isinstance(stmt, ast.AnnAssign):
+                    ann_type = parse_type(stmt.annotation)
+                    if ann_type:
+                        TYPE_ENV[mangle_name(target)] = ann_type
+                    else:
+                        inferred = infer_expr_type(stmt.value)
+                        if inferred:
+                            TYPE_ENV[mangle_name(target)] = inferred
+                else:
+                    inferred = infer_expr_type(stmt.value)
+                    if inferred:
+                        TYPE_ENV[mangle_name(target)] = inferred
                 # 根据目标变量类型选择数组创建方式
                 target_type = TYPE_ENV.get(mangle_name(target))
                 if target_type == "list[float]" and isinstance(stmt.value, ast.Call):
