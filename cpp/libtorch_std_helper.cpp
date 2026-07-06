@@ -2317,7 +2317,6 @@ void* torch_std_euler_step(void* x_ptr, void* sigma_t_ptr, void* sigma_next_ptr,
         auto& uncond = unwrap(uncond_ptr);
         auto dev = x.device();
 
-        // CFG prediction on CUDA: eps = uncond + cfg * (cond - uncond)
         torch::Tensor eps;
         if (cfg <= 1.0) {
             eps = cond;
@@ -2325,13 +2324,18 @@ void* torch_std_euler_step(void* x_ptr, void* sigma_t_ptr, void* sigma_next_ptr,
             eps = uncond + (cond - uncond) * cfg;
         }
 
-        // Euler step (VP ODE): x_{t-1} = x_t + (sigma_{t-1} - sigma_t) * (x_t - eps) / sigma_t
         auto sig_t_d = sig_t.to(dev);
         auto sig_next_d = sig_next.to(dev);
-        auto dt = sig_next_d - sig_t_d;  // negative (going from noise to clean)
-        // ComfyUI: denoised = x - sigma*eps, d = (x - denoised)/sigma = eps
-        // CFG applied to denoised: denoised = uncond + cfg*(cond - uncond)
+        auto dt = sig_next_d - sig_t_d;
         auto result = x + dt * eps;
+        {
+            static int step = 0;
+            char buf[256];
+            int n = snprintf(buf, sizeof(buf), "STK_EULER step=%d x=%.4f cond=%.4f uncond=%.4f eps=%.4f sig_t=%.4f\n",
+                step, x.abs().mean().item<float>(), cond.abs().mean().item<float>(),
+                uncond.abs().mean().item<float>(), eps.abs().mean().item<float>(), sig_t_d.item<float>());
+            write(2, buf, n); step++;
+        }
         return wrap(result);
     } catch (const std::exception& e) {
         std::cerr << "torch_std_euler_step error: " << e.what() << std::endl;
