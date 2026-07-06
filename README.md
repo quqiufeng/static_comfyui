@@ -252,7 +252,9 @@ Phase 5: 端到端验证 (需 CUDA GPU)
   [x] SDXL/T5/FLUX/FM FFI 声明补全 + 签名修复
   [x] DAG 执行引擎修复: is_link 检测、record 字段访问、tensor 算术
   [x] 模型检测 SDXL 格式支持: conditioner.embedders.* 前缀
-  [ ] workflow SDXL → 图片输出   (CUDA OOM: dtype 映射问题待修复)
+  [x] 修复 CUDA OOM: dtype 映射 + CXX11 ABI
+  [x] **KSampler 20步采样完成!**  (使用 stock libtorch_std_helper.so)
+  [ ] VAE Decode: 需要 JIT VAE 模块 (同 CLIP 的 JIT 问题)
   [ ] --prompt 命令行模式验证    (同上)
 ```
 
