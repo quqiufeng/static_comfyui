@@ -4153,11 +4153,13 @@ static at::Tensor sdxl_attn_block(const at::Tensor& x, const at::Tensor& te,
         auto co = at::scaled_dot_product_attention(cq, ck, cv, {}, 0.0, false, attn_scale);
         co = co.transpose(1,2).contiguous().reshape({B,N,ch});
         co = sdxl_linear(co.reshape({-1, ch}), d, tp+".attn2.to_out.0").contiguous();
-        if (bi == 0 && p.find("input_blocks.4") != std::string::npos) {
+        if ((bi == 0 && p.find("input_blocks.4") != std::string::npos) ||
+            (bi == 0 && p.find("middle_block") != std::string::npos)) {
             float cq_m = cq.abs().mean().item<float>(), ck_m = ck.abs().mean().item<float>();
             float co_m = co.abs().mean().item<float>(), hn_m = hn.abs().mean().item<float>();
             char buf[256];
-            int nn = snprintf(buf, sizeof(buf), "ATTN_IB4 cq=%.4f ck=%.4f co=%.4f hn=%.4f\n", cq_m, ck_m, co_m, hn_m);
+            int nn = snprintf(buf, sizeof(buf), "ATTN_%s b%d cq=%.4f ck=%.4f co=%.4f hn=%.4f\n",
+                p.c_str(), bi, cq_m, ck_m, co_m, hn_m);
             write(2, buf, nn);
         }
         hn = hn + co.view({B,H,W,ch}).permute({0,3,1,2});
