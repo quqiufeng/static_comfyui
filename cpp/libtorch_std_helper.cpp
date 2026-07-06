@@ -46,6 +46,13 @@ static void install_quiet_rnn_warning() {
 // ============================================================
 // 工具函数
 // ============================================================
+static void log_tensor(const at::Tensor& t, const char* name) {
+    char buf[256];
+    int n = snprintf(buf, sizeof(buf), "CMP %-30s shape=%d,%d,%d,%d mean=%.4f std=%.4f\n",
+        name, (int)t.size(0), (int)t.size(1), (int)t.size(2), (int)t.size(3),
+        t.mean().item<float>(), t.std().item<float>());
+    write(STDERR_FILENO, buf, n);
+}
 static torch::TensorOptions make_options(int dtype) {
     switch (dtype) {
         case TORCH_DTYPE_FLOAT32: return torch::TensorOptions().dtype(torch::kFloat32);
@@ -4106,16 +4113,22 @@ static at::Tensor sdxl_attn_block(const at::Tensor& x, const at::Tensor& te,
             return out.reshape({B, H, W, ch}).permute({0,3,1,2});
         };
 
+        double attn_scale = 1.0 / std::sqrt((double)head_dim);
         // Self-attention
         auto sa_hn = sdxl_ln(hn, tp+".norm1");
         auto n_2d = sa_hn.permute({0,2,3,1}).reshape({-1, ch});
         auto sq = sdxl_linear(n_2d, d, tp+".attn1.to_q").reshape({B,N,n_heads,head_dim}).transpose(1,2).contiguous();
         auto sk = sdxl_linear(n_2d, d, tp+".attn1.to_k").reshape({B,N,n_heads,head_dim}).transpose(1,2).contiguous();
         auto sv = sdxl_linear(n_2d, d, tp+".attn1.to_v").reshape({B,N,n_heads,head_dim}).transpose(1,2).contiguous();
-        auto so = at::scaled_dot_product_attention(sq, sk, sv, {}, 0.0, false);
+        auto so = at::scaled_dot_product_attention(sq, sk, sv, {}, 0.0, false, attn_scale);
         so = so.transpose(1,2).contiguous().reshape({B,N,ch});
         so = sdxl_linear(so.reshape({-1, ch}), d, tp+".attn1.to_out.0").contiguous();
         hn = hn.clone() + so.view({B,H,W,ch}).permute({0,3,1,2});
+        if (p.find("input_blocks.4") != std::string::npos) {
+            char name[64];
+            snprintf(name, sizeof(name), "ib4_b%d_after_self", bi);
+            log_tensor(hn, name);
+        }
         
         // Cross-attention
         auto ca_hn = sdxl_ln(hn, tp+".norm2");
@@ -4123,10 +4136,15 @@ static at::Tensor sdxl_attn_block(const at::Tensor& x, const at::Tensor& te,
         auto cq = sdxl_linear(n2_2d, d, tp+".attn2.to_q").reshape({B,N,n_heads,head_dim}).transpose(1,2).contiguous();
         auto ck = sdxl_linear(txt, d, tp+".attn2.to_k").reshape({B,-1,n_heads,head_dim}).transpose(1,2).contiguous();
         auto cv = sdxl_linear(txt, d, tp+".attn2.to_v").reshape({B,-1,n_heads,head_dim}).transpose(1,2).contiguous();
-        auto co = at::scaled_dot_product_attention(cq, ck, cv, {}, 0.0, false);
+        auto co = at::scaled_dot_product_attention(cq, ck, cv, {}, 0.0, false, attn_scale);
         co = co.transpose(1,2).contiguous().reshape({B,N,ch});
         co = sdxl_linear(co.reshape({-1, ch}), d, tp+".attn2.to_out.0").contiguous();
         hn = hn + co.view({B,H,W,ch}).permute({0,3,1,2});
+        if (p.find("input_blocks.4") != std::string::npos) {
+            char name[64];
+            snprintf(name, sizeof(name), "ib4_b%d_after_cross", bi);
+            log_tensor(hn, name);
+        }
         
         // FFN (GEGLU)
         auto ff_hn = sdxl_ln(hn, tp+".norm3");
@@ -4136,11 +4154,17 @@ static at::Tensor sdxl_attn_block(const at::Tensor& x, const at::Tensor& te,
         ff = ff.slice(1,0,half) * at::gelu(ff.slice(1,half,2*half));
         ff = sdxl_linear(ff, d, tp+".ff.net.2");
         hn = hn + ff.view({B,H,W,ch}).permute({0,3,1,2});
+        if (p.find("input_blocks.4") != std::string::npos) {
+            char name[64];
+            snprintf(name, sizeof(name), "ib4_b%d_after_ffn", bi);
+            log_tensor(hn, name);
+        }
     }
     hn = hn.permute({0,2,3,1}).reshape({-1, ch});
     hn = sdxl_linear(hn, d, p+".1.proj_out");
     hn = hn.view({B, H, W, -1}).permute({0,3,1,2});
-    return hn;
+    // residual connection: return hn + original input (matching ComfyUI SpatialTransformer)
+    return hn + x;
 }
 
 // LD-style up block: output_blocks.N has resblock at .0, optional attention at .1 (proj_in→tx_blocks→proj_out)
@@ -4323,40 +4347,36 @@ void* torch_std_sdxl_unet_forward(
         // Conv in (input_blocks.0.0)
         auto h = sdxl_conv2d(inp, d, "input_blocks.0.0", 1, 1);
 
+        log_tensor(h, "conv_in");
+
         // Encoder - push skip after each input block (matching Python's hs.append)
         std::vector<at::Tensor> sk;
         // input_blocks.0 is conv_in, result pushed
-        sk.push_back(h);  // ib0: 64×64
+        sk.push_back(h);
+        log_tensor(h, "ib0");
         // input_blocks.1: just resblock
         h = sdxl_resblock_ld(h, te, d, "input_blocks.1.0");
-        sk.push_back(h);  // ib1: 64×64
-        // input_blocks.2: just resblock
+        sk.push_back(h);  log_tensor(h, "ib1");
         h = sdxl_resblock_ld(h, te, d, "input_blocks.2.0");
-        sk.push_back(h);  // ib2: 64×64
-        // input_blocks.3: downsample only
+        sk.push_back(h);  log_tensor(h, "ib2");
         h = sdxl_conv2d(h, d, "input_blocks.3.0.op", 2, 1);
-        sk.push_back(h);  // ib3: 32×32
-        // input_blocks.4: resblock + attention
+        sk.push_back(h);  log_tensor(h, "ib3");
         h = sdxl_resblock_ld(h, te, d, "input_blocks.4.0");
         h = sdxl_attn_block(h, te, txt, d, "input_blocks.4", 2);
-        sk.push_back(h);  // ib4: 32×32
-        // input_blocks.5: resblock + attention
+        sk.push_back(h);  log_tensor(h, "ib4");
         h = sdxl_resblock_ld(h, te, d, "input_blocks.5.0");
         h = sdxl_attn_block(h, te, txt, d, "input_blocks.5", 2);
-        sk.push_back(h);  // ib5: 32×32
-        // input_blocks.6: downsample only
+        sk.push_back(h);  log_tensor(h, "ib5");
         h = sdxl_conv2d(h, d, "input_blocks.6.0.op", 2, 1);
-        sk.push_back(h);  // ib6: 16×16
-        // input_blocks.7: resblock + attention (10 blocks)
+        sk.push_back(h);  log_tensor(h, "ib6");
         h = sdxl_resblock_ld(h, te, d, "input_blocks.7.0");
         h = sdxl_attn_block(h, te, txt, d, "input_blocks.7", 10);
-        sk.push_back(h);  // ib7: 16×16
-        // input_blocks.8: resblock + attention (10 blocks)
+        sk.push_back(h);  log_tensor(h, "ib7");
         h = sdxl_resblock_ld(h, te, d, "input_blocks.8.0");
         h = sdxl_attn_block(h, te, txt, d, "input_blocks.8", 10);
-        sk.push_back(h);  // ib8: 16×16
+        sk.push_back(h);  log_tensor(h, "ib8");
 
-        // Mid
+        // Mid (output is NOT pushed to skips - matching ComfyUI)
         h = sdxl_resblock_ld(h, te, d, "middle_block.0");
         h = sdxl_attn_block(h, te, txt, d, "middle_block", 10);
         h = sdxl_resblock_ld(h, te, d, "middle_block.2");
