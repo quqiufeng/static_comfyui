@@ -4342,9 +4342,12 @@ void* torch_std_sdxl_unet_forward(
             if (d < best_dist) { best_dist = d; best_idx = i; }
         }
         static int unet_call_count = 0;
-        if (unet_call_count < 6) {
+        if (unet_call_count < 8) {
+            float inp_mean = inp.abs().mean().item<float>();
+            float txt_mean = txt.abs().mean().item<float>();
             char buf[256];
-            int n = snprintf(buf, sizeof(buf), "UNET_CALL=%d sigma=%.4f best_idx=%d\n", unet_call_count, sigma_val, best_idx);
+            int n = snprintf(buf, sizeof(buf), "UNET_CALL=%d sigma=%.4f best_idx=%d inp=%.4f txt=%.4f\n",
+                unet_call_count, sigma_val, best_idx, inp_mean, txt_mean);
             write(2, buf, n);
         }
         unet_call_count++;

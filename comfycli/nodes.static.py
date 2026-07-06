@@ -169,9 +169,10 @@ def k_sampler_inner(inputs):
         uncond_out = model_fn(sd_handle, x, s_in, uncond, pooled_neg)
         eps = torch.add(uncond_out, torch.mul(torch.sub(cond_out, uncond_out), cfg))
         x = torch.add(x, torch.mul(eps, torch.sub(sigma_prev, sigma_t)))
-        if n < 2:
-            sigma_val = torch.to_cpu(sigma_t)
-            print(sigma_val)
+        if n == 0:
+            # Print x stats after step 0 for comparison with Python
+            print(torch.to_cpu(torch.abs(x)))
+            print(torch.to_cpu(torch.abs(eps)))
         n = n + 1
     result = make_dict()
     dict_set(result, "samples", x)
