@@ -1090,6 +1090,18 @@ def vae_decode(inputs):
     image = torch.vae_decode_from_dict(vae_obj.vae_ptr, latent_tensor)
     return (image,)
 
+# VAE test: bypass UNet, use correct latent from file
+def vae_decode_test(inputs):
+    vae_obj: VAE = dict_get(inputs, "vae")
+    # Load correct latent from raw binary
+    data = file_read_binary("/tmp/correct_latent.bin")
+    if data is None:
+        return (None,)
+    # Create tensor from raw data (1,4,128,128 float16)
+    latent = torch.tensor_from_blob(data, [1, 4, 128, 128], 3)  # dtype=3 = float16
+    image = torch.vae_decode_from_dict(vae_obj.vae_ptr, latent)
+    return (image,)
+
 def vae_decode_debug(inputs):
     vae_obj: VAE = dict_get(inputs, "vae")
     # Load correct latent from file

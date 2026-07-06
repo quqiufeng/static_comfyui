@@ -271,7 +271,11 @@ static at::Tensor vae_decoder_forward(STDict* dict, const at::Tensor& z) {
         return vae_get_tensor_f32(dict, name);
     };
 
-    auto h = z.to(torch::kCPU).to(torch::kFloat32) / 0.18215;
+    auto h = z.to(torch::kCPU).to(torch::kFloat32) / 0.13025;
+    // post_quant_conv: 1x1 conv applied before decoder (matching ComfyUI)
+    h = at::conv2d(h, vae_get_tensor_f32(dict, "first_stage_model.post_quant_conv.weight"),
+                   vae_get_tensor_f32(dict, "first_stage_model.post_quant_conv.bias"),
+                   at::IntArrayRef{1,1}, at::IntArrayRef{0,0});
     h = at::conv2d(h, load("decoder.conv_in.weight"), load("decoder.conv_in.bias"),
                    at::IntArrayRef{1,1}, at::IntArrayRef{1,1});
 
@@ -318,14 +322,6 @@ extern "C" void* torch_std_euler_step(void* x_ptr, void* sigma_t_ptr, void* sigm
         auto sig_t_d = sig_t.to(dev);
         auto sig_next_d = sig_next.to(dev);
         auto result = x + (sig_next_d - sig_t_d) * eps;
-        {
-            static int step = 0;
-            char buf[256];
-            int n = snprintf(buf, sizeof(buf), "EULER step=%d x_mean=%.4f eps_mean=%.4f sig_t=%.4f\n",
-                step, x.abs().mean().item<float>(), eps.abs().mean().item<float>(), sig_t_d.item<float>());
-            write(STDERR_FILENO, buf, n);
-            step++;
-        }
         return wrap(result);
     } catch (const std::exception& e) {
         std::cerr << "euler_step error: " << e.what() << std::endl;
