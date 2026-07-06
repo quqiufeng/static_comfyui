@@ -271,11 +271,7 @@ static at::Tensor vae_decoder_forward(STDict* dict, const at::Tensor& z) {
         return vae_get_tensor_f32(dict, name);
     };
 
-    auto h = z.to(torch::kCPU).to(torch::kFloat32) / 0.13025;
-    // post_quant_conv: 1x1 conv applied before decoder (matching ComfyUI)
-    h = at::conv2d(h, vae_get_tensor_f32(dict, "first_stage_model.post_quant_conv.weight"),
-                   vae_get_tensor_f32(dict, "first_stage_model.post_quant_conv.bias"),
-                   at::IntArrayRef{1,1}, at::IntArrayRef{0,0});
+    auto h = z.to(torch::kCPU).to(torch::kFloat32) / 0.18215;
     h = at::conv2d(h, load("decoder.conv_in.weight"), load("decoder.conv_in.bias"),
                    at::IntArrayRef{1,1}, at::IntArrayRef{1,1});
 

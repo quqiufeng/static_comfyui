@@ -157,19 +157,17 @@ def k_sampler_inner(inputs):
     noise = torch.randn([1, 4, h, w])
     sigmas = torch.sampler_sigmas(steps, 0.029, 14.615, scheduler)
     noise = torch.mul(noise, torch.narrow(sigmas, 0, 0, 1))
-    sigmas = torch.to_cpu(sigmas)
     x = noise
     sd_handle = model.sd_handle
     n = 0
     while n < steps:
         sigma_t = torch.narrow(sigmas, 0, n, 1)
         sigma_prev = torch.narrow(sigmas, 0, n + 1, 1)
-        s_in = sigma_t
+        # Pass CPU copy of sigma to UNet (needs CPU data_ptr)
+        s_in = torch.to_cpu(sigma_t)
         cond_out = model_fn(sd_handle, x, s_in, cond, pooled_pos)
         uncond_out = model_fn(sd_handle, x, s_in, uncond, pooled_neg)
-        # CFG on EPS
         eps = torch.add(uncond_out, torch.mul(torch.sub(cond_out, uncond_out), cfg))
-        # Euler step: x = x + eps * (sigma_next - sigma_t)
         x = torch.add(x, torch.mul(eps, torch.sub(sigma_prev, sigma_t)))
         n = n + 1
     result = make_dict()
