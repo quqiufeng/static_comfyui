@@ -85,9 +85,11 @@ register_node("EmptyLatentImage", "Empty Latent Image",
 
 
 def vae_decode(inputs):
+    print("va")
     vae_obj: VAE = dict_get(inputs, "vae")
     samples = dict_get(inputs, "samples")
     latent_tensor = dict_get(samples, "samples")
+    print("vb")
     image = torch.vae_decode_from_dict(vae_obj.vae_ptr, latent_tensor)
     return (image,)
 

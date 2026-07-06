@@ -177,11 +177,11 @@ static at::Tensor vae_get_tensor(STDict* d, const char* name) {
     return at::Tensor();
 }
 
-// Load VAE weight and convert to fp32 (conv2d requires matching input/output dtypes)
+// Load VAE weight and convert to fp32
 static at::Tensor vae_get_tensor_f32(STDict* d, const char* name) {
-    auto t = vae_get_tensor_f32(d, name);
-    if (t.defined()) return t.to(torch::kFloat32);
-    return t;
+    auto t = vae_get_tensor(d, name);
+    if (!t.defined()) throw std::runtime_error(std::string("VAE tensor not found: ") + name);
+    return t.to(torch::kFloat32);
 }
 
 // GroupNorm + silu
@@ -205,14 +205,14 @@ static at::Tensor vae_resblock(STDict* d, const at::Tensor& x,
     auto conv2_b = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.conv2.bias", prefix.c_str()), buf));
     if (!conv1_w.defined()) throw std::runtime_error(std::string("VAE missing: ") + prefix + ".conv1.weight");
 
-    // nin_shortcut if channel changes
+    // nin_shortcut if channel changes (optional, use non-throwing lookup)
     bool has_shortcut = false;
     at::Tensor shortcut_w, shortcut_b;
-    auto t = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.nin_shortcut.weight", prefix.c_str()), buf));
+    auto t = vae_get_tensor(d, (snprintf(buf, sizeof(buf), "%s.nin_shortcut.weight", prefix.c_str()), buf));
     if (t.defined()) {
         has_shortcut = true;
-        shortcut_w = t;
-        shortcut_b = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.nin_shortcut.bias", prefix.c_str()), buf));
+        shortcut_w = t.to(torch::kFloat32);
+        shortcut_b = vae_get_tensor(d, (snprintf(buf, sizeof(buf), "%s.nin_shortcut.bias", prefix.c_str()), buf)).to(torch::kFloat32);
     }
 
     auto h = vae_gn_silu(x, norm1_w, norm1_b, 32);
@@ -233,17 +233,20 @@ static at::Tensor vae_attn(STDict* d, const at::Tensor& x,
     auto norm_w = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.norm.weight", prefix.c_str()), buf));
     auto norm_b = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.norm.bias", prefix.c_str()), buf));
     auto q_w = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.q.weight", prefix.c_str()), buf));
+    auto q_b = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.q.bias", prefix.c_str()), buf));
     auto k_w = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.k.weight", prefix.c_str()), buf));
+    auto k_b = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.k.bias", prefix.c_str()), buf));
     auto v_w = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.v.weight", prefix.c_str()), buf));
+    auto v_b = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.v.bias", prefix.c_str()), buf));
     auto proj_w = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.proj_out.weight", prefix.c_str()), buf));
     auto proj_b = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.proj_out.bias", prefix.c_str()), buf));
 
     int C = x.size(1);
     auto h = at::group_norm(x, 32, norm_w, norm_b, 1e-6);
     int B = h.size(0), H = h.size(2), W = h.size(3);
-    auto q = at::conv2d(h, q_w, at::nullopt, at::IntArrayRef{1,1}, at::IntArrayRef{0,0}).view({B, C, H*W}).transpose(1,2);
-    auto k = at::conv2d(h, k_w, at::nullopt, at::IntArrayRef{1,1}, at::IntArrayRef{0,0}).view({B, C, H*W}).transpose(1,2);
-    auto v = at::conv2d(h, v_w, at::nullopt, at::IntArrayRef{1,1}, at::IntArrayRef{0,0}).view({B, C, H*W}).transpose(1,2);
+    auto q = at::conv2d(h, q_w, q_b, at::IntArrayRef{1,1}, at::IntArrayRef{0,0}).view({B, C, H*W}).transpose(1,2);
+    auto k = at::conv2d(h, k_w, k_b, at::IntArrayRef{1,1}, at::IntArrayRef{0,0}).view({B, C, H*W}).transpose(1,2);
+    auto v = at::conv2d(h, v_w, v_b, at::IntArrayRef{1,1}, at::IntArrayRef{0,0}).view({B, C, H*W}).transpose(1,2);
     auto attn = at::softmax(q.matmul(k.transpose(-2,-1)) / std::sqrt((double)C), -1);
     h = attn.matmul(v).transpose(1,2).view({B, C, H, W});
     h = at::conv2d(h, proj_w, proj_b, at::IntArrayRef{1,1}, at::IntArrayRef{0,0});
@@ -258,103 +261,47 @@ static at::Tensor vae_downsample(STDict* d, const at::Tensor& x, const std::stri
     return at::conv2d(x, w, b, at::IntArrayRef{2,2}, at::IntArrayRef{0,0});
 }
 
-// 完整 VAE Decoder forward (encoder + decoder with skip connections)
+// 纯 Decoder forward（对齐 ComfyUI Decoder 类）
 static at::Tensor vae_decoder_forward(STDict* dict, const at::Tensor& z) {
-    // Move to CPU and convert to fp32 (weights are fp16 CPU)
+    auto load = [&](const char* name) {
+        char buf[256];
+        snprintf(buf, sizeof(buf), "first_stage_model.%s", name);
+        auto t = vae_get_tensor_f32(dict, buf);
+        if (t.defined()) return t;
+        return vae_get_tensor_f32(dict, name);
+    };
+
     auto h = z.to(torch::kCPU).to(torch::kFloat32) / 0.18215;
+    h = at::conv2d(h, load("decoder.conv_in.weight"), load("decoder.conv_in.bias"),
+                   at::IntArrayRef{1,1}, at::IntArrayRef{1,1});
 
-    // === Encoder (down) — collect skips ===
-    std::vector<at::Tensor> skips;
+    h = vae_resblock(dict, h, "first_stage_model.decoder.mid.block_1", 0);
+    h = vae_attn(dict, h, "first_stage_model.decoder.mid.attn_1");
+    h = vae_resblock(dict, h, "first_stage_model.decoder.mid.block_2", 0);
 
-    // conv_in
-    { auto w = vae_get_tensor_f32(dict, "encoder.conv_in.weight");
-      if (!w.defined()) w = vae_get_tensor_f32(dict, "first_stage_model.encoder.conv_in.weight");
-      auto b = vae_get_tensor_f32(dict, "encoder.conv_in.bias");
-      if (!b.defined()) b = vae_get_tensor_f32(dict, "first_stage_model.encoder.conv_in.bias");
-      h = at::conv2d(h, w, b, at::IntArrayRef{1,1}, at::IntArrayRef{1,1}); }
-    skips.push_back(h);
-
-    // Down blocks (4 levels, 2 resblocks each, downsample at end except last)
-    for (int level = 0; level < 4; level++) {
-        for (int b = 0; b < 2; b++) {
-            char buf[256];
-            snprintf(buf, sizeof(buf), "encoder.down.%d.block.%d", level, b);
-            std::string p(buf);
-            // Try with prefix
-            auto n1w = vae_get_tensor_f32(dict, (snprintf(buf, sizeof(buf), "%s.norm1.weight", p.c_str()), buf));
-            if (!n1w.defined()) {
-                snprintf(buf, sizeof(buf), "first_stage_model.%s.norm1.weight", p.c_str());
-                n1w = vae_get_tensor_f32(dict, buf);
-            }
-            if (n1w.defined()) {
-                // Use full prefix for this block
-                snprintf(buf, sizeof(buf), "first_stage_model.encoder.down.%d.block.%d", level, b);
-                h = vae_resblock(dict, h, buf, 0);
-            }
-            // If this is a 3rd block or the block count varies, handle accordingly
-        }
-        if (level < 3) {
-            char buf[256];
-            snprintf(buf, sizeof(buf), "encoder.down.%d.downsample", level);
-            std::string p(buf);
-            auto dw = vae_get_tensor_f32(dict, (snprintf(buf, sizeof(buf), "first_stage_model.%s.op.weight", p.c_str()), buf));
-            if (dw.defined()) {
-                h = vae_downsample(dict, h, (snprintf(buf, sizeof(buf), "first_stage_model.encoder.down.%d.downsample", level), buf));
-                skips.push_back(h);
-            }
-        }
-    }
-
-    // Mid (encoder)
-    { auto n1w = vae_get_tensor_f32(dict, "first_stage_model.encoder.mid.block_1.norm1.weight");
-      if (n1w.defined()) {
-        h = vae_resblock(dict, h, "first_stage_model.encoder.mid.block_1", 0);
-        h = vae_attn(dict, h, "first_stage_model.encoder.mid.attn_1");
-        h = vae_resblock(dict, h, "first_stage_model.encoder.mid.block_2", 0);
-      } }
-
-    // Decoder mid
-    { auto n1w = vae_get_tensor_f32(dict, "decoder.mid.block_1.norm1.weight");
-      if (!n1w.defined()) n1w = vae_get_tensor_f32(dict, "first_stage_model.decoder.mid.block_1.norm1.weight");
-      if (n1w.defined()) {
-        h = vae_resblock(dict, h, "first_stage_model.decoder.mid.block_1", 0);
-        h = vae_attn(dict, h, "first_stage_model.decoder.mid.attn_1");
-        h = vae_resblock(dict, h, "first_stage_model.decoder.mid.block_2", 0);
-      } }
-
-    // Up blocks (4 levels, 3 resblocks each with skip, upsample at end except level 0)
+    // Up blocks: 4 levels, 3 resblocks each, upsample for level>0
     for (int level = 3; level >= 0; level--) {
         for (int b = 0; b < 3; b++) {
-            // Concat skip connection: cat([h, skip], dim=1)
-            auto skip = skips.back(); skips.pop_back();
-            h = at::cat({h, skip}, 1);
-            char buf[256];
-            snprintf(buf, sizeof(buf), "first_stage_model.decoder.up.%d.block.%d", level, b);
-            h = vae_resblock(dict, h, buf, 0);
+            char key[128];
+            snprintf(key, sizeof(key), "first_stage_model.decoder.up.%d.block.%d", level, b);
+            h = vae_resblock(dict, h, key, 0);
         }
         if (level > 0) {
             namespace F = torch::nn::functional;
-            h = F::interpolate(h, F::InterpolateFuncOptions().scale_factor(std::vector<double>{2.0, 2.0}).mode(torch::kNearest));
-            char buf[256];
-            snprintf(buf, sizeof(buf), "first_stage_model.decoder.up.%d.upsample.conv", level);
-            auto uc = vae_get_tensor_f32(dict, (snprintf(buf, sizeof(buf), "%s.weight", buf), buf));
-            auto ub = vae_get_tensor_f32(dict, (snprintf(buf, sizeof(buf), "%s.bias", buf), buf));
-            h = at::conv2d(h, uc, ub, at::IntArrayRef{1,1}, at::IntArrayRef{1,1});
+            h = F::interpolate(h, F::InterpolateFuncOptions()
+                .scale_factor(std::vector<double>{2.0, 2.0}).mode(torch::kNearest));
+            char wk[128], bk[128];
+            snprintf(wk, sizeof(wk), "first_stage_model.decoder.up.%d.upsample.conv.weight", level);
+            snprintf(bk, sizeof(bk), "first_stage_model.decoder.up.%d.upsample.conv.bias", level);
+            h = at::conv2d(h, vae_get_tensor_f32(dict, wk), vae_get_tensor_f32(dict, bk),
+                           at::IntArrayRef{1,1}, at::IntArrayRef{1,1});
         }
     }
 
     // norm_out + conv_out
-    auto no_w = vae_get_tensor_f32(dict, "first_stage_model.decoder.norm_out.weight");
-    if (!no_w.defined()) no_w = vae_get_tensor_f32(dict, "decoder.norm_out.weight");
-    auto no_b = vae_get_tensor_f32(dict, "first_stage_model.decoder.norm_out.bias");
-    if (!no_b.defined()) no_b = vae_get_tensor_f32(dict, "decoder.norm_out.bias");
-    h = at::silu(at::group_norm(h, 32, no_w, no_b, 1e-6));
-
-    auto co_w = vae_get_tensor_f32(dict, "first_stage_model.decoder.conv_out.weight");
-    if (!co_w.defined()) co_w = vae_get_tensor_f32(dict, "decoder.conv_out.weight");
-    auto co_b = vae_get_tensor_f32(dict, "first_stage_model.decoder.conv_out.bias");
-    if (!co_b.defined()) co_b = vae_get_tensor_f32(dict, "decoder.conv_out.bias");
-    h = at::conv2d(h, co_w, co_b, at::IntArrayRef{1,1}, at::IntArrayRef{1,1});
+    h = at::silu(at::group_norm(h, 32, load("decoder.norm_out.weight"), load("decoder.norm_out.bias"), 1e-6));
+    h = at::conv2d(h, load("decoder.conv_out.weight"), load("decoder.conv_out.bias"),
+                   at::IntArrayRef{1,1}, at::IntArrayRef{1,1});
     return h;
 }
 
