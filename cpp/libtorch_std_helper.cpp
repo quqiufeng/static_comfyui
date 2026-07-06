@@ -12,6 +12,7 @@
 #include <cstring>
 #include <optional>
 #include <unordered_map>
+#include <unistd.h>
 #include <map>
 #include <fstream>
 #include <sstream>
@@ -141,7 +142,9 @@ void* torch_std_full(int64_t* shape, int ndim, double value, int dtype) {
     try {
         return wrap(torch::full(to_shape(shape, ndim), value, torch::TensorOptions().dtype(torch::kHalf).device(torch::kCUDA)));
     } catch (const std::exception& e) {
-        std::cerr << "torch_std_full error: " << e.what() << std::endl;
+        write(2, "FULL_ERROR ", 10);
+        write(2, e.what(), strlen(e.what()));
+        write(2, "\n", 1);
         return nullptr;
     }
 }
@@ -4268,11 +4271,12 @@ void* torch_std_sdxl_unet_forward(
         // All local tensors go in scope block for deterministic cleanup
         at::Tensor out_fp32;
         {
-        // Fresh weight map every call (avoids stale CUDA handles across steps)
-        if (!wdict_ptr) { std::cerr << "sdxl_unet_forward: wdict_ptr is null\n"; return nullptr; }
+        if (!wdict_ptr) { return nullptr; }
+        auto& inp_ref = unwrap(inp_ptr);
+        auto dev = inp_ref.device();
         auto d = st_to_map(wdict_ptr);
         for (auto& kv : d) kv.second = kv.second.to(dev).detach();
-        auto inp = inp_ref.to(torch::kHalf);  // input latent is FP16 from randn
+        auto inp = inp_ref.to(torch::kHalf);
         at::Tensor txt = unwrap(text_emb_ptr).to(dev).to(torch::kHalf);
         at::Tensor pool = unwrap(pooled_emb_ptr).to(dev).to(torch::kHalf);
         // Convert sigma to discrete timestep index matching ComfyUI
@@ -4319,6 +4323,14 @@ void* torch_std_sdxl_unet_forward(
         // Conv in (input_blocks.0.0)
         auto h = sdxl_conv2d(inp, d, "input_blocks.0.0", 1, 1);
 
+        auto log_t = [&](const at::Tensor& t, const char* name) {
+            float m = t.mean().item<float>();
+            float s = t.std().item<float>();
+            char buf[256];
+            int n = snprintf(buf, sizeof(buf), "CMP %-20s mean=%.4f std=%.4f\n", name, m, s);
+            write(STDERR_FILENO, buf, n);
+        };
+
         // Encoder - push skip after each input block (matching Python's hs.append)
         std::vector<at::Tensor> sk;
         // input_blocks.0 is conv_in, result pushed
@@ -4334,7 +4346,9 @@ void* torch_std_sdxl_unet_forward(
         sk.push_back(h);  // ib3: 32×32
         // input_blocks.4: resblock + attention
         h = sdxl_resblock_ld(h, te, d, "input_blocks.4.0");
+        log_t(h, "ib4_res");
         h = sdxl_attn_block(h, te, txt, d, "input_blocks.4", 2);
+        log_t(h, "ib4_attn");
         sk.push_back(h);  // ib4: 32×32
         // input_blocks.5: resblock + attention
         h = sdxl_resblock_ld(h, te, d, "input_blocks.5.0");
@@ -4362,12 +4376,12 @@ void* torch_std_sdxl_unet_forward(
         h = sdxl_up0_ld(h, te, txt, d, "output_blocks.1", sk, 10);
         // Output block 2 has an internal Upsample last
         h = sdxl_up0_ld(h, te, txt, d, "output_blocks.2", sk, 10);
-        if (h.dim() == 4) h = at::upsample_bilinear2d(h, {h.size(2)*2, h.size(3)*2});
+        if (h.dim() == 4) h = at::upsample_nearest2d(h, {h.size(2)*2, h.size(3)*2});
         h = sdxl_up0_ld(h, te, txt, d, "output_blocks.3", sk, 2);
         h = sdxl_up0_ld(h, te, txt, d, "output_blocks.4", sk, 2);
         // Output block 5 has an internal Upsample last
         h = sdxl_up0_ld(h, te, txt, d, "output_blocks.5", sk, 2);
-        if (h.dim() == 4) h = at::upsample_bilinear2d(h, {h.size(2)*2, h.size(3)*2});
+        if (h.dim() == 4) h = at::upsample_nearest2d(h, {h.size(2)*2, h.size(3)*2});
         h = sdxl_up0_ld(h, te, txt, d, "output_blocks.6", sk, 0);
         h = sdxl_up0_ld(h, te, txt, d, "output_blocks.7", sk, 0);
         h = sdxl_up0_ld(h, te, txt, d, "output_blocks.8", sk, 0);
