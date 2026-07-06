@@ -250,36 +250,93 @@ static at::Tensor vae_attn(STDict* d, const at::Tensor& x,
     return x + h;
 }
 
-// 完整 VAE Decoder forward
-static at::Tensor vae_decoder_forward(STDict* dict, const at::Tensor& z) {
-    auto load = [&](const char* name) { return vae_get_tensor(dict, name); };
+// Downsample block: conv with stride=2 or average pool
+static at::Tensor vae_downsample(STDict* d, const at::Tensor& x, const std::string& prefix) {
+    char buf[256];
+    auto w = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.op.weight", prefix.c_str()), buf));
+    auto b = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.op.bias", prefix.c_str()), buf));
+    return at::conv2d(x, w, b, at::IntArrayRef{2,2}, at::IntArrayRef{0,0});
+}
 
+// 完整 VAE Decoder forward (encoder + decoder with skip connections)
+static at::Tensor vae_decoder_forward(STDict* dict, const at::Tensor& z) {
     // Move to CPU and convert to fp32 (weights are fp16 CPU)
     auto h = z.to(torch::kCPU).to(torch::kFloat32) / 0.18215;
 
+    // === Encoder (down) — collect skips ===
+    std::vector<at::Tensor> skips;
+
     // conv_in
-    { auto w = vae_get_tensor_f32(dict, "decoder.conv_in.weight"); if (!w.defined()) throw std::runtime_error("VAE missing: decoder.conv_in.weight");
-      auto b = vae_get_tensor_f32(dict, "decoder.conv_in.bias"); if (!b.defined()) throw std::runtime_error("VAE missing: decoder.conv_in.bias");
+    { auto w = vae_get_tensor_f32(dict, "encoder.conv_in.weight");
+      if (!w.defined()) w = vae_get_tensor_f32(dict, "first_stage_model.encoder.conv_in.weight");
+      auto b = vae_get_tensor_f32(dict, "encoder.conv_in.bias");
+      if (!b.defined()) b = vae_get_tensor_f32(dict, "first_stage_model.encoder.conv_in.bias");
       h = at::conv2d(h, w, b, at::IntArrayRef{1,1}, at::IntArrayRef{1,1}); }
+    skips.push_back(h);
 
-    // Mid block
-    h = vae_resblock(dict, h, "decoder.mid.block_1", 512);
-    h = vae_attn(dict, h, "decoder.mid.attn_1");
-    h = vae_resblock(dict, h, "decoder.mid.block_2", 512);
-
-    // Up blocks: 4 levels. Level 0 has 3 blocks + NO upsample
-    // Levels 1-3 have 3 blocks + upsample (interpolate + conv2d)
+    // Down blocks (4 levels, 2 resblocks each, downsample at end except last)
     for (int level = 0; level < 4; level++) {
-        for (int b = 0; b < 3; b++) {
+        for (int b = 0; b < 2; b++) {
             char buf[256];
-            snprintf(buf, sizeof(buf), "decoder.up.%d.block.%d", level, b);
+            snprintf(buf, sizeof(buf), "encoder.down.%d.block.%d", level, b);
+            std::string p(buf);
+            // Try with prefix
+            auto n1w = vae_get_tensor_f32(dict, (snprintf(buf, sizeof(buf), "%s.norm1.weight", p.c_str()), buf));
+            if (!n1w.defined()) {
+                snprintf(buf, sizeof(buf), "first_stage_model.%s.norm1.weight", p.c_str());
+                n1w = vae_get_tensor_f32(dict, buf);
+            }
+            if (n1w.defined()) {
+                // Use full prefix for this block
+                snprintf(buf, sizeof(buf), "first_stage_model.encoder.down.%d.block.%d", level, b);
+                h = vae_resblock(dict, h, buf, 0);
+            }
+            // If this is a 3rd block or the block count varies, handle accordingly
+        }
+        if (level < 3) {
+            char buf[256];
+            snprintf(buf, sizeof(buf), "encoder.down.%d.downsample", level);
+            std::string p(buf);
+            auto dw = vae_get_tensor_f32(dict, (snprintf(buf, sizeof(buf), "first_stage_model.%s.op.weight", p.c_str()), buf));
+            if (dw.defined()) {
+                h = vae_downsample(dict, h, (snprintf(buf, sizeof(buf), "first_stage_model.encoder.down.%d.downsample", level), buf));
+                skips.push_back(h);
+            }
+        }
+    }
+
+    // Mid (encoder)
+    { auto n1w = vae_get_tensor_f32(dict, "first_stage_model.encoder.mid.block_1.norm1.weight");
+      if (n1w.defined()) {
+        h = vae_resblock(dict, h, "first_stage_model.encoder.mid.block_1", 0);
+        h = vae_attn(dict, h, "first_stage_model.encoder.mid.attn_1");
+        h = vae_resblock(dict, h, "first_stage_model.encoder.mid.block_2", 0);
+      } }
+
+    // Decoder mid
+    { auto n1w = vae_get_tensor_f32(dict, "decoder.mid.block_1.norm1.weight");
+      if (!n1w.defined()) n1w = vae_get_tensor_f32(dict, "first_stage_model.decoder.mid.block_1.norm1.weight");
+      if (n1w.defined()) {
+        h = vae_resblock(dict, h, "first_stage_model.decoder.mid.block_1", 0);
+        h = vae_attn(dict, h, "first_stage_model.decoder.mid.attn_1");
+        h = vae_resblock(dict, h, "first_stage_model.decoder.mid.block_2", 0);
+      } }
+
+    // Up blocks (4 levels, 3 resblocks each with skip, upsample at end except level 0)
+    for (int level = 3; level >= 0; level--) {
+        for (int b = 0; b < 3; b++) {
+            // Concat skip connection: cat([h, skip], dim=1)
+            auto skip = skips.back(); skips.pop_back();
+            h = at::cat({h, skip}, 1);
+            char buf[256];
+            snprintf(buf, sizeof(buf), "first_stage_model.decoder.up.%d.block.%d", level, b);
             h = vae_resblock(dict, h, buf, 0);
         }
         if (level > 0) {
             namespace F = torch::nn::functional;
             h = F::interpolate(h, F::InterpolateFuncOptions().scale_factor(std::vector<double>{2.0, 2.0}).mode(torch::kNearest));
             char buf[256];
-            snprintf(buf, sizeof(buf), "decoder.up.%d.upsample.conv", level);
+            snprintf(buf, sizeof(buf), "first_stage_model.decoder.up.%d.upsample.conv", level);
             auto uc = vae_get_tensor_f32(dict, (snprintf(buf, sizeof(buf), "%s.weight", buf), buf));
             auto ub = vae_get_tensor_f32(dict, (snprintf(buf, sizeof(buf), "%s.bias", buf), buf));
             h = at::conv2d(h, uc, ub, at::IntArrayRef{1,1}, at::IntArrayRef{1,1});
@@ -287,11 +344,38 @@ static at::Tensor vae_decoder_forward(STDict* dict, const at::Tensor& z) {
     }
 
     // norm_out + conv_out
-    auto no_w = vae_get_tensor_f32(dict, "decoder.norm_out.weight");
-    auto no_b = vae_get_tensor_f32(dict, "decoder.norm_out.bias");
+    auto no_w = vae_get_tensor_f32(dict, "first_stage_model.decoder.norm_out.weight");
+    if (!no_w.defined()) no_w = vae_get_tensor_f32(dict, "decoder.norm_out.weight");
+    auto no_b = vae_get_tensor_f32(dict, "first_stage_model.decoder.norm_out.bias");
+    if (!no_b.defined()) no_b = vae_get_tensor_f32(dict, "decoder.norm_out.bias");
     h = at::silu(at::group_norm(h, 32, no_w, no_b, 1e-6));
-    h = at::conv2d(h, vae_get_tensor_f32(dict, "decoder.conv_out.weight"), vae_get_tensor_f32(dict, "decoder.conv_out.bias"), at::IntArrayRef{1,1}, at::IntArrayRef{1,1});
+
+    auto co_w = vae_get_tensor_f32(dict, "first_stage_model.decoder.conv_out.weight");
+    if (!co_w.defined()) co_w = vae_get_tensor_f32(dict, "decoder.conv_out.weight");
+    auto co_b = vae_get_tensor_f32(dict, "first_stage_model.decoder.conv_out.bias");
+    if (!co_b.defined()) co_b = vae_get_tensor_f32(dict, "decoder.conv_out.bias");
+    h = at::conv2d(h, co_w, co_b, at::IntArrayRef{1,1}, at::IntArrayRef{1,1});
     return h;
+}
+
+extern "C" void* torch_std_euler_step(void* x_ptr, void* sigma_t_ptr, void* sigma_next_ptr,
+                                       void* cond_ptr, void* uncond_ptr, double cfg) {
+    try {
+        auto& x = unwrap(x_ptr);
+        auto& sig_t = unwrap(sigma_t_ptr);
+        auto& sig_next = unwrap(sigma_next_ptr);
+        auto& cond = unwrap(cond_ptr);
+        auto& uncond = unwrap(uncond_ptr);
+        auto dev = x.device();
+        torch::Tensor eps = uncond + (cond - uncond) * cfg;
+        auto sig_t_d = sig_t.to(dev);
+        auto sig_next_d = sig_next.to(dev);
+        auto result = x + (sig_next_d - sig_t_d) * eps;
+        return wrap(result);
+    } catch (const std::exception& e) {
+        std::cerr << "euler_step error: " << e.what() << std::endl;
+        return nullptr;
+    }
 }
 
 extern "C" void* torch_std_vae_decode_from_dict(void* vae_dict, void* latent) {

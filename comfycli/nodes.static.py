@@ -149,7 +149,6 @@ def k_sampler_inner(inputs):
         cond_out = model_fn(sd_handle, x, s_in, cond, pooled_pos)
         uncond_out = model_fn(sd_handle, x, s_in, uncond, pooled_neg)
         x = torch.euler_step(x, sigma_t, sigma_prev, cond_out, uncond_out, cfg)
-        print("st")
         n = n + 1
     result = make_dict()
     dict_set(result, "samples", x)

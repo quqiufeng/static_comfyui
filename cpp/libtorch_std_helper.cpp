@@ -2342,7 +2342,10 @@ void* torch_std_sample_euler_ancestral(void* noise_pred, void* x_t,
         auto sigma_noise = at::sqrt(sig_prev * sig_prev - sig_t * sig_t);
 
         // d = (x_t - eps) / sigma_t
-        auto d = (xt - eps) / sig_t;
+        auto sig_t_d = sig_t.to(xt.device());
+        auto sig_prev_d = sig_prev.to(xt.device());
+        auto d = (xt - eps) / sig_t_d;
+        auto step = sig_prev_d - sig_t_d;
 
         auto x_prev = xt + (sig_prev - sig_t) * d;
         // Add ancestral noise
