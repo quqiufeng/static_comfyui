@@ -1990,10 +1990,10 @@ Returns (B,4,H,W) output latent (autograd graph built)"
       (make-tagged-tensor-auto (torch-std-load-image path)))))
 
 (define (torch-save-image tensor path as-pgm)
-  "保存 tensor 为图像文件。as-pgm=1 输出灰度 PGM，否则 PPM"
+  "保存图像到文件。as-pgm: 0=color PPM, 1=grayscale PGM"
   (torch-check "torch not available"
     (lambda ()
-      (torch-std-save-image (tagged-tensor-ptr tensor) path (if as-pgm 1 0)))))
+      (torch-std-save-image (tagged-tensor-ptr tensor) path (if (eqv? as-pgm 1) 1 0)))))
 
 ;; ====== DDPM Scheduler ======
 
@@ -2504,7 +2504,7 @@ cast-to-float16: 非零则输出转为 float16"
 ;; ====== SDXL UNet forward (weight dict + meta) ======
 
 (define (torch-sdxl-unet-forward wdict input timestep text-emb pooled-emb
-                                 os-h os-w crop-t crop-l ts-h ts-w)
+                                  os-h os-w crop-t crop-l ts-h ts-w)
   "SDXL UNet forward: weight dict + latent + text_emb + pooled + size/crop/target meta.
 All returns auto-grad graph output latent tensor."
   (torch-check "torch not available"

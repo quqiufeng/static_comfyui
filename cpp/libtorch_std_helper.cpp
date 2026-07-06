@@ -880,7 +880,7 @@ static at::Tensor timestep_embedding(const at::Tensor& timesteps, int dim, int m
     freqs = freqs.to(timesteps.device());
     // timesteps: (B,) → (B, half)
     auto emb = timesteps.unsqueeze(1) * freqs.unsqueeze(0);
-    std::vector<at::Tensor> cats = {at::sin(emb), at::cos(emb)};
+    std::vector<at::Tensor> cats = {at::cos(emb), at::sin(emb)};
     return at::cat(cats, 1);
 }
 
@@ -4071,6 +4071,7 @@ static at::Tensor sdxl_up0_ld(const at::Tensor& x, const at::Tensor& te,
                                const std::string& p,
                                std::vector<at::Tensor>& skips, int nh);
 
+#include <algorithm>
 // Attention block (encoder/mid): proj_in → transformer_blocks → proj_out
 // Does NOT call resblock - caller already did that with .0
 static at::Tensor sdxl_attn_block(const at::Tensor& x, const at::Tensor& te,
@@ -4078,71 +4079,64 @@ static at::Tensor sdxl_attn_block(const at::Tensor& x, const at::Tensor& te,
                                    const std::unordered_map<std::string, at::Tensor>& d,
                                    const std::string& p, int n_blocks) {
     auto hn = sdxl_gn(x, d, p+".1.norm");
-    // proj_in is Linear (2D weight), apply as (N,C,H,W) -> (N,H,W,C) -> linear -> (N,C,H,W)
     int ch = hn.size(1);
-    hn = hn.permute({0,2,3,1}).reshape({-1, ch});  // (N*H*W, C)
-    hn = sdxl_linear(hn, d, p+".1.proj_in");        // (N*H*W, C')
+    hn = hn.permute({0,2,3,1}).reshape({-1, ch});
+    hn = sdxl_linear(hn, d, p+".1.proj_in");
     ch = hn.size(1);
     int B = x.size(0), H = x.size(2), W = x.size(3);
-    hn = hn.view({B, H, W, ch}).permute({0,3,1,2});  // (N, C', H, W)
-    int nhd = ch / 8;
+    hn = hn.view({B, H, W, ch}).permute({0,3,1,2});
+    int n_heads = ch / 64;
+    int head_dim = 64;
+    hn = hn.clone();
+
     for (int bi = 0; bi < n_blocks; bi++) {
         std::string tp = p+".1.transformer_blocks."+std::to_string(bi);
-        // Flatten spatial dims for linear ops (at::linear acts on last dim)
         int N = hn.size(2)*hn.size(3);
-        auto hn_2d = hn.permute({0,2,3,1}).reshape({-1, ch});  // (B*H*W, C)
+        auto hn_2d = hn.permute({0,2,3,1}).reshape({-1, ch});
         
-        // LayerNorm helpers (transformer norms are LayerNorm, not GroupNorm)
         auto sdxl_ln = [&](const at::Tensor& x, const std::string& k) -> at::Tensor {
             auto w = sdxl_get_weight(d, k + ".weight");
             auto b = sdxl_get_weight(d, k + ".bias");
             if (!w.defined()) return x;
-            auto f = x.permute({0,2,3,1}).reshape({-1, ch});  // (B*N, C)
-            auto out = at::layer_norm(f, {ch}, w, b, 1e-6);
+            auto f = x.permute({0,2,3,1}).reshape({-1, ch});
+            auto out = at::layer_norm(f, {ch}, w, b, 1e-5);
             return out.reshape({B, H, W, ch}).permute({0,3,1,2});
         };
 
-        // Self-attention (FlashAttention via SDPA)
+        // Self-attention
         auto sa_hn = sdxl_ln(hn, tp+".norm1");
         auto n_2d = sa_hn.permute({0,2,3,1}).reshape({-1, ch});
-        auto sq = sdxl_linear(n_2d, d, tp+".attn1.to_q").view({B,N,nhd,8}).permute({0,2,1,3});
-        auto sk = sdxl_linear(n_2d, d, tp+".attn1.to_k").view({B,N,nhd,8}).permute({0,2,1,3});
-        auto sv = sdxl_linear(n_2d, d, tp+".attn1.to_v").view({B,N,nhd,8}).permute({0,2,1,3});
+        auto sq = sdxl_linear(n_2d, d, tp+".attn1.to_q").reshape({B,N,n_heads,head_dim}).transpose(1,2).contiguous();
+        auto sk = sdxl_linear(n_2d, d, tp+".attn1.to_k").reshape({B,N,n_heads,head_dim}).transpose(1,2).contiguous();
+        auto sv = sdxl_linear(n_2d, d, tp+".attn1.to_v").reshape({B,N,n_heads,head_dim}).transpose(1,2).contiguous();
         auto so = at::scaled_dot_product_attention(sq, sk, sv, {}, 0.0, false);
-        so = so.permute({0,2,1,3}).reshape({B,N,ch});
-        so = so.reshape({-1, ch});
-        so = sdxl_linear(so, d, tp+".attn1.to_out.0");
-        hn = hn + so.view({B,H,W,ch}).permute({0,3,1,2});
+        so = so.transpose(1,2).contiguous().reshape({B,N,ch});
+        so = sdxl_linear(so.reshape({-1, ch}), d, tp+".attn1.to_out.0").contiguous();
+        hn = hn.clone() + so.view({B,H,W,ch}).permute({0,3,1,2});
         
-        // Cross-attention (FlashAttention)  
+        // Cross-attention
         auto ca_hn = sdxl_ln(hn, tp+".norm2");
         auto n2_2d = ca_hn.permute({0,2,3,1}).reshape({-1, ch});
-        auto cq = sdxl_linear(n2_2d, d, tp+".attn2.to_q").view({B,N,nhd,8}).permute({0,2,1,3});
-        auto ck = sdxl_linear(txt, d, tp+".attn2.to_k");
-        auto cv = sdxl_linear(txt, d, tp+".attn2.to_v");
-
-        ck = ck.view({B,-1,nhd,8}).permute({0,2,1,3});
-        cv = cv.view({B,-1,nhd,8}).permute({0,2,1,3});
+        auto cq = sdxl_linear(n2_2d, d, tp+".attn2.to_q").reshape({B,N,n_heads,head_dim}).transpose(1,2).contiguous();
+        auto ck = sdxl_linear(txt, d, tp+".attn2.to_k").reshape({B,-1,n_heads,head_dim}).transpose(1,2).contiguous();
+        auto cv = sdxl_linear(txt, d, tp+".attn2.to_v").reshape({B,-1,n_heads,head_dim}).transpose(1,2).contiguous();
         auto co = at::scaled_dot_product_attention(cq, ck, cv, {}, 0.0, false);
-        co = co.permute({0,2,1,3}).reshape({B,N,ch});
-        co = co.reshape({-1, ch});
-        co = sdxl_linear(co, d, tp+".attn2.to_out.0");
+        co = co.transpose(1,2).contiguous().reshape({B,N,ch});
+        co = sdxl_linear(co.reshape({-1, ch}), d, tp+".attn2.to_out.0").contiguous();
         hn = hn + co.view({B,H,W,ch}).permute({0,3,1,2});
         
-        // FFN
+        // FFN (GEGLU)
         auto ff_hn = sdxl_ln(hn, tp+".norm3");
         auto n3_2d = ff_hn.permute({0,2,3,1}).reshape({-1, ch});
         auto ff = sdxl_linear(n3_2d, d, tp+".ff.net.0.proj");
         int half = ff.size(1)/2;
-        auto ffg = ff.slice(1,0,half), ffv = ff.slice(1,half,2*half);
-        ff = at::silu(ffg) * ffv;
+        ff = at::silu(ff.slice(1,0,half)) * ff.slice(1,half,2*half);
         ff = sdxl_linear(ff, d, tp+".ff.net.2");
         hn = hn + ff.view({B,H,W,ch}).permute({0,3,1,2});
     }
-    // proj_out is also Linear
-    hn = hn.permute({0,2,3,1}).reshape({-1, ch});  // (N*H*W, C)
+    hn = hn.permute({0,2,3,1}).reshape({-1, ch});
     hn = sdxl_linear(hn, d, p+".1.proj_out");
-    hn = hn.view({B, H, W, -1}).permute({0,3,1,2});  // (N, C', H, W)
+    hn = hn.view({B, H, W, -1}).permute({0,3,1,2});
     return hn;
 }
 
@@ -4368,12 +4362,12 @@ void* torch_std_sdxl_unet_forward(
         h = sdxl_up0_ld(h, te, txt, d, "output_blocks.1", sk, 10);
         // Output block 2 has an internal Upsample last
         h = sdxl_up0_ld(h, te, txt, d, "output_blocks.2", sk, 10);
-        if (h.dim() == 4) h = at::upsample_bilinear2d(h, {h.size(2)*2, h.size(3)*2}, false, c10::nullopt, c10::nullopt);
+        if (h.dim() == 4) h = at::upsample_bilinear2d(h, {h.size(2)*2, h.size(3)*2});
         h = sdxl_up0_ld(h, te, txt, d, "output_blocks.3", sk, 2);
         h = sdxl_up0_ld(h, te, txt, d, "output_blocks.4", sk, 2);
         // Output block 5 has an internal Upsample last
         h = sdxl_up0_ld(h, te, txt, d, "output_blocks.5", sk, 2);
-        if (h.dim() == 4) h = at::upsample_bilinear2d(h, {h.size(2)*2, h.size(3)*2}, false, c10::nullopt, c10::nullopt);
+        if (h.dim() == 4) h = at::upsample_bilinear2d(h, {h.size(2)*2, h.size(3)*2});
         h = sdxl_up0_ld(h, te, txt, d, "output_blocks.6", sk, 0);
         h = sdxl_up0_ld(h, te, txt, d, "output_blocks.7", sk, 0);
         h = sdxl_up0_ld(h, te, txt, d, "output_blocks.8", sk, 0);

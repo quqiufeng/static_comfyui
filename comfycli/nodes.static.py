@@ -85,11 +85,9 @@ register_node("EmptyLatentImage", "Empty Latent Image",
 
 
 def vae_decode(inputs):
-    print("va")
     vae_obj: VAE = dict_get(inputs, "vae")
     samples = dict_get(inputs, "samples")
     latent_tensor = dict_get(samples, "samples")
-    print("vb")
     image = torch.vae_decode_from_dict(vae_obj.vae_ptr, latent_tensor)
     return (image,)
 
@@ -138,10 +136,11 @@ def k_sampler_inner(inputs):
     if pooled_pos is None: print("pooled_pos is None")
     if pooled_neg is None: print("pooled_neg is None")
     noise = torch.randn([1, 4, h, w])
-    x = noise
     sigma_min = 0.029
     sigma_max = 14.615
     sigmas = torch.sampler_sigmas(steps, sigma_min, sigma_max, scheduler)
+    sigmas = torch.to_cpu(sigmas)
+    x = torch.mul(noise, sigmas[0])  # scale noise by sigma_max (ComfyUI noise_scaling)
     sd_handle = model.sd_handle
     n = 0
     while n < steps:
@@ -164,7 +163,13 @@ def model_fn(sd_handle, x, sigma, text_emb, pooled_emb):
     crop_l = 0.0
     ts_h = 1024.0
     ts_w = 1024.0
-    return torch.sdxl_unet_forward(sd_handle, x, sigma, text_emb, pooled_emb,
+    # calculate_input: move sigma to x's device, compute x / sqrt(sigma^2 + 1)
+    sigma_d = torch.to_cuda(sigma)
+    sigma_2 = torch.mul(sigma_d, sigma_d)
+    factor = torch.add(sigma_2, 1.0)
+    divisor = torch.pow(factor, 0.5)
+    x_scaled = torch.div(x, divisor)
+    return torch.sdxl_unet_forward(sd_handle, x_scaled, sigma, text_emb, pooled_emb,
                                    os_h, os_w, crop_t, crop_l, ts_h, ts_w)
 
 
