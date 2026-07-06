@@ -15,15 +15,21 @@
   "4": {
     "class_type": "CLIPTextEncode",
     "inputs": {
-      "text": "cat, high quality, detailed",
-      "clip": ["10", 0]
+      "text": "solo,single woman,half body portrait of a young woman, soft natural lighting, elegant pose, studio lighting, sharp eyes, clean white background, medium close up",
+      "clip": [
+        "10",
+        0
+      ]
     }
   },
   "5": {
     "class_type": "CLIPTextEncode",
     "inputs": {
-      "text": "blurry, low quality",
-      "clip": ["10", 0]
+      "text": "blurry, low quality, messy, worst quality, ugly",
+      "clip": [
+        "10",
+        0
+      ]
     }
   },
   "6": {
@@ -37,10 +43,22 @@
   "7": {
     "class_type": "KSampler",
     "inputs": {
-      "model": ["3", 0],
-      "positive": ["4", 0],
-      "negative": ["5", 0],
-      "latent_image": ["6", 0],
+      "model": [
+        "3",
+        0
+      ],
+      "positive": [
+        "4",
+        0
+      ],
+      "negative": [
+        "5",
+        0
+      ],
+      "latent_image": [
+        "6",
+        0
+      ],
       "seed": 42,
       "steps": 20,
       "cfg": 7.0,
@@ -52,14 +70,23 @@
   "8": {
     "class_type": "VAEDecode",
     "inputs": {
-      "samples": ["7", 0],
-      "vae": ["3", 2]
+      "samples": [
+        "7",
+        0
+      ],
+      "vae": [
+        "3",
+        2
+      ]
     }
   },
   "9": {
     "class_type": "SaveImage",
     "inputs": {
-      "images": ["8", 0],
+      "images": [
+        "8",
+        0
+      ],
       "filename_prefix": "comfycli"
     }
   }

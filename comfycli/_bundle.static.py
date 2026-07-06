@@ -1041,7 +1041,6 @@ def dual_clip_loader(inputs):
     dict_set(result, "clip_g", clip_g_sd)
     dict_set(result, "clip_l", clip_l_sd)
     return (result,)
-    return (result,)
 
 
 register_node("DualCLIPLoader", "Dual CLIP Loader",
@@ -1085,13 +1084,10 @@ register_node("EmptyLatentImage", "Empty Latent Image",
 
 
 def vae_decode(inputs):
-    vae = dict_get(inputs, "vae")
+    vae_obj: VAE = dict_get(inputs, "vae")
     samples = dict_get(inputs, "samples")
-    tile_size = 512
-    overlap = 64
     latent_tensor = dict_get(samples, "samples")
-    vae_ptr = vae.vae_ptr
-    image = torch.vae_decode_tiled(vae_ptr, latent_tensor, tile_size, overlap)
+    image = torch.vae_decode_from_dict(vae_obj.vae_ptr, latent_tensor)
     return (image,)
 
 
@@ -1100,7 +1096,7 @@ register_node("VAEDecode", "VAE Decode",
 
 
 def vae_encode(inputs):
-    vae = dict_get(inputs, "vae")
+    vae: VAE = dict_get(inputs, "vae")
     pixels = dict_get(inputs, "pixels")
     tile_size = 512
     overlap = 64
@@ -1135,10 +1131,10 @@ def k_sampler_inner(inputs):
     w = tensor_shape_dim(latent_tensor, 3)
     torch.manual_seed(seed)
     noise = torch.randn([1, 4, h, w])
+    sigmas = torch.sampler_sigmas(steps, 0.029, 14.615, scheduler)
+    noise = torch.mul(noise, torch.narrow(sigmas, 0, 0, 1))
+    sigmas = torch.to_cpu(sigmas)
     x = noise
-    sigma_min = 0.029
-    sigma_max = 14.615
-    sigmas = torch.sampler_sigmas(steps, sigma_min, sigma_max, scheduler)
     sd_handle = model.sd_handle
     n = 0
     while n < steps:
@@ -1146,11 +1142,11 @@ def k_sampler_inner(inputs):
         sigma_prev = torch.narrow(sigmas, 0, n + 1, 1)
         s_in = sigma_t
         cond_out = model_fn(sd_handle, x, s_in, cond, pooled_pos)
-        uncond_out = cond_out
-        diff = torch.sub(cond_out, uncond_out)
-        scaled = torch.mul(diff, cfg)
-        denoised = torch.add(uncond_out, scaled)
-        x = torch.sample_euler(denoised, x, sigma_t, sigma_prev)
+        uncond_out = model_fn(sd_handle, x, s_in, uncond, pooled_neg)
+        # CFG on EPS
+        eps = torch.add(uncond_out, torch.mul(torch.sub(cond_out, uncond_out), cfg))
+        # Euler step: x = x + eps * (sigma_next - sigma_t)
+        x = torch.add(x, torch.mul(eps, torch.sub(sigma_prev, sigma_t)))
         n = n + 1
     result = make_dict()
     dict_set(result, "samples", x)
@@ -1164,7 +1160,12 @@ def model_fn(sd_handle, x, sigma, text_emb, pooled_emb):
     crop_l = 0.0
     ts_h = 1024.0
     ts_w = 1024.0
-    return torch.sdxl_unet_forward(sd_handle, x, sigma, text_emb, pooled_emb,
+    sigma_d = torch.to_cuda(sigma)
+    sigma_2 = torch.mul(sigma_d, sigma_d)
+    factor = torch.add(sigma_2, 1.0)
+    divisor = torch.pow(factor, 0.5)
+    x_scaled = torch.div(x, divisor)
+    return torch.sdxl_unet_forward(sd_handle, x_scaled, sigma, text_emb, pooled_emb,
                                    os_h, os_w, crop_t, crop_l, ts_h, ts_w)
 
 

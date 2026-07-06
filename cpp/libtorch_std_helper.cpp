@@ -4133,7 +4133,7 @@ static at::Tensor sdxl_attn_block(const at::Tensor& x, const at::Tensor& te,
         auto n3_2d = ff_hn.permute({0,2,3,1}).reshape({-1, ch});
         auto ff = sdxl_linear(n3_2d, d, tp+".ff.net.0.proj");
         int half = ff.size(1)/2;
-        ff = at::silu(ff.slice(1,0,half)) * ff.slice(1,half,2*half);
+        ff = ff.slice(1,0,half) * at::gelu(ff.slice(1,half,2*half));
         ff = sdxl_linear(ff, d, tp+".ff.net.2");
         hn = hn + ff.view({B,H,W,ch}).permute({0,3,1,2});
     }
@@ -4323,14 +4323,6 @@ void* torch_std_sdxl_unet_forward(
         // Conv in (input_blocks.0.0)
         auto h = sdxl_conv2d(inp, d, "input_blocks.0.0", 1, 1);
 
-        auto log_t = [&](const at::Tensor& t, const char* name) {
-            float m = t.mean().item<float>();
-            float s = t.std().item<float>();
-            char buf[256];
-            int n = snprintf(buf, sizeof(buf), "CMP %-20s mean=%.4f std=%.4f\n", name, m, s);
-            write(STDERR_FILENO, buf, n);
-        };
-
         // Encoder - push skip after each input block (matching Python's hs.append)
         std::vector<at::Tensor> sk;
         // input_blocks.0 is conv_in, result pushed
@@ -4346,9 +4338,7 @@ void* torch_std_sdxl_unet_forward(
         sk.push_back(h);  // ib3: 32×32
         // input_blocks.4: resblock + attention
         h = sdxl_resblock_ld(h, te, d, "input_blocks.4.0");
-        log_t(h, "ib4_res");
         h = sdxl_attn_block(h, te, txt, d, "input_blocks.4", 2);
-        log_t(h, "ib4_attn");
         sk.push_back(h);  // ib4: 32×32
         // input_blocks.5: resblock + attention
         h = sdxl_resblock_ld(h, te, d, "input_blocks.5.0");
