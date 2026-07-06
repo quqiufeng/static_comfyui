@@ -90,6 +90,18 @@ def vae_decode(inputs):
     image = torch.vae_decode_from_dict(vae_obj.vae_ptr, latent_tensor)
     return (image,)
 
+def vae_decode_debug(inputs):
+    vae_obj: VAE = dict_get(inputs, "vae")
+    # Load correct latent from file
+    import_data = file_read_all("/tmp/correct_latent2.bin")
+    if import_data is None:
+        return (None,)
+    # Use a bypass: just decode the native latent from KSampler
+    samples = dict_get(inputs, "samples")
+    latent_tensor = dict_get(samples, "samples")
+    image = torch.vae_decode_from_dict(vae_obj.vae_ptr, latent_tensor)
+    return (image,)
+
 
 register_node("VAEDecode", "VAE Decode",
               "vae_decode", ("IMAGE",), False)

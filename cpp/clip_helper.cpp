@@ -318,6 +318,14 @@ extern "C" void* torch_std_euler_step(void* x_ptr, void* sigma_t_ptr, void* sigm
         auto sig_t_d = sig_t.to(dev);
         auto sig_next_d = sig_next.to(dev);
         auto result = x + (sig_next_d - sig_t_d) * eps;
+        {
+            static int step = 0;
+            char buf[256];
+            int n = snprintf(buf, sizeof(buf), "EULER step=%d x_mean=%.4f eps_mean=%.4f sig_t=%.4f\n",
+                step, x.abs().mean().item<float>(), eps.abs().mean().item<float>(), sig_t_d.item<float>());
+            write(STDERR_FILENO, buf, n);
+            step++;
+        }
         return wrap(result);
     } catch (const std::exception& e) {
         std::cerr << "euler_step error: " << e.what() << std::endl;

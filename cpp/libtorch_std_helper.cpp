@@ -4174,10 +4174,6 @@ static at::Tensor sdxl_up0_ld(const at::Tensor& x, const at::Tensor& te,
                                const std::string& p,
                                std::vector<at::Tensor>& skips, int nh) {
     auto h = x;
-    // Take skip connection if spatial dims match
-    int n64 = 0;
-    for (auto& s : skips) if (s.defined() && s.dim()>=4 && s.size(2)==h.size(2)) n64++;
-    // Take LAST matching skip (most recent encoder push)
     for (int si = (int)skips.size() - 1; si >= 0; si--) {
         auto& s = skips[si];
         if (s.dim() == 4 && s.size(2) == h.size(2) && s.size(3) == h.size(3)) {
@@ -4186,9 +4182,12 @@ static at::Tensor sdxl_up0_ld(const at::Tensor& x, const at::Tensor& te,
             break;
         }
     }
+    if (p.find("output_blocks.2") != std::string::npos) log_tensor(h, "ob2_cat");
     h = sdxl_resblock_ld(h, te, d, p+".0");
+    if (p.find("output_blocks.2") != std::string::npos) log_tensor(h, "ob2_res");
     if (nh > 0) {
         h = sdxl_attn_block(h, te, txt, d, p, nh);
+        if (p.find("output_blocks.2") != std::string::npos) log_tensor(h, "ob2_attn");
     }
     return h;
 }
@@ -4382,24 +4381,32 @@ void* torch_std_sdxl_unet_forward(
         h = sdxl_resblock_ld(h, te, d, "middle_block.2");
 
         // Decoder
-        h = sdxl_up0_ld(h, te, txt, d, "output_blocks.0", sk, 10);
-        h = sdxl_up0_ld(h, te, txt, d, "output_blocks.1", sk, 10);
-        // Output block 2 has an internal Upsample last
-        h = sdxl_up0_ld(h, te, txt, d, "output_blocks.2", sk, 10);
-        if (h.dim() == 4) h = at::upsample_nearest2d(h, {h.size(2)*2, h.size(3)*2});
-        h = sdxl_up0_ld(h, te, txt, d, "output_blocks.3", sk, 2);
-        h = sdxl_up0_ld(h, te, txt, d, "output_blocks.4", sk, 2);
-        // Output block 5 has an internal Upsample last
-        h = sdxl_up0_ld(h, te, txt, d, "output_blocks.5", sk, 2);
-        if (h.dim() == 4) h = at::upsample_nearest2d(h, {h.size(2)*2, h.size(3)*2});
-        h = sdxl_up0_ld(h, te, txt, d, "output_blocks.6", sk, 0);
-        h = sdxl_up0_ld(h, te, txt, d, "output_blocks.7", sk, 0);
-        h = sdxl_up0_ld(h, te, txt, d, "output_blocks.8", sk, 0);
+        h = sdxl_up0_ld(h, te, txt, d, "output_blocks.0", sk, 10); log_tensor(h, "ob0");
+        h = sdxl_up0_ld(h, te, txt, d, "output_blocks.1", sk, 10); log_tensor(h, "ob1");
+        h = sdxl_up0_ld(h, te, txt, d, "output_blocks.2", sk, 10); log_tensor(h, "ob2_pre");
+        if (h.dim() == 4) {
+            h = at::upsample_nearest2d(h, {h.size(2)*2, h.size(3)*2});
+            h = sdxl_conv2d(h, d, "output_blocks.2.2.conv", 1, 1);
+            log_tensor(h, "ob2_up");
+        }
+        h = sdxl_up0_ld(h, te, txt, d, "output_blocks.3", sk, 2); log_tensor(h, "ob3");
+        h = sdxl_up0_ld(h, te, txt, d, "output_blocks.4", sk, 2); log_tensor(h, "ob4");
+        h = sdxl_up0_ld(h, te, txt, d, "output_blocks.5", sk, 2); log_tensor(h, "ob5_pre");
+        if (h.dim() == 4) {
+            h = at::upsample_nearest2d(h, {h.size(2)*2, h.size(3)*2});
+            h = sdxl_conv2d(h, d, "output_blocks.5.2.conv", 1, 1);
+            log_tensor(h, "ob5_up");
+        }
+        h = sdxl_up0_ld(h, te, txt, d, "output_blocks.6", sk, 0); log_tensor(h, "ob6");
+        h = sdxl_up0_ld(h, te, txt, d, "output_blocks.7", sk, 0); log_tensor(h, "ob7");
+        h = sdxl_up0_ld(h, te, txt, d, "output_blocks.8", sk, 0); log_tensor(h, "ob8");
 
         // Out
+        log_tensor(h, "pre_out");
         h = at::silu(sdxl_gn(h, d, "out.0"));
+        log_tensor(h, "post_gn");
         h = sdxl_conv2d(h, d, "out.2", 1, 1);
-        // Convert output back to FP32 for VAE decode
+        log_tensor(h, "out");
         out_fp32 = h.to(torch::kFloat32);
         }  // end scope: all intermediate tensors freed
         return wrap(out_fp32);
