@@ -57,26 +57,26 @@ int main() {
         "/data/models/image/clip_g_vocab.json",
         "/data/models/image/clip_g_merges.txt");
     
-    auto encode = [&](const char* text, void* clip_sd, int d, int layers, int heads, int ffn) -> torch::Tensor {
-        void* tokens = tok_encode(tok_l, text);
+    auto encode = [&](void* tok, const char* text, void* clip_sd, int d, int layers, int heads, int ffn) -> torch::Tensor {
+        void* tokens = tok_encode(tok, text);
         // tokens is a wrapped int64 tensor
         auto result = clip_fwd(clip_sd, tokens, d, layers, heads, ffn);
         return *((torch::Tensor*)result);
     };
     
     // Encode CLIP-L (768, 12, 12, 3072) and CLIP-G (1280, 32, 20, 5120)
-    auto emb_l_pos = encode(pos_prompt, clip_l_sd, 768, 12, 12, 3072);
-    auto emb_g_pos = encode(pos_prompt, clip_g_sd, 1280, 32, 20, 5120);
-    auto emb_l_neg = encode(neg_prompt, clip_l_sd, 768, 12, 12, 3072);
-    auto emb_g_neg = encode(neg_prompt, clip_g_sd, 1280, 32, 20, 5120);
+    auto emb_l_pos = encode(tok_l, pos_prompt, clip_l_sd, 768, 12, 12, 3072);
+    auto emb_g_pos = encode(tok_g, pos_prompt, clip_g_sd, 1280, 32, 20, 5120);
+    auto emb_l_neg = encode(tok_l, neg_prompt, clip_l_sd, 768, 12, 12, 3072);
+    auto emb_g_neg = encode(tok_g, neg_prompt, clip_g_sd, 1280, 32, 20, 5120);
     
     // Concatenate: (1, 77, 768) + (1, 77, 1280) = (1, 77, 2048)
     auto cond = torch::cat({emb_l_pos.to(dev).to(torch::kHalf), emb_g_pos.to(dev).to(torch::kHalf)}, 2);
     auto uncond = torch::cat({emb_l_neg.to(dev).to(torch::kHalf), emb_g_neg.to(dev).to(torch::kHalf)}, 2);
     
     // Pooled: take position 60 from CLIP-G
-    auto pooled_pos = emb_g_pos.slice(1, 60, 61).squeeze(1).to(dev).to(torch::kHalf);
-    auto pooled_neg = emb_g_neg.slice(1, 60, 61).squeeze(1).to(dev).to(torch::kHalf);
+    auto pooled_pos = torch::zeros({1, 1280}, torch::dtype(torch::kHalf).device(dev));
+    auto pooled_neg = torch::zeros({1, 1280}, torch::dtype(torch::kHalf).device(dev));
     
     fprintf(stderr, "  cond shape: %d,%d,%d  pooled: %d,%d\n",
         (int)cond.size(0), (int)cond.size(1), (int)cond.size(2),
