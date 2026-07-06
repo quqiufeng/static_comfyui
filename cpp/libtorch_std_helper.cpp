@@ -4441,8 +4441,10 @@ void* torch_std_sdxl_unet_forward(
         {
             static int eps_call = 0;
             if (eps_call < 8) {
+                float m = out_fp32.mean().item<float>();
+                float s = out_fp32.std().item<float>();
                 char buf[128];
-                int n = snprintf(buf, sizeof(buf), "EPS_OUT call=%d mean=%.4f std=%.4f\n", eps_call, out_fp32.abs().mean().item<float>(), out_fp32.std().item<float>());
+                int n = snprintf(buf, sizeof(buf), "EPS_OUT call=%d mean=%.4f std=%.4f abs_mean=%.4f\n", eps_call, m, s, out_fp32.abs().mean().item<float>());
                 write(2, buf, n);
                 eps_call++;
             }
