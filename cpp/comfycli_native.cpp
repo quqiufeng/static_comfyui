@@ -71,8 +71,8 @@ int main() {
     auto emb_g_neg = encode(tok_g, neg_prompt, clip_g_sd, 1280, 32, 20, 5120);
     
     // Concatenate: (1, 77, 768) + (1, 77, 1280) = (1, 77, 2048)
-    auto cond = torch::cat({emb_l_pos.to(dev).to(torch::kHalf), emb_g_pos.to(dev).to(torch::kHalf)}, 2);
-    auto uncond = torch::cat({emb_l_neg.to(dev).to(torch::kHalf), emb_g_neg.to(dev).to(torch::kHalf)}, 2);
+    auto cond = torch::cat({emb_l_pos.to(dev).to(torch::kHalf), emb_g_pos.to(dev).to(torch::kHalf)}, 2).contiguous();
+    auto uncond = torch::cat({emb_l_neg.to(dev).to(torch::kHalf), emb_g_neg.to(dev).to(torch::kHalf)}, 2).contiguous();
     
     // Pooled: take position 60 from CLIP-G
     auto pooled_pos = torch::zeros({1, 1280}, torch::dtype(torch::kHalf).device(dev));

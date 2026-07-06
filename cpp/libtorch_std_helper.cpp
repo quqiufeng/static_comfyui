@@ -4151,15 +4151,26 @@ static at::Tensor sdxl_attn_block(const at::Tensor& x, const at::Tensor& te,
         auto ck = sdxl_linear(txt, d, tp+".attn2.to_k").reshape({B,-1,n_heads,head_dim}).transpose(1,2).contiguous();
         auto cv = sdxl_linear(txt, d, tp+".attn2.to_v").reshape({B,-1,n_heads,head_dim}).transpose(1,2).contiguous();
         auto co = at::scaled_dot_product_attention(cq, ck, cv, {}, 0.0, false, attn_scale);
+        {
+            // Check attention output variance (should be high if softmax dim is correct)
+            static int attn_check = 0;
+            if (attn_check < 4 && p.find("input_blocks.4") != std::string::npos) {
+                float m = co.mean().item<float>(), s = co.std().item<float>();
+                char buf[128];
+                int n = snprintf(buf, sizeof(buf), "ATTN_OUT %s b%d mean=%.4f std=%.4f\n", p.c_str(), bi, m, s);
+                write(2, buf, n);
+                attn_check++;
+            }
+        }
         co = co.transpose(1,2).contiguous().reshape({B,N,ch});
         co = sdxl_linear(co.reshape({-1, ch}), d, tp+".attn2.to_out.0").contiguous();
-        if ((bi == 0 && p.find("input_blocks.4") != std::string::npos) ||
-            (bi == 0 && p.find("middle_block") != std::string::npos)) {
-            float cq_m = cq.abs().mean().item<float>(), ck_m = ck.abs().mean().item<float>();
-            float co_m = co.abs().mean().item<float>(), hn_m = hn.abs().mean().item<float>();
+        if (bi == 0) {
+            float ck_m = ck.abs().mean().item<float>();
+            float co_m = co.abs().mean().item<float>();
+            float hn_m = hn.abs().mean().item<float>();
             char buf[256];
-            int nn = snprintf(buf, sizeof(buf), "ATTN_%s b%d cq=%.4f ck=%.4f co=%.4f hn=%.4f\n",
-                p.c_str(), bi, cq_m, ck_m, co_m, hn_m);
+            int nn = snprintf(buf, sizeof(buf), "CO_%s b0 ck=%.4f co=%.4f hn=%.4f\n",
+                p.c_str(), ck_m, co_m, hn_m);
             write(2, buf, nn);
         }
         hn = hn + co.view({B,H,W,ch}).permute({0,3,1,2});
