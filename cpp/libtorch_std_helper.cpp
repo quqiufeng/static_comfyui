@@ -1681,8 +1681,10 @@ void* torch_std_load_image(const char* path) {
 
 void torch_std_save_image(void* tensor, const char* path, int as_pgm) {
     try {
+        write(2, "SAVE_START\n", 11);
         auto& t = unwrap(tensor);
         auto cpu_t = t.to(torch::kCPU).to(torch::kFloat32);
+        write(2, "SAVE_CPY\n", 9);
         
         // Handle various shapes: (B,C,H,W), (C,H,W), (H,W,C), (H,W)
         at::Tensor img;

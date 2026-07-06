@@ -203,7 +203,6 @@ def save_image(inputs):
     output_dir = dict_get(inputs, "output_dir")
     if output_dir is None:
         output_dir = "/tmp/comfy_output"
-    # Save the real image
     torch.save_image(images, output_dir + "/" + filename_prefix + ".png", 0)
     return (images,)
 
