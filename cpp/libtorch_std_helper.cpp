@@ -4310,7 +4310,10 @@ void* torch_std_sdxl_unet_forward(
         // Precompute sigmas on CPU once, then argmin(|log(sigma) - log_sigmas|) on CPU
         static thread_local at::Tensor _cpu_log_sigmas = []() {
             double ls = 0.00085, le = 0.012;
-            auto betas = at::linspace(ls, le, 1000, torch::kFloat64);
+            // ComfyUI make_beta_schedule: linspace(sqrt(start), sqrt(end), n)**2
+            auto sqrt_start = std::sqrt(ls), sqrt_end = std::sqrt(le);
+            auto betas = at::linspace(sqrt_start, sqrt_end, 1000, torch::kFloat64);
+            betas = betas * betas;
             auto alpha_bar = at::cumprod(1.0 - betas, 0);
             auto sigmas = at::sqrt((1.0 - alpha_bar) / alpha_bar.clamp_min(1e-8)).clamp_min(1e-8);
             return sigmas.log().to(torch::kFloat32).contiguous();
@@ -4318,13 +4321,21 @@ void* torch_std_sdxl_unet_forward(
         auto ts_sigma = unwrap(timestep_ptr).to(torch::kFloat32).contiguous();  // CPU scalar
         float* ls_p = _cpu_log_sigmas.data_ptr<float>();
         float* s_p = ts_sigma.data_ptr<float>();
-        float log_s = s_p ? std::log(std::max(*s_p, 1e-8f)) : 0.0f;
+        float sigma_val = s_p ? *s_p : 0.0f;
+        float log_s = s_p ? std::log(std::max(sigma_val, 1e-8f)) : 0.0f;
         int best_idx = 0;
         float best_dist = std::abs(log_s - ls_p[0]);
         for (int i = 1; i < 1000; i++) {
             float d = std::abs(log_s - ls_p[i]);
             if (d < best_dist) { best_dist = d; best_idx = i; }
         }
+        static int unet_call_count = 0;
+        if (unet_call_count < 6) {
+            char buf[256];
+            int n = snprintf(buf, sizeof(buf), "UNET_CALL=%d sigma=%.4f best_idx=%d\n", unet_call_count, sigma_val, best_idx);
+            write(2, buf, n);
+        }
+        unet_call_count++;
         auto ts = at::full({1}, (float)best_idx, at::TensorOptions().dtype(torch::kFloat16).device(dev));
         // Timestep embed
         auto te = timestep_embedding(ts, 320).to(torch::kFloat16);
