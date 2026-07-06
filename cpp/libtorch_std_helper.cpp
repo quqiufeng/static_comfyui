@@ -4438,6 +4438,15 @@ void* torch_std_sdxl_unet_forward(
         h = sdxl_conv2d(h, d, "out.2", 1, 1);
         log_tensor(h, "out");
         out_fp32 = h.to(torch::kFloat32);
+        {
+            static int eps_call = 0;
+            if (eps_call < 8) {
+                char buf[128];
+                int n = snprintf(buf, sizeof(buf), "EPS_OUT call=%d mean=%.4f std=%.4f\n", eps_call, out_fp32.abs().mean().item<float>(), out_fp32.std().item<float>());
+                write(2, buf, n);
+                eps_call++;
+            }
+        }
         }  // end scope: all intermediate tensors freed
         return wrap(out_fp32);
     } catch (const std::exception& e) {
