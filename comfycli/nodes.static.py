@@ -85,7 +85,7 @@ register_node("EmptyLatentImage", "Empty Latent Image",
 
 
 def vae_decode(inputs):
-    vae = dict_get(inputs, "vae")
+    vae: VAE = dict_get(inputs, "vae")
     samples = dict_get(inputs, "samples")
     tile_size = 512
     overlap = 64
@@ -100,7 +100,7 @@ register_node("VAEDecode", "VAE Decode",
 
 
 def vae_encode(inputs):
-    vae = dict_get(inputs, "vae")
+    vae: VAE = dict_get(inputs, "vae")
     pixels = dict_get(inputs, "pixels")
     tile_size = 512
     overlap = 64

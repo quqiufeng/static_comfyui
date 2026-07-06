@@ -47,11 +47,11 @@ static void install_quiet_rnn_warning() {
 // ============================================================
 static torch::TensorOptions make_options(int dtype) {
     switch (dtype) {
-        case TORCH_DTYPE_FLOAT32: return torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
-        case TORCH_DTYPE_FLOAT64: return torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCUDA);
-        case TORCH_DTYPE_INT32:   return torch::TensorOptions().dtype(torch::kInt32).device(torch::kCUDA);
-        case TORCH_DTYPE_INT64:   return torch::TensorOptions().dtype(torch::kInt64).device(torch::kCUDA);
-        default:                  return torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
+        case TORCH_DTYPE_FLOAT32: return torch::TensorOptions().dtype(torch::kFloat32);
+        case TORCH_DTYPE_FLOAT64: return torch::TensorOptions().dtype(torch::kFloat64);
+        case TORCH_DTYPE_INT32:   return torch::TensorOptions().dtype(torch::kInt32);
+        case TORCH_DTYPE_INT64:   return torch::TensorOptions().dtype(torch::kInt64);
+        default:                  return torch::TensorOptions().dtype(torch::kFloat32);
     }
 }
 
