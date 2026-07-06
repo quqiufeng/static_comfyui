@@ -271,7 +271,7 @@ static at::Tensor vae_decoder_forward(STDict* dict, const at::Tensor& z) {
         return vae_get_tensor_f32(dict, name);
     };
 
-    auto h = z.to(torch::kCPU).to(torch::kFloat32) / 0.18215;
+    auto h = z.to(torch::kCPU).to(torch::kFloat32) / 0.13025;
     h = at::conv2d(h, load("decoder.conv_in.weight"), load("decoder.conv_in.bias"),
                    at::IntArrayRef{1,1}, at::IntArrayRef{1,1});
 

@@ -1683,23 +1683,33 @@ void torch_std_save_image(void* tensor, const char* path, int as_pgm) {
     try {
         auto& t = unwrap(tensor);
         auto cpu_t = t.to(torch::kCPU).to(torch::kFloat32);
+        // VAE DEBUG: print pixel at [100,100]
+        if (cpu_t.numel() > 0) {
+            float r, g, b;
+            if (cpu_t.dim() == 4 && cpu_t.size(1) == 3) { r=cpu_t[0][0][100][100].item<float>(); g=cpu_t[0][1][100][100].item<float>(); b=cpu_t[0][2][100][100].item<float>(); }
+            else if (cpu_t.dim() == 4 && cpu_t.size(3) == 3) { r=cpu_t[0][100][100][0].item<float>(); g=cpu_t[0][100][100][1].item<float>(); b=cpu_t[0][100][100][2].item<float>(); }
+            else if (cpu_t.dim() == 3 && cpu_t.size(0) == 3) { r=cpu_t[0][100][100].item<float>(); g=cpu_t[1][100][100].item<float>(); b=cpu_t[2][100][100].item<float>(); }
+            else if (cpu_t.dim() == 3 && cpu_t.size(2) == 3) { r=cpu_t[100][100][0].item<float>(); g=cpu_t[100][100][1].item<float>(); b=cpu_t[100][100][2].item<float>(); }
+            char buf[128];
+            int n = snprintf(buf, sizeof(buf), "VAE_PIXEL [100,100] R=%.4f G=%.4f B=%.4f\n", r, g, b);
+            write(2, buf, n);
+        }
         
         // Handle various shapes: (B,C,H,W), (C,H,W), (H,W,C), (H,W)
         at::Tensor img;
         if (cpu_t.dim() == 4) {
-            // (B,C,H,W) or (B,H,W,C) - squeeze batch dim
             if (cpu_t.size(0) == 1) cpu_t = cpu_t.squeeze(0);
             if (cpu_t.dim() == 3) {
-                if (cpu_t.size(0) <= 4) img = cpu_t.permute({1,2,0});  // (C,H,W)→(H,W,C)
-                else img = cpu_t;  // (H,W,C)
+                if (cpu_t.size(0) <= 4) img = cpu_t.permute({1,2,0}).contiguous();
+                else img = cpu_t.contiguous();
             } else {
                 img = cpu_t;
             }
         } else if (cpu_t.dim() == 3) {
-            if (cpu_t.size(0) <= 4) {  // (C,H,W)
-                img = cpu_t.permute({1,2,0});  // → (H,W,C)
+            if (cpu_t.size(0) <= 4) {
+                img = cpu_t.permute({1,2,0}).contiguous();
             } else {
-                img = cpu_t;  // (H,W,C)
+                img = cpu_t.contiguous();
             }
         } else {
             img = cpu_t;
@@ -4223,7 +4233,9 @@ void* torch_std_sdxl_unet_jit_forward(
         // Convert sigma to timestep index (matching ComfyUI)
         static thread_local at::Tensor _cpu_log_sigmas = []() {
             double ls = 0.00085, le = 0.012;
-            auto betas = at::linspace(ls, le, 1000, torch::kFloat64);
+            double sqrt_start = std::sqrt(ls), sqrt_end = std::sqrt(le);
+            auto betas = at::linspace(sqrt_start, sqrt_end, 1000, torch::kFloat64);
+            betas = betas * betas;
             auto alpha_bar = at::cumprod(1.0 - betas, 0);
             auto sigmas = at::sqrt((1.0 - alpha_bar) / alpha_bar.clamp_min(1e-8)).clamp_min(1e-8);
             return sigmas.log().to(torch::kFloat32).contiguous();
