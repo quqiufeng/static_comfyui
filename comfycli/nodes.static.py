@@ -85,13 +85,10 @@ register_node("EmptyLatentImage", "Empty Latent Image",
 
 
 def vae_decode(inputs):
-    vae: VAE = dict_get(inputs, "vae")
+    vae_obj: VAE = dict_get(inputs, "vae")
     samples = dict_get(inputs, "samples")
-    tile_size = 512
-    overlap = 64
     latent_tensor = dict_get(samples, "samples")
-    vae_ptr = vae.vae_ptr
-    image = torch.vae_decode_tiled(vae_ptr, latent_tensor, tile_size, overlap)
+    image = torch.vae_decode_from_dict(vae_obj.vae_ptr, latent_tensor)
     return (image,)
 
 

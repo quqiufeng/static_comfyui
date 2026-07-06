@@ -155,3 +155,154 @@ extern "C" void* torch_std_clip_text_forward_from_dict(void* clip_dict, void* to
     }
 }
 
+// ============================================================
+// VAE Decoder: 从 safetensors 权重构建前向计算
+// ============================================================
+
+// 从 STDict 按名称获取 tensor
+static at::Tensor vae_get_tensor(STDict* d, const char* name) {
+    // Try exact name first
+    for (int i = 0; i < d->count; i++) {
+        if (strcmp(d->entries[i].name, name) == 0)
+            return *static_cast<torch::Tensor*>(d->entries[i].tensor);
+    }
+    // Try with first_stage_model. prefix (checkpoint format)
+    char buf[256];
+    snprintf(buf, sizeof(buf), "first_stage_model.%s", name);
+    for (int i = 0; i < d->count; i++) {
+        if (strcmp(d->entries[i].name, buf) == 0)
+            return *static_cast<torch::Tensor*>(d->entries[i].tensor);
+    }
+    std::cerr << "vae: tensor not found: " << name << std::endl;
+    return at::Tensor();
+}
+
+// Load VAE weight and convert to fp32 (conv2d requires matching input/output dtypes)
+static at::Tensor vae_get_tensor_f32(STDict* d, const char* name) {
+    auto t = vae_get_tensor_f32(d, name);
+    if (t.defined()) return t.to(torch::kFloat32);
+    return t;
+}
+
+// GroupNorm + silu
+static at::Tensor vae_gn_silu(const at::Tensor& x, const at::Tensor& w,
+                               const at::Tensor& b, int groups) {
+    int C = x.size(1);
+    return at::silu(at::group_norm(x, groups, w, b, 1e-6));
+}
+
+// ResnetBlock: norm → silu → conv → norm → silu → conv + skip
+static at::Tensor vae_resblock(STDict* d, const at::Tensor& x,
+                                const std::string& prefix, int ch) {
+    char buf[256];
+    auto norm1_w = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.norm1.weight", prefix.c_str()), buf));
+    auto norm1_b = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.norm1.bias", prefix.c_str()), buf));
+    auto conv1_w = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.conv1.weight", prefix.c_str()), buf));
+    auto conv1_b = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.conv1.bias", prefix.c_str()), buf));
+    auto norm2_w = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.norm2.weight", prefix.c_str()), buf));
+    auto norm2_b = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.norm2.bias", prefix.c_str()), buf));
+    auto conv2_w = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.conv2.weight", prefix.c_str()), buf));
+    auto conv2_b = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.conv2.bias", prefix.c_str()), buf));
+    if (!conv1_w.defined()) throw std::runtime_error(std::string("VAE missing: ") + prefix + ".conv1.weight");
+
+    // nin_shortcut if channel changes
+    bool has_shortcut = false;
+    at::Tensor shortcut_w, shortcut_b;
+    auto t = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.nin_shortcut.weight", prefix.c_str()), buf));
+    if (t.defined()) {
+        has_shortcut = true;
+        shortcut_w = t;
+        shortcut_b = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.nin_shortcut.bias", prefix.c_str()), buf));
+    }
+
+    auto h = vae_gn_silu(x, norm1_w, norm1_b, 32);
+    h = at::conv2d(h, conv1_w, conv1_b, at::IntArrayRef{1,1}, at::IntArrayRef{1,1});
+    h = vae_gn_silu(h, norm2_w, norm2_b, 32);
+    h = at::conv2d(h, conv2_w, conv2_b, at::IntArrayRef{1,1}, at::IntArrayRef{1,1});
+    if (has_shortcut)
+        h = h + at::conv2d(x, shortcut_w, shortcut_b, at::IntArrayRef{1,1}, at::IntArrayRef{0,0});
+    else
+        h = h + x;
+    return h;
+}
+
+// Spatial attention block
+static at::Tensor vae_attn(STDict* d, const at::Tensor& x,
+                             const std::string& prefix) {
+    char buf[256];
+    auto norm_w = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.norm.weight", prefix.c_str()), buf));
+    auto norm_b = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.norm.bias", prefix.c_str()), buf));
+    auto q_w = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.q.weight", prefix.c_str()), buf));
+    auto k_w = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.k.weight", prefix.c_str()), buf));
+    auto v_w = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.v.weight", prefix.c_str()), buf));
+    auto proj_w = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.proj_out.weight", prefix.c_str()), buf));
+    auto proj_b = vae_get_tensor_f32(d, (snprintf(buf, sizeof(buf), "%s.proj_out.bias", prefix.c_str()), buf));
+
+    int C = x.size(1);
+    auto h = at::group_norm(x, 32, norm_w, norm_b, 1e-6);
+    int B = h.size(0), H = h.size(2), W = h.size(3);
+    auto q = at::conv2d(h, q_w, at::nullopt, at::IntArrayRef{1,1}, at::IntArrayRef{0,0}).view({B, C, H*W}).transpose(1,2);
+    auto k = at::conv2d(h, k_w, at::nullopt, at::IntArrayRef{1,1}, at::IntArrayRef{0,0}).view({B, C, H*W}).transpose(1,2);
+    auto v = at::conv2d(h, v_w, at::nullopt, at::IntArrayRef{1,1}, at::IntArrayRef{0,0}).view({B, C, H*W}).transpose(1,2);
+    auto attn = at::softmax(q.matmul(k.transpose(-2,-1)) / std::sqrt((double)C), -1);
+    h = attn.matmul(v).transpose(1,2).view({B, C, H, W});
+    h = at::conv2d(h, proj_w, proj_b, at::IntArrayRef{1,1}, at::IntArrayRef{0,0});
+    return x + h;
+}
+
+// 完整 VAE Decoder forward
+static at::Tensor vae_decoder_forward(STDict* dict, const at::Tensor& z) {
+    auto load = [&](const char* name) { return vae_get_tensor(dict, name); };
+
+    // Move to CPU and convert to fp32 (weights are fp16 CPU)
+    auto h = z.to(torch::kCPU).to(torch::kFloat32) / 0.18215;
+
+    // conv_in
+    { auto w = vae_get_tensor_f32(dict, "decoder.conv_in.weight"); if (!w.defined()) throw std::runtime_error("VAE missing: decoder.conv_in.weight");
+      auto b = vae_get_tensor_f32(dict, "decoder.conv_in.bias"); if (!b.defined()) throw std::runtime_error("VAE missing: decoder.conv_in.bias");
+      h = at::conv2d(h, w, b, at::IntArrayRef{1,1}, at::IntArrayRef{1,1}); }
+
+    // Mid block
+    h = vae_resblock(dict, h, "decoder.mid.block_1", 512);
+    h = vae_attn(dict, h, "decoder.mid.attn_1");
+    h = vae_resblock(dict, h, "decoder.mid.block_2", 512);
+
+    // Up blocks: 4 levels. Level 0 has 3 blocks + NO upsample
+    // Levels 1-3 have 3 blocks + upsample (interpolate + conv2d)
+    for (int level = 0; level < 4; level++) {
+        for (int b = 0; b < 3; b++) {
+            char buf[256];
+            snprintf(buf, sizeof(buf), "decoder.up.%d.block.%d", level, b);
+            h = vae_resblock(dict, h, buf, 0);
+        }
+        if (level > 0) {
+            namespace F = torch::nn::functional;
+            h = F::interpolate(h, F::InterpolateFuncOptions().scale_factor(std::vector<double>{2.0, 2.0}).mode(torch::kNearest));
+            char buf[256];
+            snprintf(buf, sizeof(buf), "decoder.up.%d.upsample.conv", level);
+            auto uc = vae_get_tensor_f32(dict, (snprintf(buf, sizeof(buf), "%s.weight", buf), buf));
+            auto ub = vae_get_tensor_f32(dict, (snprintf(buf, sizeof(buf), "%s.bias", buf), buf));
+            h = at::conv2d(h, uc, ub, at::IntArrayRef{1,1}, at::IntArrayRef{1,1});
+        }
+    }
+
+    // norm_out + conv_out
+    auto no_w = vae_get_tensor_f32(dict, "decoder.norm_out.weight");
+    auto no_b = vae_get_tensor_f32(dict, "decoder.norm_out.bias");
+    h = at::silu(at::group_norm(h, 32, no_w, no_b, 1e-6));
+    h = at::conv2d(h, vae_get_tensor_f32(dict, "decoder.conv_out.weight"), vae_get_tensor_f32(dict, "decoder.conv_out.bias"), at::IntArrayRef{1,1}, at::IntArrayRef{1,1});
+    return h;
+}
+
+extern "C" void* torch_std_vae_decode_from_dict(void* vae_dict, void* latent) {
+    try {
+        auto* dict = static_cast<STDict*>(vae_dict);
+        auto& lat = unwrap(latent);
+        auto result = vae_decoder_forward(dict, lat);
+        return wrap(result.to(torch::kFloat16).to(torch::kCUDA));
+    } catch (const std::exception& e) {
+        std::cerr << "vae_decode_from_dict error: " << e.what() << std::endl;
+        return nullptr;
+    }
+}
+

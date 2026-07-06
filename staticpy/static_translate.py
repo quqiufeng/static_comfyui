@@ -415,6 +415,7 @@ MODULE_FN_RETURN_TYPES = {
     "torch-controlnet-apply": Type("torch-tensor"),
     "torch-vae-encode-tiled": Type("torch-tensor"),
         "torch-vae-decode-tiled": Type("torch-tensor"),
+    "torch-vae-decode-from-dict": Type("torch-tensor"),
         "torch-clip-tokenizer-create": Type("ptr"),
         "torch-clip-tokenizer-encode": Type("torch-tensor"),
         "torch-clip-tokenizer-free": Type("void"),
@@ -2388,7 +2389,8 @@ def translate_expr(node):
                     "controlnet_apply": "torch-controlnet-apply",
                     # VAE tiling
                     "vae_encode_tiled": "torch-vae-encode-tiled",
-                    "vae_decode_tiled": "torch-vae-decode-tiled",
+        "vae_decode_tiled": "torch-vae-decode-tiled",
+        "vae_decode_from_dict": "torch-vae-decode-from-dict",
                     # GGUF
                     "gguf_load": "torch-gguf-load",
                     "gguf_tensor_count": "torch-gguf-tensor-count",

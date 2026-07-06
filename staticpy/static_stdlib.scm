@@ -750,6 +750,7 @@
 ;; VAE tiling
 (define torch-std-vae-encode-tiled #f)
 (define torch-std-vae-decode-tiled #f)
+(define torch-std-vae-decode-from-dict #f)
 ;; CLIP tokenizer
 (define torch-std-clip-tokenizer-create #f)
 (define torch-std-clip-tokenizer-encode #f)
@@ -1079,6 +1080,8 @@
     (foreign-procedure "torch_std_vae_encode_tiled" (void* void* int int) void*))
   (set! torch-std-vae-decode-tiled
     (foreign-procedure "torch_std_vae_decode_tiled" (void* void* int int) void*))
+  (set! torch-std-vae-decode-from-dict
+    (foreign-procedure "torch_std_vae_decode_from_dict" (void* void*) void*))
 
   ;; ---- CLIP BPE tokenizer ----
   (set! torch-std-clip-tokenizer-create
@@ -2224,6 +2227,15 @@ Returns (B,4,H,W) output latent (autograd graph built)"
         (torch-std-vae-decode-tiled
           vae-module
           (tagged-tensor-ptr latent) tile-size overlap)))))
+
+(define (torch-vae-decode-from-dict vae-dict latent)
+  "VAE decode from safetensors dict，返回 tagged tensor"
+  (torch-check "torch not available"
+    (lambda ()
+      (make-tagged-tensor-auto
+        (torch-std-vae-decode-from-dict
+          vae-dict
+          (tagged-tensor-ptr latent))))))
 
 ;; ====== CLIP BPE Tokenizer ======
 
