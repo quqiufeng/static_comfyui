@@ -41,7 +41,6 @@ def dual_clip_loader(inputs):
     dict_set(result, "clip_g", clip_g_sd)
     dict_set(result, "clip_l", clip_l_sd)
     return (result,)
-    return (result,)
 
 
 register_node("DualCLIPLoader", "Dual CLIP Loader",
@@ -131,25 +130,23 @@ def k_sampler_inner(inputs):
     h = tensor_shape_dim(latent_tensor, 2)
     w = tensor_shape_dim(latent_tensor, 3)
     torch.manual_seed(seed)
-    if cond is None: print("cond is None")
-    if uncond is None: print("uncond is None")
-    if pooled_pos is None: print("pooled_pos is None")
-    if pooled_neg is None: print("pooled_neg is None")
     noise = torch.randn([1, 4, h, w])
-    sigma_min = 0.029
-    sigma_max = 14.615
-    sigmas = torch.sampler_sigmas(steps, sigma_min, sigma_max, scheduler)
+    sigmas = torch.sampler_sigmas(steps, 0.029, 14.615, scheduler)
     sigmas = torch.to_cpu(sigmas)
-    x = torch.mul(noise, sigmas[0])  # scale noise by sigma_max (ComfyUI noise_scaling)
+    x = torch.mul(noise, sigmas[0])
     sd_handle = model.sd_handle
     n = 0
     while n < steps:
         sigma_t = torch.narrow(sigmas, 0, n, 1)
         sigma_prev = torch.narrow(sigmas, 0, n + 1, 1)
         s_in = sigma_t
+        # model_fn returns EPS prediction
         cond_out = model_fn(sd_handle, x, s_in, cond, pooled_pos)
         uncond_out = model_fn(sd_handle, x, s_in, uncond, pooled_neg)
-        x = torch.euler_step(x, sigma_t, sigma_prev, cond_out, uncond_out, cfg)
+        # CFG on EPS
+        eps = uncond_out + torch.mul(torch.sub(cond_out, uncond_out), cfg)
+        # Euler step: x = x + eps * (sigma_next - sigma_t)
+        x = x + torch.mul(eps, torch.sub(sigma_prev, sigma_t))
         n = n + 1
     result = make_dict()
     dict_set(result, "samples", x)
@@ -163,7 +160,6 @@ def model_fn(sd_handle, x, sigma, text_emb, pooled_emb):
     crop_l = 0.0
     ts_h = 1024.0
     ts_w = 1024.0
-    # calculate_input: move sigma to x's device, compute x / sqrt(sigma^2 + 1)
     sigma_d = torch.to_cuda(sigma)
     sigma_2 = torch.mul(sigma_d, sigma_d)
     factor = torch.add(sigma_2, 1.0)
