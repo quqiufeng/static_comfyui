@@ -142,10 +142,89 @@ $ file /tmp/output.png
 PNG image data, 1024 x 1024, 8-bit/color RGB, non-interlaced
 ```
 
+## stable-diffusion-cli.cpp
+
+基于 stable-diffusion.cpp C API 的 SDXL txt2img，单 C++ 文件。
+
+### 路径
+```
+/opt/static_comfyui/cpp/stable-diffusion-cli.cpp
+```
+
+### 编译
+```bash
+cd cpp
+SD=/opt/stable-diffusion.cpp
+GGML=$SD/build/ggml/src
+CUDA=/data/cuda/targets/x86_64-linux/lib
+g++ -O3 -std=gnu++17 stable-diffusion-cli.cpp \
+    -I$SD/include \
+    $SD/build/libstable-diffusion.a \
+    $GGML/libggml.a $GGML/libggml-base.a $GGML/libggml-cpu.a \
+    -Wl,--whole-archive $GGML/ggml-cuda/libggml-cuda.a -Wl,--no-whole-archive \
+    -ldl -lpthread -lm -lgomp \
+    $CUDA/libcudart.so $CUDA/libcublas.so.12.6.4.1 \
+    $CUDA/libcublasLt.so.12.6.4.1 $CUDA/stubs/libcuda.so \
+    $CUDA/libculibos.a \
+    -L/usr/lib/x86_64-linux-gnu -lz -ljpeg -lwebp -lpng \
+    -o stable-diffusion-cli
+```
+
+### 运行的 API 调用路径
+```
+main()
+  └── sd_ctx_params_init()           ← 初始化上下文参数
+  └── new_sd_ctx()                   ← 创建 SD 上下文
+        └── StableDiffusionGGML::init()  ← 加载模型 + CLIP + VAE
+  └── sd_img_gen_params_init()       ← 初始化生成参数
+  └── generate_image()               ← 生成图像
+        ├── prepare_image_generation_latents()   ← 创建噪声
+        ├── prepare_image_generation_embeds()     ← CLIP 编码
+        └── StableDiffusionGGML::sample()        ← 采样循环
+              ├── Karras sigmas
+              ├── Cond UNet forward
+              ├── Uncond UNet forward
+              ├── CFG: uncond + scale*(cond - uncond)
+              └── Euler step
+  └── free_sd_ctx()                  ← 释放上下文
+```
+
+### 用到的 stable-diffusion.cpp API
+| API | 头文件 | 作用 |
+|-----|--------|------|
+| `sd_ctx_params_init()` | `stable-diffusion.h` | 初始化上下文参数结构体 |
+| `new_sd_ctx()` | `stable-diffusion.h` | 创建推理上下文（加载模型） |
+| `sd_img_gen_params_init()` | `stable-diffusion.h` | 初始化生成参数结构体 |
+| `generate_image()` | `stable-diffusion.h` | 执行 txt2img 管线 |
+| `free_sd_ctx()` | `stable-diffusion.h` | 释放上下文 |
+| `sd_image_t` | `stable-diffusion.h` | 图像数据结构体 |
+
+### 第三方库依赖
+| 库 | 作用 | 来源 |
+|----|------|------|
+| libstable-diffusion.a | stable-diffusion.cpp 静态库 | /opt/stable-diffusion.cpp/build |
+| libggml.a / libggml-base.a / libggml-cpu.a | GGML 张量计算库 | stable-diffusion.cpp 自带 |
+| libggml-cuda.a | GGML CUDA 后端 | stable-diffusion.cpp 自带 |
+| libcudart.so / libcublas.so / libcublasLt.so | CUDA 运行时 + cuBLAS | CUDA 12 |
+| libcuda.so | CUDA 驱动 API | CUDA 12 |
+| libculibos.a | CUDA 设备库 | CUDA 12 |
+| libz / libjpeg / libwebp / libpng | 图像 I/O | 系统 |
+
+### 运行
+```bash
+LD_LIBRARY_PATH=/data/cuda/targets/x86_64-linux/lib \
+  ./stable-diffusion-cli -p "prompt" -n "negative" --steps 20 --cfg 7 -s 42
+```
+
+### 输出
+```
+/tmp/sd_cli_output.ppm (PPM 格式, 1024×1024, ~12秒)
+```
+
 ### 与 Python 参考的对比
-| 指标 | sdxl_pipeline.py (ComfyUI) | img.sh (stable-diffusion.cpp) |
-|------|---------------------------|-------------------------------|
-| 后端 | PyTorch + ComfyUI | GGML + stable-diffusion.cpp |
-| 速度 | ~6秒/20步 | ~12秒/20步 |
-| 输出 | ~1.3MB PNG | ~2MB PNG |
-| 依赖 | Python, PyTorch, ComfyUI | 独立 ELF 二进制 |
+| 指标 | sdxl_pipeline.py (ComfyUI) | img.sh (stable-diffusion.cpp) | stable-diffusion-cli.cpp |
+|------|---------------------------|-------------------------------|--------------------------|
+| 后端 | PyTorch + ComfyUI | GGML + stable-diffusion.cpp | stable-diffusion.cpp C API |
+| 速度 | ~6秒/20步 | ~12秒/20步 | ~12秒/20步 |
+| 输出 | ~1.3MB PNG | ~2MB PNG | ~3MB PPM |
+| 依赖 | Python, PyTorch | 独立 ELF | 独立 ELF |
