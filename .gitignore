@@ -227,6 +227,9 @@ sd_generate*.elf
 # ComfyUI source (read-only reference, not part of this project)
 ComfyUI/
 
+# GGML (third-party tensor library, not part of this project)
+ggml_repo/
+
 # ML model files (binary)
 *.bin
 *.pt

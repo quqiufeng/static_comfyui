@@ -1,5 +1,51 @@
 # ComfyUI StaticPy 重写方案
 
+## GGML 引擎（SDXL 推理后端）
+
+`cpp/ggml_engine/` 是基于 GGML 的 SDXL 推理引擎，零 libtorch 依赖。
+
+### 目录结构
+```
+cpp/ggml_engine/
+├── engine.h              # 对外 C API
+├── engine.cpp            # 实现（safetensors 加载 + UNet + 采样）
+├── sdxl_standalone.cpp   # 单文件 CLI 入口
+├── ggml_repo/            # GGML 库（git 子模块，.gitignore 排除）
+└── sd/                   # 从 stable-diffusion.cpp 复制的源码
+```
+
+### 编译（CUDA）
+```bash
+cd cpp/ggml_engine
+GGML=ggml_repo
+g++ -O1 -std=gnu++17 -DGGML_MAX_NAME=128 \
+    engine.cpp sdxl_standalone.cpp \
+    -I. -I$GGML/include \
+    $GGML/build/src/libggml.a \
+    $GGML/build/src/libggml-base.a \
+    $GGML/build/src/libggml-cpu.a \
+    -Wl,--whole-archive $GGML/build/src/ggml-cuda/libggml-cuda.a -Wl,--no-whole-archive \
+    -ldl -lpthread -lm -lgomp \
+    /data/cuda/targets/x86_64-linux/lib/libcudart.so \
+    /data/cuda/targets/x86_64-linux/lib/stubs/libcublas.so \
+    /data/cuda/targets/x86_64-linux/lib/stubs/libcublasLt.so \
+    /data/cuda/targets/x86_64-linux/lib/stubs/libcuda.so \
+    /data/cuda/targets/x86_64-linux/lib/libculibos.a \
+    -o sdxl_ggml
+```
+
+**注意**：GGML 必须用 `cmake -DGGML_CUDA=ON` 编译。
+
+### 运行
+```bash
+./sdxl_ggml -p "prompt" -n "negative" --steps 20 --cfg 7 -s 42 -o /tmp/out.ppm
+```
+
+### 依赖
+- GGML（cloned to `ggml_repo/`，需 CUDA 编译）
+- 无 libtorch
+- 无 stable-diffusion.cpp（源码已复制到 `sd/`）
+
 ## 模型文件位置（调试用）
 
 | 模型 | 路径 | 大小 | 格式 |
