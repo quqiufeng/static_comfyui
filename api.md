@@ -176,6 +176,97 @@ main()
 | `ggml_nbytes()` | tensor 字节数 | — |
 | `ggml_nelements()` | tensor 元素数 | — |
 
+## v2 简化版提取方案
+
+### 背景与诉求
+
+- 现有 `cpp/stable-diffusion-cli_v1.cpp` 依赖 `/opt/stable-diffusion.cpp` 项目的静态库/源码，部署不独立。
+- 目标：把 v1 实际用到的代码从 `/opt/stable-diffusion.cpp` 提取出来，放到 `cpp/lib/sd/` 下，编译后彻底摆脱 `/opt/stable-diffusion.cpp`。
+- GGML 使用本地已存在的 `/opt/static_comfyui/ggml_repo`（通过 `cpp/ggml` 引用），不抽取 GGML 源码。
+- 后续上游有更新时，按提取清单重新同步对应函数实现即可。
+
+### 提取策略
+
+按 **函数/类级别** 提取，而非复制整个文件：
+
+1. 以 v1 的 5 个 API 入口为根：
+   - `sd_ctx_params_init()`
+   - `new_sd_ctx()`
+   - `sd_img_gen_params_init()`
+   - `generate_image()`
+   - `free_sd_ctx()`
+
+2. 用 code search 展开每个函数调用了谁，递归到没有新依赖为止，只保留 **SDXL txt2img + Euler + Karras** 路径上的函数和类。
+
+3. 不搬运的分支（v1 未调用）：
+   - SD1.5 / SD2.x / SD3 / Flux / Wan / LTX / Anima / HiDream / Qwen-Image 等模型
+   - LoRA / ControlNet / IP-Adapter / PhotoMaker
+   - img2img / inpaint / hires-fix / 视频生成
+   - 不使用的 schedulers 和 samplers（只留 Karras + Euler）
+
+### 目标目录结构
+
+```
+cpp/
+├── ggml -> /opt/static_comfyui/ggml_repo          # 本地 GGML，只链接不抽取
+├── lib/sd/
+│   ├── include/
+│   │   └── sd_api.h                                # 新 C API 头文件
+│   ├── src/
+│   │   ├── sd_context.cpp                          # init/sample/decode 主流程
+│   │   ├── model_loader.cpp                        # 权重加载（safetensors）
+│   │   ├── unet_model.cpp                          # SDXL UNet
+│   │   ├── clip_model.cpp                          # CLIP-L + CLIP-G
+│   │   ├── vae_model.cpp                           # VAE decode
+│   │   ├── common_blocks.cpp                       # ResBlock/Attention/SpatialTransformer
+│   │   ├── sampler.cpp                             # Euler + Karras
+│   │   ├── conditioner.cpp                         # SDXL 文本条件/y 向量
+│   │   ├── guidance.cpp                            # CFG
+│   │   ├── tokenizer.cpp                           # CLIP tokenizer
+│   │   ├── safetensors_io.cpp                      # safetensors 读取
+│   │   └── utils.cpp                               # 辅助函数/工具类
+│   ├── thirdparty/
+│   │   ├── zip.c / zip.h                           # 如需要兼容 .ckpt 时再用
+│   │   ├── json.hpp                                # safetensors metadata
+│   │   └── stb_image*.h                            # 图像 I/O
+│   ├── CMakeLists.txt
+│   └── EXTRACTED_FROM                              # 提取清单：函数/类/原文件/行号
+└── stable-diffusion-cli_v2.cpp                     # 使用新 API 的 v2 客户端
+```
+
+### 实施步骤
+
+1. **创建目录结构**：`cpp/lib/sd/{include,src,thirdparty}`。
+2. **生成依赖清单**：用 code search 从 v1 的 5 个 API 入口递归展开，得到必须提取的函数和类列表。
+3. **按清单提取代码**：把每个函数/类的声明和实现从 `/opt/stable-diffusion.cpp` 复制到 `cpp/lib/sd/src/` 对应的新文件中。
+4. **调整 include 路径**：把原项目内部路径（如 `#include "model.h"`）改为新目录的相对路径。
+5. **精简 `sd_context.cpp`**：只保留 SDXL txt2img 分支，删除其他模型/功能分支。
+6. **定义新 API**：`sd_api.h` 保持与 v1 兼容的 C 结构体，函数由 `cpp/lib/sd` 自己实现。
+7. **编写 `stable-diffusion-cli_v2.cpp`**：命令行参数与 v1 保持一致。
+8. **编译 GGML**：在 `ggml_repo` 中构建 `libggml*.a`。
+9. **编译 `libsd.a`**：在 `cpp/lib/sd` 中构建静态库。
+10. **编译 v2 并验证**：链接 `libsd.a` + `libggml*.a`，运行 SDXL txt2img 出图。
+
+### 同步策略
+
+- 维护 `EXTRACTED_FROM` 清单，记录每个函数的来源文件和行号范围。
+- `/opt/stable-diffusion.cpp` 更新时，按清单重新提取对应函数，再重新删减分支。
+- 由于按函数级别提取，同步粒度可控。
+
+### 验收标准
+
+```bash
+./cpp/stable-diffusion-cli_v2 \
+  -m /data/models/image/sd_xl_base_1.0.safetensors \
+  --clip-l /data/models/image/clip_l.safetensors \
+  --clip-g /data/models/image/clip_g.safetensors \
+  -p "cat" -n "blurry" \
+  -W 1024 -H 1024 --steps 20 --cfg 7 -s 42 \
+  -o /tmp/v2.png
+```
+
+能够成功生成图片，即表示 v1 代码路径已成功提取并独立运行。
+
 ## 关键设计模式
 
 1. **params_ctx**: `ggml_init({MAX_TENSORS×overhead, NULL, true})` — no_alloc=true, 只为 metadata
