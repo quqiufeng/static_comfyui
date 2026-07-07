@@ -4,20 +4,46 @@
 
 `cpp/ggml_engine/` 是基于 GGML 的 SDXL 推理引擎，零 libtorch 依赖。
 
+### 架构
+
+```
+GGML (tensor library) ──→ engine.cpp ──→ engine.h (C API) ──→ sdxl_standalone.cpp
+```
+
+- **engine.h**: 对外 C API（`sdxl_new`, `sdxl_unet_forward`, `sdxl_txt2img`）
+- **engine.cpp**: 实现（safetensors 加载、GGML tensor 管理、UNet graph 构建、采样循环）
+- **sdxl_standalone.cpp**: CLI 入口，<60 行
+
+### 数据流（forward pass）
+
+```
+graph ctx (no_alloc=true, metadata only)
+  ├── 输入 tensors（inp, ts, pt, context, time_id scalars）
+  ├── 权重 tensors（F32, in W.ctx, CPU memory）
+  ├── UNet graph（ggml ops: conv2d, mul_mat, group_norm, silu, add）
+  ├── gallocr（CPU backend buffer type → allocates GPU memory）
+  ├── memcpy（input data → GPU pointers）
+  ├── ggml_backend_graph_compute
+  └── memcpy（result → host）
+```
+
+**关键顺序**：compute → COPY OUT → gallocr_free（！buffer 读取必须在 free 之前）
+
 ### 目录结构
 ```
 cpp/ggml_engine/
 ├── engine.h              # 对外 C API
-├── engine.cpp            # 实现（safetensors 加载 + UNet + 采样）
+├── engine.cpp            # 实现
 ├── sdxl_standalone.cpp   # 单文件 CLI 入口
-├── ggml_repo/            # GGML 库（git 子模块，.gitignore 排除）
-└── sd/                   # 从 stable-diffusion.cpp 复制的源码
+├── ggml_repo/            # GGML 库（.gitignore 排除）
+└── test_cuda2.cpp        # CUDA backend 验证测试
 ```
 
-### 编译（CUDA）
+### 编译（CPU backend + CUDA 符号静态链接）
 ```bash
 cd cpp/ggml_engine
 GGML=ggml_repo
+CUDALIB=/data/cuda/targets/x86_64-linux/lib
 g++ -O1 -std=gnu++17 -DGGML_MAX_NAME=128 \
     engine.cpp sdxl_standalone.cpp \
     -I. -I$GGML/include \
@@ -26,25 +52,48 @@ g++ -O1 -std=gnu++17 -DGGML_MAX_NAME=128 \
     $GGML/build/src/libggml-cpu.a \
     -Wl,--whole-archive $GGML/build/src/ggml-cuda/libggml-cuda.a -Wl,--no-whole-archive \
     -ldl -lpthread -lm -lgomp \
-    /data/cuda/targets/x86_64-linux/lib/libcudart.so \
-    /data/cuda/targets/x86_64-linux/lib/stubs/libcublas.so \
-    /data/cuda/targets/x86_64-linux/lib/stubs/libcublasLt.so \
-    /data/cuda/targets/x86_64-linux/lib/stubs/libcuda.so \
-    /data/cuda/targets/x86_64-linux/lib/libculibos.a \
+    $CUDALIB/libcudart.so \
+    $CUDALIB/libcublas.so.12.6.4.1 \
+    $CUDALIB/libcublasLt.so.12.6.4.1 \
+    $CUDALIB/stubs/libcuda.so \
+    $CUDALIB/libculibos.a \
     -o sdxl_ggml
 ```
 
-**注意**：GGML 必须用 `cmake -DGGML_CUDA=ON` 编译。
+**注意**：GGML 必须 `cmake -DGGML_CUDA=ON` 编译。当前使用 CPU backend 计算（F32 权重 + gallocr），单步 ~60s。
 
 ### 运行
 ```bash
 ./sdxl_ggml -p "prompt" -n "negative" --steps 20 --cfg 7 -s 42 -o /tmp/out.ppm
 ```
 
+### 状态
+| 组件 | 状态 | 说明 |
+|------|------|------|
+| safetensors 加载 | ✅ | 自研解析器，F16→F32 转换 |
+| 权重管理 | ✅ | F32 CPU tensors + 前缀剥离 |
+| UNet graph（resblock） | ✅ | encoder + decoder + skip + upsample |
+| UNet graph（attention） | ❌ | SpatialTransformer permute/reshape 有 bug |
+| Denoiser | ✅ | Karras sigmas + sigma_to_t + get_scalings |
+| 采样循环 | ✅ | Euler + CFG（占位符） |
+| CPU backend + gallocr | ✅ | no_alloc=true → gallocr alloc → compute → copy out |
+| CUDA backend | ⚠️ | test_cuda2 验证通过，engine 集成需权重 GPU 化 |
+| CLIP 编码 | ❌ | 未开始 |
+| VAE 解码 | ❌ | 未开始 |
+| Attention block | ❌ | 已实现但 reshape 有 bug |
+
+### 已验证（test_cuda2.cpp）
+```
+CUDA backend + gallocr:
+no_alloc=true → create tensors → gallocr(CUDA) → 
+backend_tensor_set → backend_graph_compute → backend_tensor_get
+→ result[0]=1280.0 ✅
+```
+
 ### 依赖
-- GGML（cloned to `ggml_repo/`，需 CUDA 编译）
+- GGML（cloned to `ggml_repo/`）
 - 无 libtorch
-- 无 stable-diffusion.cpp（源码已复制到 `sd/`）
+- 无 stable-diffusion.cpp
 
 ## 模型文件位置（调试用）
 
