@@ -238,3 +238,4 @@ ggml_repo/
 *.safetensors
 *.gguf
 *.ggml
+ggml_repo/
