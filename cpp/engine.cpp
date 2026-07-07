@@ -126,25 +126,38 @@ static struct ggml_tensor*build_unet(struct ggml_context*c,WT&w,struct ggml_tens
     ob(1280,false);ob(1280,false);ob(1280,true);ob(640,false);ob(640,false);ob(640,true);
     ob(320,false);ob(320,false);ob(320,false);hh=gn_silu(c,hh,32,"out.0",w);return conv(c,hh,"out.2",w,1,1);}
 
-// UNet compute + VAE decode in one graph
-static bool compute(sdxl_ctx*ctx,const std::vector<float>&inp,int lh,int lw,float ts_v,std::vector<float>&out){
-    ggml_init_params gp={64*1024*1024,NULL,true};auto*gctx=ggml_init(gp);if(!gctx)return false;
+// UNet compute per step
+static bool compute_unet(sdxl_ctx*ctx,const std::vector<float>&inp,int lh,int lw,float ts_v,std::vector<float>&out){
+    ggml_init_params gp={32*1024*1024,NULL,true};auto*gctx=ggml_init(gp);if(!gctx)return false;
     auto*inp_t=ggml_new_tensor_4d(gctx,GGML_TYPE_F32,lw,lh,4,1);auto*ts=ggml_new_tensor_1d(gctx,GGML_TYPE_F32,1);
     auto*te=ggml_timestep_embedding(gctx,ts,320,10000);te=lin(gctx,te,"time_embed.0",ctx->w);te=ggml_silu(gctx,te);te=lin(gctx,te,"time_embed.2",ctx->w);
     auto ev=[&](float v){auto*t=ggml_new_tensor_1d(gctx,GGML_TYPE_F32,1);return ggml_timestep_embedding(gctx,t,256,10000);};
     auto*ae=ggml_concat(gctx,ev(128.f),ev(128.f),0);ae=ggml_concat(gctx,ae,ev(0),0);ae=ggml_concat(gctx,ae,ev(0),0);
     ae=ggml_concat(gctx,ae,ev(128.f),0);ae=ggml_concat(gctx,ae,ev(128.f),0);auto*pt=ggml_new_tensor_1d(gctx,GGML_TYPE_F32,1280);
     ae=ggml_concat(gctx,pt,ae,0);ae=lin(gctx,ae,"label_emb.0.0",ctx->w);ae=ggml_silu(gctx,ae);ae=lin(gctx,ae,"label_emb.0.2",ctx->w);te=ggml_add(gctx,te,ae);
-    auto*unet_out=build_unet(gctx,ctx->w,inp_t,te);
-    // VAE decoder
-    auto rb_v=[&](ggml_tensor*x,const std::string&pfx){auto r=gn_silu(gctx,x,32,pfx+".norm1",ctx->w);
+    auto*result=build_unet(gctx,ctx->w,inp_t,te);auto*gf=ggml_new_graph(gctx);ggml_build_forward_expand(gf,result);
+    auto*al=ggml_gallocr_new(ggml_backend_get_default_buffer_type(ctx->compute_backend));
+    if(!al||!ggml_gallocr_reserve(al,gf)){ggml_gallocr_free(al);ggml_free(gctx);return false;}
+    if(!ggml_gallocr_alloc_graph(al,gf)){ggml_gallocr_free(al);ggml_free(gctx);return false;}
+    if(ctx->use_gpu){ggml_backend_tensor_set_async(ctx->compute_backend,ts,&ts_v,0,4);
+        ggml_backend_tensor_set_async(ctx->compute_backend,inp_t,inp.data(),0,4*lh*lw*4);
+        ggml_backend_synchronize(ctx->compute_backend);}else{((float*)ts->data)[0]=ts_v;memcpy(inp_t->data,inp.data(),4*lh*lw*4);}
+    ggml_backend_graph_compute(ctx->compute_backend,gf);
+    int nc=result->ne[0]*result->ne[1]*result->ne[2]*result->ne[3];out.resize(nc);
+    if(ctx->use_gpu)ggml_backend_tensor_get(result,out.data(),0,nc*4);else memcpy(out.data(),result->data,nc*4);
+    ggml_gallocr_free(al);ggml_free(gctx);return true;}
+// VAE decoder (separate graph)
+static bool compute_vae(sdxl_ctx*ctx,const std::vector<float>&latent,int lh,int lw,std::vector<float>&out){
+    ggml_init_params gp={16*1024*1024,NULL,true};auto*gctx=ggml_init(gp);if(!gctx)return false;
+    auto*z=ggml_new_tensor_4d(gctx,GGML_TYPE_F32,lw,lh,4,1);
+    auto rb=[&](ggml_tensor*x,const std::string&pfx){auto r=gn_silu(gctx,x,32,pfx+".norm1",ctx->w);
         r=conv(gctx,r,pfx+".conv1",ctx->w,1,1);r=gn_silu(gctx,r,32,pfx+".norm2",ctx->w);
         r=conv(gctx,r,pfx+".conv2",ctx->w,1,1);auto*sk=ctx->w.get(pfx+".nin_shortcut.weight");
         if(sk)r=ggml_add(gctx,r,conv(gctx,x,pfx+".nin_shortcut",ctx->w,1,0));return r;};
-    auto h=conv(gctx,unet_out,"first_stage_model.decoder.conv_in",ctx->w,1,1);
-    h=rb_v(h,"first_stage_model.decoder.mid.block_1");h=rb_v(h,"first_stage_model.decoder.mid.block_2");
+    auto h=conv(gctx,z,"first_stage_model.decoder.conv_in",ctx->w,1,1);
+    h=rb(h,"first_stage_model.decoder.mid.block_1");h=rb(h,"first_stage_model.decoder.mid.block_2");
     for(int lvl=3;lvl>=0;lvl--){auto dp="first_stage_model.decoder.up."+std::to_string(lvl);
-        h=rb_v(h,dp+".block.0");h=rb_v(h,dp+".block.1");h=rb_v(h,dp+".block.2");
+        h=rb(h,dp+".block.0");h=rb(h,dp+".block.1");h=rb(h,dp+".block.2");
         if(lvl>0){h=ggml_upscale(gctx,h,2,GGML_SCALE_MODE_NEAREST);
             auto*uw=ctx->w.get(dp+".upsample.conv.weight");if(uw)h=conv(gctx,h,dp+".upsample.conv",ctx->w,1,1);}}
     h=ggml_group_norm(gctx,h,32,1e-6f);h=ggml_silu(gctx,h);h=conv(gctx,h,"first_stage_model.decoder.conv_out",ctx->w,1,1);
@@ -152,9 +165,8 @@ static bool compute(sdxl_ctx*ctx,const std::vector<float>&inp,int lh,int lw,floa
     auto*al=ggml_gallocr_new(ggml_backend_get_default_buffer_type(ctx->compute_backend));
     if(!al||!ggml_gallocr_reserve(al,gf)){ggml_gallocr_free(al);ggml_free(gctx);return false;}
     if(!ggml_gallocr_alloc_graph(al,gf)){ggml_gallocr_free(al);ggml_free(gctx);return false;}
-    if(ctx->use_gpu){ggml_backend_tensor_set_async(ctx->compute_backend,ts,&ts_v,0,4);
-        ggml_backend_tensor_set_async(ctx->compute_backend,inp_t,inp.data(),0,4*lh*lw*4);
-        ggml_backend_synchronize(ctx->compute_backend);}else{((float*)ts->data)[0]=ts_v;memcpy(inp_t->data,inp.data(),4*lh*lw*4);}
+    if(ctx->use_gpu){ggml_backend_tensor_set_async(ctx->compute_backend,z,latent.data(),0,4*lh*lw*4);
+        ggml_backend_synchronize(ctx->compute_backend);}else memcpy(z->data,latent.data(),4*lh*lw*4);
     ggml_backend_graph_compute(ctx->compute_backend,gf);
     int oh=h->ne[1],ow=h->ne[0],oc=h->ne[2];out.resize(ow*oh*oc);
     if(ctx->use_gpu)ggml_backend_tensor_get(h,out.data(),0,out.size()*4);else memcpy(out.data(),h->data,out.size()*4);
@@ -170,13 +182,13 @@ sd_image_t*generate_image(sd_ctx_t*ctx,const sd_img_gen_params_t*p){
     srand((unsigned)seed);for(auto&v:noise)v=(float)rand()/RAND_MAX*2-1;for(int i=0;i<ls;i++)x[i]=noise[i]*sigs[0];
     for(int step=0;step<steps;step++){float s=sigs[step],sn=sigs[step+1],cs,co,ci;c->den.sc(s,cs,co,ci);
         std::vector<float>sc(ls);for(int j=0;j<ls;j++)sc[j]=x[j]*ci;float ts_v=c->den.s2t(s);
-        if(!compute(c,sc,lh,lw,ts_v,eps))return nullptr;
+        if(!compute_unet(c,sc,lh,lw,ts_v,eps))return nullptr;
         for(int j=0;j<ls;j++)x[j]+=eps[j]*(sn-s);fprintf(stderr,"\rstep %d/%d",step+1,steps);fflush(stderr);}
     fprintf(stderr,"\n");
     // VAE decode
-    if(!compute(c,x,lh,lw,0,eps))return nullptr; // final decode: timestep 0 doesn't matter for VAE path
-    int oh=(int)(H),ow=(int)(W);
+    std::vector<float>img_data;if(!compute_vae(c,x,lh,lw,img_data))return nullptr;
+    int oh=H,ow=W;
     sd_image_t*img=(sd_image_t*)malloc(sizeof(sd_image_t));if(!img)return nullptr;
     img->width=ow;img->height=oh;img->channel=3;img->data=(uint8_t*)malloc(ow*oh*3);if(!img->data){free(img);return nullptr;}
-    for(int y=0;y<oh;y++)for(int x=0;x<ow;x++)for(int cc=0;cc<3;cc++){float v=eps[x+y*ow+cc*ow*oh]*0.5f+0.5f;
+    for(int y=0;y<oh;y++)for(int x=0;x<ow;x++)for(int cc=0;cc<3;cc++){float v=img_data[x+y*ow+cc*ow*oh]*0.5f+0.5f;
         if(v<0)v=0;if(v>1)v=1;img->data[(y*ow+x)*3+cc]=(uint8_t)(v*255);}return img;}
