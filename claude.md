@@ -148,7 +148,7 @@ PNG image data, 1024 x 1024, 8-bit/color RGB, non-interlaced
 
 ### 路径
 ```
-/opt/static_comfyui/cpp/stable-diffusion-cli.cpp
+/opt/static_comfyui/cpp/stable-diffusion-cli_v1.cpp
 ```
 
 ### 编译
@@ -213,7 +213,7 @@ main()
 ### 运行
 ```bash
 LD_LIBRARY_PATH=/data/cuda/targets/x86_64-linux/lib \
-  ./stable-diffusion-cli -p "prompt" -n "negative" --steps 20 --cfg 7 -s 42
+  ./stable-diffusion-cli_v1 -p "prompt" -n "negative" --steps 20 --cfg 7 -s 42
 ```
 
 ### 输出
