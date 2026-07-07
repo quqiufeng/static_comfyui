@@ -1,9 +1,16 @@
-// stable-diffusion-cli_v2.cpp — SDXL txt2img using stable-diffusion.h API
-// Reference implementation following sd_helper.cpp patterns
+// stable-diffusion-cli_v2.cpp — SDXL txt2img 使用 sd_helper.cpp 中的实现
+// 编译: g++ stable-diffusion-cli_v2.cpp sd_helper.cpp \
+//   -I/opt/stable-diffusion.cpp/include -I/opt/stable-diffusion.cpp -I/opt/stable-diffusion.cpp/src \
+//   -I/opt/stable-diffusion.cpp/ggml/include -I/opt/stable-diffusion.cpp/thirdparty \
+//   -L/opt/stable-diffusion.cpp/build -lstable-diffusion \
+//   ... (GGML + CUDA 链接) -o stable-diffusion-cli_v2
 #include "stable-diffusion.h"
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+
+// sd_helper.cpp 中的实现函数声明 (sd_ctx_params_init, new_sd_ctx, generate_image, etc)
+// 这些函数定义在 sd_helper.cpp 中，编译时需要一起编译
 
 static void save_ppm(const char* path, const unsigned char* data, int w, int h, int c) {
     FILE* f = fopen(path, "wb");
@@ -44,7 +51,7 @@ int main(int argc, char** argv) {
     fprintf(stderr, "  prompt: %s\n", prompt);
     fprintf(stderr, "  size:   %dx%d steps=%d cfg=%.1f seed=%d\n", W, H, steps, cfg, seed);
 
-    // 1. Init context (sd_ctx_params_init → new_sd_ctx → init_backend → ModelLoader → GGMLRunner)
+    // 1. Init context
     sd_ctx_params_t ctx_params;
     sd_ctx_params_init(&ctx_params);
     ctx_params.model_path    = model;
@@ -58,7 +65,7 @@ int main(int argc, char** argv) {
     sd_ctx_t* ctx = new_sd_ctx(&ctx_params);
     if (!ctx) { fprintf(stderr, "new_sd_ctx failed\n"); return 1; }
 
-    // 2. Generate image (sd_img_gen_params_init → generate_image)
+    // 2. Generate image
     sd_img_gen_params_t img_params;
     sd_img_gen_params_init(&img_params);
     img_params.prompt           = prompt;
@@ -67,23 +74,21 @@ int main(int argc, char** argv) {
     img_params.height           = H;
     img_params.seed             = seed;
     img_params.batch_count      = 1;
-    img_params.sample_params.sample_steps               = steps;
-    img_params.sample_params.guidance.txt_cfg            = cfg;
-    img_params.sample_params.sample_method               = EULER_SAMPLE_METHOD;
-    img_params.sample_params.scheduler                   = KARRAS_SCHEDULER;
+    img_params.sample_params.sample_steps          = steps;
+    img_params.sample_params.guidance.txt_cfg      = cfg;
+    img_params.sample_params.sample_method         = EULER_SAMPLE_METHOD;
+    img_params.sample_params.scheduler             = KARRAS_SCHEDULER;
 
     sd_image_t* images = generate_image(ctx, &img_params);
     if (!images) { fprintf(stderr, "generate_image failed\n"); free_sd_ctx(ctx); return 1; }
 
-    // 3. Save output (PPM)
-    char ppm_path[1024];
-    snprintf(ppm_path, sizeof(ppm_path), "%s.ppm", output);
-    save_ppm(ppm_path, images[0].data, images[0].width, images[0].height, 3);
-    fprintf(stderr, "Saved %s (%dx%d)\n", ppm_path, images[0].width, images[0].height);
+    // 3. Save
+    char ppm[1024]; snprintf(ppm, sizeof(ppm), "%s.ppm", output);
+    save_ppm(ppm, images[0].data, images[0].width, images[0].height, 3);
+    fprintf(stderr, "Saved %s (%dx%d)\n", ppm, images[0].width, images[0].height);
 
-    // 4. Cleanup (free_sd_ctx)
-    free(images[0].data);
-    free(images);
+    // 4. Cleanup
+    free(images[0].data); free(images);
     free_sd_ctx(ctx);
     return 0;
 }
