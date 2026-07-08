@@ -143,13 +143,13 @@ int main(int argc, char** argv) {
     img_params.vae_tiling_params.tile_size_y    = 32;
     img_params.vae_tiling_params.target_overlap = 0.5f;
 
-    // HiRes fix: low-res -> target via latent upscaling
-    img_params.hires.enabled             = true;
-    img_params.hires.upscaler            = SD_HIRES_UPSCALER_LATENT;
-    img_params.hires.target_width        = target_W;
-    img_params.hires.target_height       = target_H;
-    img_params.hires.steps             = hires_steps;
-    img_params.hires.denoising_strength  = hires_strength;
+    // HiRes fix: low-res -> target via latent upscaling (currently disabled)
+    // img_params.hires.enabled             = true;
+    // img_params.hires.upscaler            = SD_HIRES_UPSCALER_LATENT;
+    // img_params.hires.target_width        = target_W;
+    // img_params.hires.target_height       = target_H;
+    // img_params.hires.steps               = hires_steps;
+    // img_params.hires.denoising_strength  = hires_strength;
 
     // FreeU + SAG (currently both disabled)
     // img_params.freeu.enabled = true;
