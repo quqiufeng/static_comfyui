@@ -121,7 +121,7 @@ int main(int argc, char** argv) {
     // Base pass: 1920x1080, HiRes target: 2560x1440 (same as sdxl_pipeline.py)
     int W = 1920, H = 1080;
     int target_W = 2560, target_H = 1440;
-    int steps = 20;
+    int steps = 8;
     int hires_steps = 45;
     float cfg = 3.0f;
     float hires_strength = 0.35f;
