@@ -58,7 +58,7 @@ static bool save_png(const char* path, const uint8_t* data, int w, int h, int ch
 }
 
 int main(int argc, char** argv) {
-    const char* model  = "/data/models/image/DreamShaperXL_Turbo_v2_1.safetensors";
+    const char* model  = "/data/models/image/RealVisXL_V5.0_fp16.safetensors";
     const char* prompt = "solo,single woman,half body portrait of a young woman, "
                          "soft natural lighting, elegant pose, studio lighting, "
                          "sharp eyes, clean white background, medium close up";
