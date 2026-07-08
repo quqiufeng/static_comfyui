@@ -117,8 +117,7 @@ int main(int argc, char** argv) {
                          "border artifacts, edge distortion, tiling artifacts, edge artifacts, "
                          "frame distortion, warped edges, stretched proportions, asymmetrical face, "
                          "off-center, cropped, out of frame, partial face, cut off, incomplete head, "
-                         "cropped head, watermark, text, logo, signature, cropped shoulders, "
-                         "embedding:EasyNegative, embedding:bad-hands-5";
+                         "cropped head, watermark, text, logo, signature, cropped shoulders";
     const char* clip_l = "/data/models/image/clip_l_sdcpp.safetensors";
     const char* clip_g = "/data/models/image/clip_g_sdcpp.safetensors";
     const char* output = "/home/quqiufeng/sdxl_pipeline_cpp.png";
@@ -165,7 +164,7 @@ int main(int argc, char** argv) {
     ctx_params.clip_g_path = nullptr;
     ctx_params.vae_path    = nullptr;
     ctx_params.n_threads   = 8;
-    ctx_params.wtype       = SD_TYPE_F16;
+    ctx_params.wtype       = SD_TYPE_F32;
     ctx_params.rng_type    = STD_DEFAULT_RNG;
     ctx_params.diffusion_flash_attn = false;
 
