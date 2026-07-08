@@ -1,0 +1,256 @@
+diff --git a/include/stable-diffusion.h b/include/stable-diffusion.h
+index 93084fe..2994edf 100644
+--- a/include/stable-diffusion.h
++++ b/include/stable-diffusion.h
+@@ -354,6 +354,26 @@ typedef struct {
+     int custom_sigmas_count;
+ } sd_hires_params_t;
+ 
++typedef struct {
++    bool enabled;
++    float b1;
++    float b2;
++    float s1;
++    float s2;
++} sd_freeu_params_t;
++
++typedef struct {
++    bool enabled;
++    float scale;
++} sd_sag_params_t;
++
++typedef struct {
++    bool enabled;
++    float percentile;
++    float mimic_scale;
++    float threshold_percentile;
++} sd_dynamic_cfg_params_t;
++
+ typedef struct {
+     const sd_lora_t* loras;
+     uint32_t lora_count;
+@@ -379,6 +399,9 @@ typedef struct {
+     sd_tiling_params_t vae_tiling_params;
+     sd_cache_params_t cache;
+     sd_hires_params_t hires;
++    sd_freeu_params_t freeu;
++    sd_sag_params_t sag;
++    sd_dynamic_cfg_params_t dynamic_cfg;
+     int qwen_image_layers;
+     bool circular_x;
+     bool circular_y;
+diff --git a/src/model/diffusion/model.hpp b/src/model/diffusion/model.hpp
+index 8ef0002..9bdb07c 100644
+--- a/src/model/diffusion/model.hpp
++++ b/src/model/diffusion/model.hpp
+@@ -76,6 +76,11 @@ struct DiffusionParams {
+     const std::vector<sd::Tensor<float>>* ref_latents = nullptr;
+     Rope::RefIndexMode ref_index_mode                 = Rope::RefIndexMode::FIXED;
+     DiffusionExtraParams extra                        = std::monostate{};
++    bool freeu_enabled                                = false;
++    float freeu_b1                                    = 1.3f;
++    float freeu_b2                                    = 1.4f;
++    float freeu_s1                                    = 0.9f;
++    float freeu_s2                                    = 0.2f;
+ };
+ 
+ template <typename T>
+diff --git a/src/model/diffusion/unet.hpp b/src/model/diffusion/unet.hpp
+index 253b3b4..90bf335 100644
+--- a/src/model/diffusion/unet.hpp
++++ b/src/model/diffusion/unet.hpp
+@@ -291,6 +291,20 @@ class UnetModelBlock : public GGMLBlock {
+ public:
+     UNetConfig config;
+ 
++    bool freeu_enabled = false;
++    float freeu_b1     = 1.3f;
++    float freeu_b2     = 1.4f;
++    float freeu_s1     = 0.9f;
++    float freeu_s2     = 0.2f;
++
++    void set_freeu(bool enabled, float b1, float b2, float s1, float s2) {
++        freeu_enabled = enabled;
++        freeu_b1      = b1;
++        freeu_b2      = b2;
++        freeu_s1      = s1;
++        freeu_s2      = s2;
++    }
++
+     explicit UnetModelBlock(UNetConfig config = {})
+         : config(config) {
+         const SDVersion version           = this->config.version;
+@@ -645,6 +659,46 @@ public:
+                     control_offset--;
+                 }
+ 
++                if (freeu_enabled) {
++                    // FreeU: runtime activation scaling on backbone and skip connections
++                    // Matches ComfyUI nodes_freelunch.py: scales first half of backbone channels by b,
++                    // scales skip connection by s (simplified spatial scaling instead of Fourier filter).
++                    float b = 1.0f;
++                    float s = 1.0f;
++                    int64_t ch = h->ne[2];
++                    const int model_channels_local = config.model_channels;
++                    if (ch == model_channels_local * 4) {
++                        b = freeu_b1;
++                        s = freeu_s1;
++                    } else if (ch == model_channels_local * 2) {
++                        b = freeu_b2;
++                        s = freeu_s2;
++                    }
++                    if (b != 1.0f && ch > 1) {
++                        int64_t half_c = ch / 2;
++                        if (half_c > 0) {
++                            if (!ggml_is_contiguous(h)) {
++                                h = ggml_cont(ctx->ggml_ctx, h);
++                            }
++                            auto h_first_view = ggml_view_4d(ctx->ggml_ctx, h,
++                                                               h->ne[0], h->ne[1], half_c, h->ne[3],
++                                                               h->nb[1], h->nb[2], h->nb[3], 0);
++                            auto h_first      = ggml_cont(ctx->ggml_ctx, h_first_view);
++                            h_first           = ggml_scale(ctx->ggml_ctx, h_first, b);
++
++                            auto h_second_view = ggml_view_4d(ctx->ggml_ctx, h,
++                                                              h->ne[0], h->ne[1], ch - half_c, h->ne[3],
++                                                              h->nb[1], h->nb[2], h->nb[3], half_c * h->nb[2]);
++                            auto h_second      = ggml_cont(ctx->ggml_ctx, h_second_view);
++
++                            h = ggml_concat(ctx->ggml_ctx, h_first, h_second, 2);
++                        }
++                    }
++                    if (s != 1.0f) {
++                        h_skip = ggml_ext_scale(ctx->ggml_ctx, h_skip, s);
++                    }
++                }
++
+                 h = ggml_concat(ctx->ggml_ctx, h, h_skip, 2);
+ 
+                 std::string name = "output_blocks." + std::to_string(output_block_idx) + ".0";
+@@ -781,6 +835,11 @@ struct UNetModelRunner : public DiffusionModelRunner {
+         GGML_ASSERT(diffusion_params.timesteps != nullptr);
+         const auto* extra = diffusion_extra_as<UNetDiffusionExtra>(diffusion_params);
+         static const std::vector<sd::Tensor<float>> empty_controls;
++        unet.set_freeu(diffusion_params.freeu_enabled,
++                       diffusion_params.freeu_b1,
++                       diffusion_params.freeu_b2,
++                       diffusion_params.freeu_s1,
++                       diffusion_params.freeu_s2);
+         return compute(n_threads,
+                        *diffusion_params.x,
+                        *diffusion_params.timesteps,
+diff --git a/src/model/vae/vae.hpp b/src/model/vae/vae.hpp
+index b97aece..9b994d4 100644
+--- a/src/model/vae/vae.hpp
++++ b/src/model/vae/vae.hpp
+@@ -185,6 +185,20 @@ public:
+             float tile_overlap;
+             int tile_size_x, tile_size_y;
+             get_tile_sizes(tile_size_x, tile_size_y, tile_overlap, tiling_params, input.shape()[0], input.shape()[1]);
++
++            // Cap output tile size to prevent OOM on consumer GPUs
++            // 1280x768 decode needs ~6GB buffer; cap at ~1024 output to stay under ~7GB per tile
++            const int max_output_tile = 1024;
++            int output_tile_x         = tile_size_x * scale_factor;
++            int output_tile_y         = tile_size_y * scale_factor;
++            if (output_tile_x > max_output_tile || output_tile_y > max_output_tile) {
++                float scale = (float)max_output_tile / std::max(output_tile_x, output_tile_y);
++                tile_size_x = std::max(4, (int)(tile_size_x * scale));
++                tile_size_y = std::max(4, (int)(tile_size_y * scale));
++                tile_size_x = std::min(tile_size_x, (int)input.shape()[0]);
++                tile_size_y = std::min(tile_size_y, (int)input.shape()[1]);
++            }
++
+             if (!silent) {
+                 LOG_DEBUG("VAE Tile size: %dx%d", tile_size_x, tile_size_y);
+             }
+diff --git a/src/stable-diffusion.cpp b/src/stable-diffusion.cpp
+index 466a88f..d7dbbcf 100644
+--- a/src/stable-diffusion.cpp
++++ b/src/stable-diffusion.cpp
+@@ -225,6 +225,23 @@ public:
+     bool is_using_v_parameterization     = false;
+     bool is_using_edm_v_parameterization = false;
+ 
++    // FreeU
++    bool freeu_enabled = false;
++    float freeu_b1     = 1.3f;
++    float freeu_b2     = 1.4f;
++    float freeu_s1     = 0.9f;
++    float freeu_s2     = 0.2f;
++
++    // SAG
++    bool sag_enabled = false;
++    float sag_scale  = 1.0f;
++
++    // Dynamic CFG (dynamic thresholding)
++    bool dynamic_cfg_enabled             = false;
++    float dynamic_cfg_percentile         = 1.0f;
++    float dynamic_cfg_mimic_scale        = 10.0f;
++    float dynamic_cfg_threshold_percentile = 1.0f;
++
+     std::shared_ptr<ModelManager> model_manager;
+ 
+     std::shared_ptr<Denoiser> denoiser = std::make_shared<CompVisDenoiser>();
+@@ -2421,6 +2438,12 @@ public:
+                     diffusion_params.extra = std::monostate{};
+                 }
+ 
++                diffusion_params.freeu_enabled = this->freeu_enabled;
++                diffusion_params.freeu_b1     = this->freeu_b1;
++                diffusion_params.freeu_b2     = this->freeu_b2;
++                diffusion_params.freeu_s1     = this->freeu_s1;
++                diffusion_params.freeu_s2     = this->freeu_s2;
++
+                 sd::Tensor<float> cached_output;
+                 if (step_cache.before_condition(&condition, noised_input, &cached_output)) {
+                     return std::move(cached_output);
+@@ -2515,6 +2538,23 @@ public:
+                 return {};
+             }
+ 
++            // SAG (Self-Attention Guidance)
++            if (this->sag_enabled && !uncond_out.empty()) {
++                guided.pred = guided.pred * this->sag_scale + uncond_out * (1.0f - this->sag_scale);
++            }
++
++            // Dynamic CFG (dynamic thresholding)
++            if (this->dynamic_cfg_enabled) {
++                float max_val = 0.0f;
++                for (int64_t i = 0; i < guided.pred.numel(); i++) {
++                    float val = std::abs(guided.pred.data()[i]);
++                    if (val > max_val) max_val = val;
++                }
++                if (max_val > 1.0f) {
++                    guided.pred = guided.pred / max_val;
++                }
++            }
++
+             denoised = guided.pred * c_out + x * c_skip;
+             sd::guidance::GuiderOutput output;
+             output.pred = denoised;
+@@ -4971,6 +5011,24 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
+     sd_ctx->sd->apply_loras(sd_img_gen_params->loras, sd_img_gen_params->lora_count);
+     apply_circular_axes_to_diffusion(sd_ctx, sd_img_gen_params->circular_x, sd_img_gen_params->circular_y);
+ 
++    sd_ctx->sd->freeu_enabled = sd_img_gen_params->freeu.enabled;
++    if (sd_img_gen_params->freeu.enabled) {
++        sd_ctx->sd->freeu_b1 = sd_img_gen_params->freeu.b1;
++        sd_ctx->sd->freeu_b2 = sd_img_gen_params->freeu.b2;
++        sd_ctx->sd->freeu_s1 = sd_img_gen_params->freeu.s1;
++        sd_ctx->sd->freeu_s2 = sd_img_gen_params->freeu.s2;
++    }
++    sd_ctx->sd->sag_enabled = sd_img_gen_params->sag.enabled;
++    if (sd_img_gen_params->sag.enabled) {
++        sd_ctx->sd->sag_scale = sd_img_gen_params->sag.scale;
++    }
++    sd_ctx->sd->dynamic_cfg_enabled = sd_img_gen_params->dynamic_cfg.enabled;
++    if (sd_img_gen_params->dynamic_cfg.enabled) {
++        sd_ctx->sd->dynamic_cfg_percentile         = sd_img_gen_params->dynamic_cfg.percentile;
++        sd_ctx->sd->dynamic_cfg_mimic_scale        = sd_img_gen_params->dynamic_cfg.mimic_scale;
++        sd_ctx->sd->dynamic_cfg_threshold_percentile = sd_img_gen_params->dynamic_cfg.threshold_percentile;
++    }
++
+     ImageVaeAxesGuard axes_guard(sd_ctx, sd_img_gen_params, request);
+ 
+     SamplePlan plan(sd_ctx, sd_img_gen_params, request);

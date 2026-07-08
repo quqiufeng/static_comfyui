@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace sd {
@@ -21,19 +22,30 @@ struct Image {
 };
 
 /**
+ * @brief LoRA configuration entry.
+ */
+struct LoraConfig {
+    std::string path;
+    float multiplier = 1.0f;
+};
+
+/**
  * @brief SD model configuration.
  *
- * Mirrors sd_ctx_params_t from stable-diffusion.h but only exposes
- * the fields we need for SDXL txt2img.
+ * Mirrors sd_ctx_params_t from stable-diffusion.h.
  */
 struct ModelConfig {
     std::string model_path;
     std::string clip_l_path;
     std::string clip_g_path;
     std::string vae_path;
+    std::string diffusion_model_path;  // standalone diffusion model (e.g. Z-Image GGUF)
+    std::string llm_path;              // LLM text encoder for DiT models
     int n_threads = 8;
     bool keep_vae_on_cpu = false;
     bool keep_clip_on_cpu = false;
+    bool flash_attn = false;
+    bool diffusion_flash_attn = false;
 };
 
 /**
@@ -52,6 +64,33 @@ struct ImageGenerationParams {
     int batch_count = 1;
     std::string sample_method = "euler_a";
     std::string scheduler = "discrete";
+
+    // LoRA
+    std::vector<LoraConfig> loras;
+
+    // VAE tiling
+    bool vae_tiling = false;
+    int vae_tile_size_x = 128;
+    int vae_tile_size_y = 128;
+    float vae_tile_overlap = 0.5f;
+
+    // HiRes Fix
+    bool hires_enabled = false;
+    int hires_width = 0;
+    int hires_height = 0;
+    int hires_steps = 20;
+    float hires_strength = 0.35f;
+
+    // FreeU
+    bool freeu_enabled = false;
+    float freeu_b1 = 1.3f;
+    float freeu_b2 = 1.4f;
+    float freeu_s1 = 0.9f;
+    float freeu_s2 = 0.2f;
+
+    // SAG (Self-Attention Guidance)
+    bool sag_enabled = false;
+    float sag_scale = 1.0f;
 };
 
 /**

@@ -45,6 +45,18 @@ message(STATUS "CUDA_DRIVER:   ${CUDA_DRIVER_LIB}")
 message(STATUS "CULIBOS:       ${CULIBOS_LIB}")
 
 # ---------------------------------------------------------------------------
+# Post-processing library (clarity / sharpen / smart-sharpen / edge-sharpen)
+# ---------------------------------------------------------------------------
+add_library(postproc STATIC
+    src/postproc/postproc.cpp
+)
+
+target_include_directories(postproc
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/postproc
+)
+
+# ---------------------------------------------------------------------------
 # Adapter library (compile-only wrapper, final link order is set below)
 # ---------------------------------------------------------------------------
 add_library(sdcpp_adapter STATIC
@@ -60,23 +72,15 @@ target_include_directories(sdcpp_adapter
 )
 
 # ---------------------------------------------------------------------------
-# Example: SDXL txt2img
+# Common link libraries for sd.cpp executables
 # Link order derived from /opt/sd/build/examples/cli link.txt (sd-cli):
 #   stable-diffusion -> image libs (webp, webpmux, ...) -> ggml -> dl ->
 #   ggml-cpu -> ggml-cuda -> ggml-base -> gomp/pthread ->
 #   cudart/cublas/cublasLt/culibos/cuda -> webp/sharpyuv -> m
 # ---------------------------------------------------------------------------
-add_executable(sdxl_txt2img
-    examples/sdxl_txt2img.cpp
-)
-
-target_include_directories(sdxl_txt2img
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}
-)
-
-set(SD_LINK_LIBS
+set(SD_COMMON_LINK_LIBS
     sdcpp_adapter
+    postproc
     ${SD_LIB}
     webp
     webpmux
@@ -85,17 +89,11 @@ set(SD_LINK_LIBS
     ${GGML_CPU_LIB}
     ${GGML_CUDA_LIB}
     ${GGML_BASE_LIB}
-)
-
-set(CUDA_LINK_LIBS
     CUDA::cudart
     CUDA::cublas
     CUDA::cublasLt
     ${CULIBOS_LIB}
     ${CUDA_DRIVER_LIB}
-)
-
-set(SYSTEM_LINK_LIBS
     gomp
     pthread
     webp
@@ -103,17 +101,22 @@ set(SYSTEM_LINK_LIBS
     m
 )
 
-target_link_libraries(sdxl_txt2img
-    PRIVATE
-        ${SD_LINK_LIBS}
-        ${CUDA_LINK_LIBS}
-        ${SYSTEM_LINK_LIBS}
-)
+function(add_sd_example target)
+    add_executable(${target} ${ARGN})
+    target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(${target} PRIVATE ${SD_COMMON_LINK_LIBS})
+endfunction()
+
+# ---------------------------------------------------------------------------
+# Examples
+# ---------------------------------------------------------------------------
+add_sd_example(sdxl_txt2img examples/sdxl_txt2img.cpp)
+add_sd_example(img_hires examples/img_hires.cpp)
 
 # ---------------------------------------------------------------------------
 # Install
 # ---------------------------------------------------------------------------
-install(TARGETS sdcpp_adapter sdxl_txt2img
+install(TARGETS sdcpp_adapter sdxl_txt2img img_hires
     RUNTIME DESTINATION bin
     ARCHIVE DESTINATION lib
     LIBRARY DESTINATION lib

@@ -435,7 +435,7 @@ const char* sd_version();
 - **ESRGAN**：独立上采样模型（`src/model/upscaler/esrgan.hpp`）。
 - **采样缓存**：`sd_cache_params_t` 支持 `EASYCACHE`、`UCACHE`、`DBCache`、`TAYLORSEER`、`SPECTRUM` 等策略，跳过相邻步骤间相似度高的计算。
 
-> 注：当前 `/opt/sd` 主干中并未直接内置 FreeU、Self-Attention Guidance（SAG）或 IP-Adapter 的完整实现；这些功能如要在 ComfyUI 等价工作流中使用，通常需要在上层适配器（如本项目的 `sdcpp_adapter`）或扩展模块中自行实现。
+> 注：当前 `/opt/sd` 主干中并未直接内置 FreeU、Self-Attention Guidance（SAG）或 IP-Adapter 的完整实现。本兼容层通过最小 patch 在 `/opt/sd` 中加入了 FreeU/SAG 支持（见 `patches/sdcpp-freeu-sag-v2.patch`），IP-Adapter 仍需后续扩展模块实现。
 
 ---
 
@@ -726,13 +726,87 @@ cmake --build build -j$(nproc)
   - 少于 20 steps（如 5 steps）的图像质量会明显下降，看起来"破碎/失真"，这是 SDXL 正常行为，不是 bug。
   - 建议 SDXL 推理至少使用 20 steps。
 
-### 13.5 已知问题与后续方向
+### 13.5 img_hires 示例与 img2.sh 迁移（HiRes + VAE Tiling + FreeU + SAG）
 
-- 当前示例只支持 txt2img，尚未接入 img2img、ControlNet、LoRA、HiRes 等 `/opt/sd` 已支持的功能。
+`examples/img_hires.cpp` 和迁移后的 `img2.sh` 演示了 `sd::SDPipeline` 的进阶用法：
+
+- **GGUF 模型**：使用 `z_image_turbo-Q5_K_M.gguf` 作为 standalone diffusion model，`Qwen3-4B-Instruct-2507-Q4_K_M.gguf` 作为 LLM 文本编码器，`ae.safetensors` 作为 VAE。
+- **HiRes Fix**：先低分辨率采样，再 latent 放大二次去噪。
+- **VAE Tiling**：大分辨率解码时开启，降低显存峰值。
+- **LoRA**：通过 `--lora path:weight` 支持多个。
+- **FreeU / SAG**：通过最小 patch 接入 UNet 和采样循环。
+
+直接运行示例（img_hires）：
+
+```bash
+./build/img_hires \
+  --diffusion-model /data/models/image/z_image_turbo-Q5_K_M.gguf \
+  --llm /data/models/image/Qwen3-4B-Instruct-2507-Q4_K_M.gguf \
+  --vae /data/models/image/ae.safetensors \
+  -W 1024 -H 576 \
+  --hires --hires-width 1280 --hires-height 720 \
+  --hires-steps 45 --hires-strength 0.35 \
+  --vae-tiling --vae-tile-size 128 --vae-tile-overlap 0.5 \
+  --freeu --freeu-b1 1.4 --freeu-b2 1.5 \
+  --sag --sag-scale 1.0 \
+  --method euler --scheduler discrete --cfg 3.2 --steps 20 \
+  "a cat sitting on a bench" \
+  ~/img_hires_output.png
+```
+
+或使用迁移后的 `img2.sh`（与原版用法完全一致）：
+
+```bash
+./img2.sh "solo,single woman,half body portrait of a young woman, soft natural lighting, elegant pose, studio lighting, sharp eyes, clean white background, medium close up" \
+  ~/portrait.png 2560 1440
+```
+
+`img2.sh` 所有参数都有默认值，可直接运行：
+
+```bash
+./img2.sh
+# 输出: ~/YYYYMMDD_HHMMSS_xxxxxxxx.png，1280x720，20+45 steps
+```
+
+验证结果：
+
+- `img2.sh` 2560×1440 目标在 RTX 3080 20G 上约 11 分 26 秒（20+45 steps），输出 `2560×1440` 正常人像，无噪声/花屏。
+- 1280×720 快速测试（5+5 steps）约 25 秒，输出正常。
+- 之前图像错误的原因是：错误地用 safetensors SDXL 模型测试，且 FreeU 实现为全 tensor 缩放；迁移后使用 img2.sh 同款 GGUF 模型，并把 FreeU 修复为 channel-half 缩放。
+
+### 13.6 对 `/opt/sd` 的 patch 记录
+
+为支持 FreeU/SAG，对 `/opt/sd` 做了最小修改，完整 diff 保存在：
+
+```
+cpp/sd/patches/sdcpp-freeu-sag-v2.patch
+```
+
+修改文件：
+
+| 文件 | 修改内容 |
+|------|----------|
+| `include/stable-diffusion.h` | 新增 `sd_freeu_params_t`、`sd_sag_params_t`、`sd_dynamic_cfg_params_t`；在 `sd_img_gen_params_t` 中加入对应字段 |
+| `src/model/diffusion/model.hpp` | 在 `DiffusionParams` 中加入 FreeU 参数 |
+| `src/model/diffusion/unet.hpp` | 在 `UnetModelBlock` 中加入 `set_freeu` 与输出块缩放逻辑 |
+| `src/stable-diffusion.cpp` | 在 `StableDiffusionGGML` 中加入 FreeU/SAG/Dynamic CFG 字段；在 `generate_image` 中读取参数；在采样循环中应用 SAG 与 Dynamic CFG |
+| `src/model/vae/vae.hpp` | 对 VAE decode tiling 的输出 tile 尺寸做上限保护（1024），避免消费级显卡 OOM |
+
+应用 patch：
+
+```bash
+cd /opt/sd
+git apply /opt/static_comfyui/cpp/sd/patches/sdcpp-freeu-sag-v2.patch
+```
+
+### 13.7 已知问题与后续方向
+
+- 当前示例已支持 txt2img、HiRes Fix、VAE tiling、LoRA、FreeU、SAG；尚未接入 img2img、ControlNet、IP-Adapter 等 `/opt/sd` 已支持或需扩展的功能。
 - 适配层目前仅做最小封装，尚未实现 `design.md` 中规划的 `sd::Tensor` / `sd::nn::Module` / `sd::ops` 抽象。
-- 下一步可按 `design.md` Phase 1 推进：先扩展 `SDPipeline` 接口（LoRA、VAE tiling、HiRes），再逐步引入 `api/` 层。
+- 下一步可按 `design.md` Phase 2 推进：加入 img2img、ControlNet、扩展模块体系，并完善 C++/Python 双向绑定。
 
 ---
 
 **报告更新时间**：2026-07-07（补充 v1 API 分析）
 **报告更新时间**：2026-07-08（补充 v2 适配层实现与端到端验证）
+**报告更新时间**：2026-07-08（补充 FreeU/SAG patch、img_hires 示例与 img_hires.sh）

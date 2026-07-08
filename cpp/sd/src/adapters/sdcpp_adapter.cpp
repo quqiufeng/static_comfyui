@@ -11,6 +11,10 @@ class SDPipeline::Impl {
 public:
     sd_ctx_t* ctx = nullptr;
 
+    // LoRA strings must outlive generate_image call
+    std::vector<std::string> lora_paths;
+    std::vector<sd_lora_t> lora_entries;
+
     ~Impl() {
         if (ctx) {
             free_sd_ctx(ctx);
@@ -39,15 +43,22 @@ bool SDPipeline::load(const ModelConfig& config) {
     sd_ctx_params_t params;
     sd_ctx_params_init(&params);
 
-    params.model_path    = config.model_path.c_str();
-    params.clip_l_path   = config.clip_l_path.c_str();
-    params.clip_g_path   = config.clip_g_path.c_str();
+    params.model_path   = config.model_path.c_str();
+    params.clip_l_path  = config.clip_l_path.c_str();
+    params.clip_g_path  = config.clip_g_path.c_str();
     if (!config.vae_path.empty()) {
         params.vae_path = config.vae_path.c_str();
     }
+    if (!config.diffusion_model_path.empty()) {
+        params.diffusion_model_path = config.diffusion_model_path.c_str();
+    }
+    if (!config.llm_path.empty()) {
+        params.llm_path = config.llm_path.c_str();
+    }
     params.n_threads = config.n_threads;
     params.wtype     = SD_TYPE_COUNT;  // auto, matches sd-cli default
-    // Keep CUDA_RNG default (matches sd-cli). Do not override to STD_DEFAULT_RNG.
+    params.flash_attn = config.flash_attn;
+    params.diffusion_flash_attn = config.diffusion_flash_attn;
 
     impl_->ctx = new_sd_ctx(&params);
     return impl_->ctx != nullptr;
@@ -82,6 +93,54 @@ Image SDPipeline::generate(const ImageGenerationParams& params) {
     }
     if (img_params.sample_params.scheduler == SCHEDULER_COUNT) {
         img_params.sample_params.scheduler = DISCRETE_SCHEDULER;
+    }
+
+    // LoRA
+    impl_->lora_paths.clear();
+    impl_->lora_entries.clear();
+    for (const auto& lora : params.loras) {
+        impl_->lora_paths.push_back(lora.path);
+        sd_lora_t entry;
+        entry.is_high_noise = false;
+        entry.multiplier    = lora.multiplier;
+        entry.path          = impl_->lora_paths.back().c_str();
+        impl_->lora_entries.push_back(entry);
+    }
+    if (!impl_->lora_entries.empty()) {
+        img_params.loras      = impl_->lora_entries.data();
+        img_params.lora_count = static_cast<uint32_t>(impl_->lora_entries.size());
+    }
+
+    // VAE tiling
+    if (params.vae_tiling) {
+        img_params.vae_tiling_params.enabled      = true;
+        img_params.vae_tiling_params.tile_size_x = params.vae_tile_size_x;
+        img_params.vae_tiling_params.tile_size_y = params.vae_tile_size_y;
+        img_params.vae_tiling_params.target_overlap = params.vae_tile_overlap;
+    }
+
+    // HiRes Fix
+    if (params.hires_enabled) {
+        img_params.hires.enabled            = true;
+        img_params.hires.target_width       = params.hires_width;
+        img_params.hires.target_height      = params.hires_height;
+        img_params.hires.steps              = params.hires_steps;
+        img_params.hires.denoising_strength = params.hires_strength;
+    }
+
+    // FreeU
+    img_params.freeu.enabled = params.freeu_enabled;
+    if (params.freeu_enabled) {
+        img_params.freeu.b1 = params.freeu_b1;
+        img_params.freeu.b2 = params.freeu_b2;
+        img_params.freeu.s1 = params.freeu_s1;
+        img_params.freeu.s2 = params.freeu_s2;
+    }
+
+    // SAG
+    img_params.sag.enabled = params.sag_enabled;
+    if (params.sag_enabled) {
+        img_params.sag.scale = params.sag_scale;
     }
 
     sd_image_t* images = nullptr;

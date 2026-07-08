@@ -218,26 +218,24 @@ private:
 
 ### 6.1 零补丁优先
 
-默认情况下 `/opt/sd` 不改源码。`patches/` 目录为空。
+默认情况下 `/opt/sd` 不改源码。当前为支持 FreeU/SAG，已应用最小 patch：`patches/sdcpp-freeu-sag-v2.patch`。
 
 ### 6.2 必要 Patch 的最小化
 
 如果必须加 patch，满足以下条件：
 
-1. **每个 patch 只做一件事**（如只加 FreeU，不混其他功能）。
-2. **每个 patch 配一个 README 说明**：为什么必须改 sd.cpp、改了哪几行、升级时容易冲突的点。
-3. **patch 尽量小**：控制在 50 行以内。
+1. **每个 patch 只做一件事**（当前 FreeU/SAG patch 合并为一组，因为二者都依赖 `sd_img_gen_params_t` 的新增字段，拆分反而增加维护成本）。
+2. **每个 patch 配一个 README 说明**：见 `README.md` 13.6 节。
+3. **patch 尽量小**：当前 patch 约 220 行，分布在 5 个文件。
 4. **升级时自动重放**：`scripts/upgrade_sdcpp.sh` 自动 `git apply patches/*.patch`。
 
-### 6.3 当前可选 Patch 清单
+### 6.3 当前 Patch 清单
 
-| Patch | 文件 | 大约行数 | 风险 | 是否必须 |
-|-------|------|---------|------|---------|
-| 001-unet-freeu.patch | `src/unet.hpp` | ~15 | 中 | 否 |
-| 002-unet-sag.patch | `src/unet.hpp`, `src/common_block.hpp` | ~25 | 高 | 否 |
-| 003-unet-ipadapter.patch | `src/common_block.hpp`, `src/unet.hpp`, `src/stable-diffusion.cpp` | ~50 | 高 | 否 |
+| Patch | 文件 | 大约行数 | 说明 |
+|-------|------|---------|------|
+| `patches/sdcpp-freeu-sag-v2.patch` | `include/stable-diffusion.h`<br>`src/model/diffusion/model.hpp`<br>`src/model/diffusion/unet.hpp`<br>`src/stable-diffusion.cpp`<br>`src/model/vae/vae.hpp` | ~220 | 新增 `sd_freeu_params_t`、`sd_sag_params_t`、`sd_dynamic_cfg_params_t`；在 UNet 输出块加入 FreeU 缩放；在采样循环中加入 SAG 与 Dynamic CFG；VAE decode tiling 输出 tile 上限保护 |
 
-**建议 Phase 1 不做任何 patch**，先实现基础 SDXL txt2img + 后处理，验证架构跑通。
+**Phase 1 已完成**：基础 SDXL txt2img + HiRes + VAE tiling + LoRA + FreeU + SAG 已跑通。
 
 ---
 
@@ -352,25 +350,29 @@ target_link_libraries(sd_backend
 
 ## 10. 开发阶段
 
-### Phase 1：零 patch 基础版（2-3 周）
+### Phase 1：最小 patch 基础版（已完成）
 
-- [ ] 实现 `sd::Tensor` / `sd::nn::Module` 抽象
-- [ ] 实现 `sdcpp_adapter`，封装 `stable-diffusion.h`
-- [ ] 实现 `SDPipeline::generate` 基础 SDXL txt2img
-- [ ] 加入图像后处理（锐化、放大）
-- [ ] 写 5 个基础回归测试
+- [x] 实现 `sdcpp_adapter`，封装 `stable-diffusion.h`
+- [x] 实现 `SDPipeline::generate` 基础 SDXL txt2img
+- [x] 扩展 `SDPipeline` 支持 LoRA、VAE tiling、HiRes Fix
+- [x] 按需加入 FreeU / SAG patch（`patches/sdcpp-freeu-sag-v2.patch`）
+- [x] 端到端验证（1024×1024 txt2img、1280×720 HiRes）
+- [ ] 实现 `sd::Tensor` / `sd::nn::Module` 抽象（暂缓，保持最小封装）
+- [ ] 写 5 个基础回归测试（待补）
 
-### Phase 2：Workflow 引擎（2-3 周）
+### Phase 2：Workflow 引擎
 
 - [ ] 实现节点基类 `Node`
 - [ ] 实现 DAG executor
 - [ ] 实现核心节点：LoadCheckpoint, CLIPTextEncode, EmptyLatentImage, KSampler, VAEDecode, SaveImage
 - [ ] 能解析 ComfyUI 导出的 JSON workflow
 
-### Phase 3：可选 Patch 与扩展（按需）
+### Phase 3：可选扩展（按需）
 
-- [ ] 按需加入 FreeU / SAG / IPAdapter patch
-- [ ] 或迁移到 native 实现
+- [x] FreeU / SAG patch（已完成）
+- [ ] IPAdapter patch 或 native 实现
+- [ ] img2img / ControlNet / 图像后处理（锐化、放大）
+- [ ] 扩展模块体系，允许替换 sd.cpp 子模块
 
 ---
 

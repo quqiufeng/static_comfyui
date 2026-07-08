@@ -39,7 +39,7 @@ echo "  OK"
 echo ""
 echo ">>> Step 2: 编译 comfycli"
 GLIBC_SYSROOT="$GLIBC_SYSROOT" bash "$STATICPY_DIR/static_build.sh" \
-  "$PROJECT_DIR/main.static.py" comfycli
+  "$PROJECT_DIR/comfycli/_bundle.static.py" comfycli
 echo "  OK"
 
 echo ""
