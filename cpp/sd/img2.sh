@@ -304,7 +304,7 @@ SAMPLING_METHOD="${SAMPLING_METHOD:-euler}"
 SCHEDULER="${SCHEDULER:-discrete}"
 CFG_SCALE="${CFG_SCALE:-3.2}"
 STEPS="${STEPS:-12}"
-HIRES_STEPS="${HIRES_STEPS:-35}"
+HIRES_STEPS="${HIRES_STEPS:-50}"
 HIRES_STRENGTH="${HIRES_STRENGTH:-0.35}"
 
 if [ "$WIDTH" -ge 1920 ] && [ "$HEIGHT" -ge 1080 ]; then
@@ -314,7 +314,7 @@ else
 fi
 
 # Add quality keywords - enhanced for realism and edge stability
-QUALITY_PREFIX="masterpiece, best quality, ultra-detailed, sharp focus, 8k uhd, photorealistic, highly detailed, crisp, clear, centered composition, professional portrait, medium shot, natural framing, warm skin tones, healthy skin glow, rosy cheeks, realistic skin texture, soft lighting"
+QUALITY_PREFIX="masterpiece, best quality, ultra-detailed, sharp focus, 8k uhd, photorealistic, highly detailed, crisp, clear, centered composition, professional portrait, medium shot, natural framing, realistic skin texture, soft lighting"
 if [[ "$PROMPT" != *"masterpiece"* ]]; then
     PROMPT="$QUALITY_PREFIX, $PROMPT"
 fi
