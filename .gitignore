@@ -224,6 +224,10 @@ comfyui_ref/
 sd_generate*.elf
 *.elf
 
+# C++ build artifacts in cpp/
+cpp/sdxl_pipeline
+
+
 # ComfyUI source (read-only reference, not part of this project)
 ComfyUI/
 
