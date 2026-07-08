@@ -372,7 +372,7 @@ if [ "$WIDTH" -eq 3840 ] && [ "$HEIGHT" -eq 2160 ]; then
     LOW_W=2560
     LOW_H=1440
 elif [ "$WIDTH" -eq 2560 ] && [ "$HEIGHT" -eq 1440 ]; then
-    # 2K: 1920x1080 基础 → 1.33x 放大（20G显存安全方案）
+    # 2K: 1920x1080 基础 -> 1.33x 放大（20G显存安全方案）
     LOW_W=1920
     LOW_H=1080
 elif [ "$WIDTH" -eq 1920 ] && [ "$HEIGHT" -eq 1080 ]; then
@@ -458,12 +458,12 @@ SD_CMD=("$SD_CLI"
   --freeu-b2 1.5
   --sag
   --sag-scale 1.0
-  --clarity 0.4
-  --sharpen 0.8
+  --clarity 0.2
+  --sharpen 0.3
   --sharpen-radius 1
-  --smart-sharpen 0.5
+  --smart-sharpen 0.2
   --smart-sharpen-radius 2
-  --edge-sharpen 1.5
+  --edge-sharpen 0.5
   --edge-sharpen-radius 2
   --edge-sharpen-threshold 0.3
   -W "$LOW_W"

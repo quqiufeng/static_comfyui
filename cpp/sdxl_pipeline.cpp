@@ -58,7 +58,7 @@ static bool save_png(const char* path, const uint8_t* data, int w, int h, int ch
 }
 
 int main(int argc, char** argv) {
-    const char* model  = "/data/models/image/RealVisXL_V5.0_fp16.safetensors";
+    const char* model  = "/data/models/image/Juggernaut-XI-byRunDiffusion.safetensors";
     const char* prompt = "solo,single woman,half body portrait of a young woman, "
                          "soft natural lighting, elegant pose, studio lighting, "
                          "sharp eyes, clean white background, medium close up";
@@ -72,11 +72,11 @@ int main(int argc, char** argv) {
     const char* output = "/home/quqiufeng/sdxl_pipeline_cpp.png";
 
     // Base pass: 1920x1080, HiRes target: 2560x1440 (same as sdxl_pipeline.py)
-    int W = 1920, H = 1080;
+    int W = 1280, H = 720;
     int target_W = 2560, target_H = 1440;
-    int steps = 20;
+    int steps = 30;
     int hires_steps = 45;
-    float cfg = 3.0f;
+    float cfg = 4.0f;
     float hires_strength = 0.35f;
     int seed = 42;
 
@@ -103,12 +103,12 @@ int main(int argc, char** argv) {
     fprintf(stderr, "  steps:  %d -> %d (HiRes)\n", steps, hires_steps);
     fprintf(stderr, "  cfg:    %.1f, hires_strength: %.2f, seed: %d\n", cfg, hires_strength, seed);
 
-    // 1. Create context. Full SDXL checkpoint already contains CLIP-L, CLIP-G, UNet and VAE.
+    // 1. Create context. Load UNet/VAE from SDXL checkpoint, external CLIP-L + CLIP-G for text encoding.
     sd_ctx_params_t ctx_params;
     sd_ctx_params_init(&ctx_params);
     ctx_params.model_path  = model;
-    ctx_params.clip_l_path = nullptr;
-    ctx_params.clip_g_path = nullptr;
+    ctx_params.clip_l_path = "/data/models/image/clip_l_sdcpp.safetensors";
+    ctx_params.clip_g_path = "/data/models/image/clip_g_sdcpp.safetensors";
     ctx_params.vae_path    = nullptr;
     ctx_params.n_threads   = 8;
     ctx_params.wtype       = SD_TYPE_F16;
@@ -137,15 +137,28 @@ int main(int argc, char** argv) {
     img_params.sample_params.sample_steps     = steps;
     img_params.sample_params.eta              = 0.0f;
 
+    // // FreeU (currently disabled - caused overfitting)
+    // img_params.freeu.enabled = true;
+    // img_params.freeu.b1      = 1.05f;
+    // img_params.freeu.b2      = 1.10f;
+    // img_params.freeu.s1      = 0.50f;
+    // img_params.freeu.s2      = 0.20f;
+
+    // SAG (Self-Attention Guidance)
+    img_params.sag.enabled = true;
+    img_params.sag.scale   = 1.0f;
+
     // VAE tiling: 2560x1440 needs tiled decode to avoid OOM
     img_params.vae_tiling_params.enabled        = true;
     img_params.vae_tiling_params.tile_size_x    = 32;
     img_params.vae_tiling_params.tile_size_y    = 32;
     img_params.vae_tiling_params.target_overlap = 0.5f;
 
-    // HiRes fix: low-res -> target via latent upscaling
+    // HiRes fix: low-res -> target via model upscaler (sharper than latent)
     img_params.hires.enabled             = true;
-    img_params.hires.upscaler          = SD_HIRES_UPSCALER_LATENT;
+    img_params.hires.upscaler          = SD_HIRES_UPSCALER_MODEL;
+    img_params.hires.model_path        = "/data/models/image/2x_ESRGAN.gguf";
+    img_params.hires.upscale_tile_size = 128;
     img_params.hires.target_width      = target_W;
     img_params.hires.target_height     = target_H;
     img_params.hires.steps             = hires_steps;
