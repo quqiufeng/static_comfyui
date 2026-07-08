@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 #include <memory>
+#include <stable-diffusion.h>
 #include <string>
 #include <utility>
 #include <vector>
@@ -38,14 +40,26 @@ struct ModelConfig {
     std::string model_path;
     std::string clip_l_path;
     std::string clip_g_path;
+    std::string clip_vision_path;
     std::string vae_path;
     std::string diffusion_model_path;  // standalone diffusion model (e.g. Z-Image GGUF)
     std::string llm_path;              // LLM text encoder for DiT models
     int n_threads = 8;
     bool keep_vae_on_cpu = false;
     bool keep_clip_on_cpu = false;
+    // Weight type: SD_TYPE_F16, SD_TYPE_F32, etc. SD_TYPE_COUNT means auto.
+    int wtype = SD_TYPE_F16;
+    // RNG: STD_DEFAULT_RNG, CUDA_RNG, CPU_RNG
+    int rng_type = STD_DEFAULT_RNG;
+    int sampler_rng_type = RNG_TYPE_COUNT; // RNG_TYPE_COUNT means default
+    // Prediction type: EPS_PRED, V_PRED, EDM_V_PRED, FLOW_PRED, ...
+    int prediction = PREDICTION_COUNT; // PREDICTION_COUNT means auto
     bool flash_attn = false;
     bool diffusion_flash_attn = false;
+    bool enable_mmap = false;
+    // Optional backend spec (e.g. "CUDA", "CPU")
+    std::string backend;
+    std::string params_backend;
 };
 
 /**
@@ -60,10 +74,14 @@ struct ImageGenerationParams {
     int height = 1024;
     int steps = 20;
     float cfg_scale = 7.0f;
+    float img_cfg_scale = INFINITY; // INFINITY means same as txt_cfg (native default)
+    float distilled_guidance = 3.5f;
+    int clip_skip = -1; // -1 means default
     int64_t seed = 42;
     int batch_count = 1;
     std::string sample_method = "euler_a";
     std::string scheduler = "discrete";
+    float eta = INFINITY; // INFINITY means default
 
     // LoRA
     std::vector<LoraConfig> loras;
@@ -76,10 +94,13 @@ struct ImageGenerationParams {
 
     // HiRes Fix
     bool hires_enabled = false;
+    std::string hires_upscaler = "latent"; // latent, latent-bicubic, lanczos, nearest, ...
     int hires_width = 0;
     int hires_height = 0;
+    float hires_scale = 2.0f;
     int hires_steps = 20;
     float hires_strength = 0.35f;
+    int hires_upscale_tile_size = 128;
 
     // FreeU
     bool freeu_enabled = false;

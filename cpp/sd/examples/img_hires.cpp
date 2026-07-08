@@ -134,6 +134,7 @@ int main(int argc, char** argv) {
     float vae_tile_overlap = 0.5f;
 
     bool hires = false;
+    int low_w = 0, low_h = 0;
     int hires_width = 0, hires_height = 0, hires_steps = 20;
     float hires_strength = 0.35f;
 
@@ -274,12 +275,14 @@ int main(int argc, char** argv) {
 
     // Mutually exclusive model modes: SDXL checkpoint vs GGUF+LLM
     if (!model.empty()) {
-        // SDXL checkpoint already contains VAE, ignore standalone VAE/diffusion/LLM
+        // SDXL checkpoint already contains VAE, CLIP-L, CLIP-G; ignore standalone components
         vae = "";
         diffusion_model = "";
         llm = "";
+        clip_l = "";
+        clip_g = "";
     } else {
-        // GGUF+LLM mode: no full checkpoint, VAE required
+        // GGUF+LLM mode: no full checkpoint, VAE/diffusion/LLM required, external CLIP optional
         model = "";
     }
 
@@ -291,21 +294,29 @@ int main(int argc, char** argv) {
         // No HiRes: generate directly at target resolution
         hires_width = W;
         hires_height = H;
+        low_w = W;
+        low_h = H;
     } else {
         if (hires_width == 0) hires_width = W;
         if (hires_height == 0) hires_height = H;
+        // If explicit hires target differs from W/H, treat W/H as the base resolution
+        if (hires_width != W || hires_height != H) {
+            low_w = W;
+            low_h = H;
+        } else {
+            // W/H is the target; compute a low-res base
+            auto resolutions = compute_hires_resolution(W, H);
+            low_w = resolutions[0].first;
+            low_h = resolutions[0].second;
+        }
     }
-
-    auto resolutions = compute_hires_resolution(W, H);
-    int low_w = resolutions[0].first;
-    int low_h = resolutions[0].second;
 
     std::fprintf(stderr, "img_hires (v2 adapter)\n");
     std::fprintf(stderr, "  model:  %s\n", model.empty() ? diffusion_model.c_str() : model.c_str());
     std::fprintf(stderr, "  diffusion_model: %s\n", diffusion_model.c_str());
     std::fprintf(stderr, "  llm:    %s\n", llm.c_str());
     std::fprintf(stderr, "  prompt: %s\n", prompt.c_str());
-    std::fprintf(stderr, "  low-res: %dx%d -> target: %dx%d\n", low_w, low_h, W, H);
+    std::fprintf(stderr, "  low-res: %dx%d -> target: %dx%d\n", low_w, low_h, hires_width, hires_height);
     std::fprintf(stderr, "  steps: %d (HiRes: %d), cfg=%.1f, seed=%ld\n", steps, hires ? hires_steps : 0, cfg, seed);
 
     sd::ModelConfig cfg_model;

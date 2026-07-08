@@ -44,8 +44,15 @@ bool SDPipeline::load(const ModelConfig& config) {
     sd_ctx_params_init(&params);
 
     params.model_path   = config.model_path.c_str();
-    params.clip_l_path  = config.clip_l_path.c_str();
-    params.clip_g_path  = config.clip_g_path.c_str();
+    if (!config.clip_l_path.empty()) {
+        params.clip_l_path = config.clip_l_path.c_str();
+    }
+    if (!config.clip_g_path.empty()) {
+        params.clip_g_path = config.clip_g_path.c_str();
+    }
+    if (!config.clip_vision_path.empty()) {
+        params.clip_vision_path = config.clip_vision_path.c_str();
+    }
     if (!config.vae_path.empty()) {
         params.vae_path = config.vae_path.c_str();
     }
@@ -55,10 +62,20 @@ bool SDPipeline::load(const ModelConfig& config) {
     if (!config.llm_path.empty()) {
         params.llm_path = config.llm_path.c_str();
     }
-    params.n_threads = config.n_threads;
-    params.wtype     = SD_TYPE_COUNT;  // auto, matches sd-cli default
-    params.flash_attn = config.flash_attn;
+    params.n_threads            = config.n_threads;
+    params.wtype                = static_cast<sd_type_t>(config.wtype);
+    params.rng_type             = static_cast<rng_type_t>(config.rng_type);
+    params.sampler_rng_type     = static_cast<rng_type_t>(config.sampler_rng_type);
+    params.prediction           = static_cast<prediction_t>(config.prediction);
+    params.flash_attn           = config.flash_attn;
     params.diffusion_flash_attn = config.diffusion_flash_attn;
+    params.enable_mmap          = config.enable_mmap;
+    if (!config.backend.empty()) {
+        params.backend = config.backend.c_str();
+    }
+    if (!config.params_backend.empty()) {
+        params.params_backend = config.params_backend.c_str();
+    }
 
     impl_->ctx = new_sd_ctx(&params);
     return impl_->ctx != nullptr;
@@ -81,18 +98,28 @@ Image SDPipeline::generate(const ImageGenerationParams& params) {
     img_params.negative_prompt = params.negative_prompt.c_str();
     img_params.width           = params.width;
     img_params.height          = params.height;
+    img_params.clip_skip       = params.clip_skip;
     img_params.seed            = params.seed;
     img_params.batch_count     = params.batch_count;
 
     img_params.sample_params.sample_steps     = params.steps;
     img_params.sample_params.guidance.txt_cfg = params.cfg_scale;
+    if (std::isfinite(params.img_cfg_scale)) {
+        img_params.sample_params.guidance.img_cfg = params.img_cfg_scale;
+    }
+    if (std::isfinite(params.distilled_guidance)) {
+        img_params.sample_params.guidance.distilled_guidance = params.distilled_guidance;
+    }
     img_params.sample_params.sample_method    = str_to_sample_method(params.sample_method.c_str());
-    img_params.sample_params.scheduler        = str_to_scheduler(params.scheduler.c_str());
+    img_params.sample_params.scheduler      = str_to_scheduler(params.scheduler.c_str());
     if (img_params.sample_params.sample_method == SAMPLE_METHOD_COUNT) {
         img_params.sample_params.sample_method = EULER_A_SAMPLE_METHOD;
     }
     if (img_params.sample_params.scheduler == SCHEDULER_COUNT) {
         img_params.sample_params.scheduler = DISCRETE_SCHEDULER;
+    }
+    if (std::isfinite(params.eta)) {
+        img_params.sample_params.eta = params.eta;
     }
 
     // LoRA
@@ -121,11 +148,17 @@ Image SDPipeline::generate(const ImageGenerationParams& params) {
 
     // HiRes Fix
     if (params.hires_enabled) {
-        img_params.hires.enabled            = true;
-        img_params.hires.target_width       = params.hires_width;
-        img_params.hires.target_height      = params.hires_height;
-        img_params.hires.steps              = params.hires_steps;
-        img_params.hires.denoising_strength = params.hires_strength;
+        img_params.hires.enabled             = true;
+        img_params.hires.upscaler            = str_to_sd_hires_upscaler(params.hires_upscaler.c_str());
+        if (img_params.hires.upscaler == SD_HIRES_UPSCALER_COUNT) {
+            img_params.hires.upscaler = SD_HIRES_UPSCALER_LATENT;
+        }
+        img_params.hires.target_width        = params.hires_width;
+        img_params.hires.target_height       = params.hires_height;
+        img_params.hires.scale               = params.hires_scale;
+        img_params.hires.steps               = params.hires_steps;
+        img_params.hires.denoising_strength  = params.hires_strength;
+        img_params.hires.upscale_tile_size   = params.hires_upscale_tile_size;
     }
 
     // FreeU
