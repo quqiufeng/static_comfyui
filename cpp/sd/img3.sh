@@ -1,13 +1,13 @@
 #!/bin/bash
 # =============================================================================
-# img3.sh - RealVisXL V5.0 Lightning + HiRes Fix wrapper
+# img3.sh - Checkpoint model + HiRes Fix wrapper
 # =============================================================================
 # Usage: ./img3.sh "prompt" ~/output.png 2560 1440
 #
 # Environment variables:
 #   SD_CLI            - path to img_hires binary (default: ./build/img_hires)
 #   MODEL_DIR         - model directory (default: /data/models/image)
-#   MODEL             - checkpoint (default: RealVisXL_V5.0_Lightning_fp16.safetensors)
+#   MODEL             - full checkpoint path (default: RealVisXL_V5.0_Lightning_fp16.safetensors)
 #   VAE_MODEL         - VAE model (default: ae.safetensors, ignored in checkpoint mode)
 #   VAE_TILE_SIZE     - tile size as NxN or single int (default: 128x128)
 #   VAE_TILE_OVERLAP  - overlap ratio (default: 0.5)
@@ -18,6 +18,11 @@
 #   HIRES_STEPS       - HiRes steps (default: 3)
 #   HIRES_STRENGTH    - HiRes denoising strength (default: 0.5)
 #   SEED              - random seed (default: random)
+#
+# Examples:
+#   ./img3.sh "a photo of a cat" ~/cat.png 1024 1024
+#   MODEL=/path/to/another.safetensors ./img3.sh "prompt" ~/out.png 1280 720
+#   CFG_SCALE=7.0 STEPS=30 HIRES_STEPS=45 ./img3.sh "prompt" ~/out.png 1280 720
 # =============================================================================
 set -euo pipefail
 
@@ -37,7 +42,8 @@ VAE_MODEL="${VAE_MODEL:-$MODEL_DIR/ae.safetensors}"
 VAE_TILE_SIZE="${VAE_TILE_SIZE:-128x128}"
 VAE_TILE_OVERLAP="${VAE_TILE_OVERLAP:-0.5}"
 
-# RealVisXL V5.0 Lightning recommended settings (DPM++ SDE Karras, 4-6 steps, CFG 1-2)
+# Defaults below are tuned for RealVisXL V5.0 Lightning.
+# Override any of them via environment variables for other models.
 SAMPLING_METHOD="${SAMPLING_METHOD:-dpm++2m_sde}"
 SCHEDULER="${SCHEDULER:-karras}"
 CFG_SCALE="${CFG_SCALE:-2.0}"
