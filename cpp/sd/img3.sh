@@ -51,6 +51,13 @@ CLIP_G_MODEL="${CLIP_G_MODEL:-$MODEL_DIR/clip_g_sdcpp.safetensors}"
 USE_EXTERNAL_VAE="${USE_EXTERNAL_VAE:-0}"
 USE_EXTERNAL_CLIP="${USE_EXTERNAL_CLIP:-1}"
 
+# FreeU / SAG
+FREEU="${FREEU:-1}"
+FREEU_B1="${FREEU_B1:-1.4}"
+FREEU_B2="${FREEU_B2:-1.5}"
+SAG="${SAG:-1}"
+SAG_SCALE="${SAG_SCALE:-1.0}"
+
 VAE_TILE_SIZE="${VAE_TILE_SIZE:-32x32}"
 VAE_TILE_OVERLAP="${VAE_TILE_OVERLAP:-0.5}"
 
@@ -233,6 +240,14 @@ fi
 
 if [ "$USE_EXTERNAL_CLIP" -eq 1 ]; then
     SD_CMD+=(--clip-l "$CLIP_L_MODEL" --clip-g "$CLIP_G_MODEL")
+fi
+
+if [ "$FREEU" -eq 1 ]; then
+    SD_CMD+=(--freeu --freeu-b1 "$FREEU_B1" --freeu-b2 "$FREEU_B2")
+fi
+
+if [ "$SAG" -eq 1 ]; then
+    SD_CMD+=(--sag --sag-scale "$SAG_SCALE")
 fi
 
 if [ -n "$LORA_CONFIG" ]; then
