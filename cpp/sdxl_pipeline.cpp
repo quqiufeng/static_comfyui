@@ -122,8 +122,8 @@ int main(int argc, char** argv) {
     int W = 1920, H = 1080;
     int target_W = 2560, target_H = 1440;
     int steps = 30;
-    int hires_steps = 45;
-    float cfg = 3.0f;
+    int hires_steps = 90;
+    float cfg = 4.0f;
     float hires_strength = 0.5f;
     int seed = 42;
 
@@ -179,7 +179,7 @@ int main(int argc, char** argv) {
     img_params.batch_count     = 1;
 
     img_params.sample_params.guidance.txt_cfg = cfg;
-    img_params.sample_params.sample_method    = EULER_SAMPLE_METHOD;
+    img_params.sample_params.sample_method    = DPMPP2M_SDE_SAMPLE_METHOD;
     img_params.sample_params.scheduler        = KARRAS_SCHEDULER;
     img_params.sample_params.sample_steps     = steps;
     img_params.sample_params.eta              = 0.0f;
@@ -251,7 +251,7 @@ int main(int argc, char** argv) {
         hires_params.init_image      = upscaled;
 
         hires_params.sample_params.guidance.txt_cfg = cfg;
-        hires_params.sample_params.sample_method    = EULER_SAMPLE_METHOD;
+        hires_params.sample_params.sample_method    = DPMPP2M_SDE_SAMPLE_METHOD;
         hires_params.sample_params.scheduler        = KARRAS_SCHEDULER;
         hires_params.sample_params.sample_steps     = hires_steps;
         hires_params.sample_params.eta              = 0.0f;
