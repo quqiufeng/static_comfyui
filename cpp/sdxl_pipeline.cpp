@@ -132,7 +132,7 @@ int main(int argc, char** argv) {
     img_params.batch_count     = 1;
 
     img_params.sample_params.guidance.txt_cfg = cfg;
-    img_params.sample_params.sample_method    = EULER_SAMPLE_METHOD;
+    img_params.sample_params.sample_method    = DPMPP2M_SDE_SAMPLE_METHOD;
     img_params.sample_params.scheduler        = KARRAS_SCHEDULER;
     img_params.sample_params.sample_steps     = steps;
     img_params.sample_params.eta              = 0.0f;
