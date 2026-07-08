@@ -105,7 +105,7 @@ static sd_image_t resize_image_bilinear(const sd_image_t& src, int dst_w, int ds
 }
 
 int main(int argc, char** argv) {
-    const char* model  = "/data/models/image/DreamShaperXL_Turbo_v2_1.safetensors";
+    const char* model  = "/data/models/image/RealVisXL_V5.0_fp16.safetensors";
     const char* prompt = "solo,single woman,half body portrait of a young woman, "
                          "soft natural lighting, elegant pose, studio lighting, "
                          "sharp eyes, clean white background, medium close up";
@@ -121,10 +121,10 @@ int main(int argc, char** argv) {
     // Base pass: 1920x1080, HiRes target: 2560x1440 (same as sdxl_pipeline.py)
     int W = 1920, H = 1080;
     int target_W = 2560, target_H = 1440;
-    int steps = 8;
+    int steps = 30;
     int hires_steps = 45;
     float cfg = 3.0f;
-    float hires_strength = 0.35f;
+    float hires_strength = 0.5f;
     int seed = 42;
 
     for (int i = 1; i < argc; i++) {
