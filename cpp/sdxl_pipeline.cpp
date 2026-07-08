@@ -145,11 +145,21 @@ int main(int argc, char** argv) {
 
     // HiRes fix: low-res -> target via latent upscaling
     img_params.hires.enabled             = true;
-    img_params.hires.upscaler          = SD_HIRES_UPSCALER_LATENT;
-    img_params.hires.target_width      = target_W;
-    img_params.hires.target_height     = target_H;
+    img_params.hires.upscaler            = SD_HIRES_UPSCALER_LATENT;
+    img_params.hires.target_width        = target_W;
+    img_params.hires.target_height       = target_H;
     img_params.hires.steps             = hires_steps;
-    img_params.hires.denoising_strength = hires_strength;
+    img_params.hires.denoising_strength  = hires_strength;
+
+    // FreeU + SAG
+    img_params.freeu.enabled = true;
+    img_params.freeu.b1      = 1.4f;
+    img_params.freeu.b2      = 1.5f;
+    img_params.freeu.s1      = 0.9f;
+    img_params.freeu.s2      = 0.2f;
+
+    img_params.sag.enabled = true;
+    img_params.sag.scale   = 1.0f;
 
     // 3. Generate
     sd_image_t* images = nullptr;
