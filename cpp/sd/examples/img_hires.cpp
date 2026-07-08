@@ -272,6 +272,18 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // Mutually exclusive model modes: SDXL checkpoint vs GGUF+LLM
+    if (!model.empty()) {
+        // SDXL checkpoint already contains CLIP/VAE/UNet, ignore standalone paths
+        diffusion_model = "";
+        llm = "";
+        clip_l = "";
+        clip_g = "";
+    } else {
+        // GGUF+LLM mode: no full checkpoint
+        model = "";
+    }
+
     if (quality_prefix && prompt.find("masterpiece") == std::string::npos) {
         prompt = "masterpiece, best quality, ultra-detailed, sharp focus, photorealistic, highly detailed, " + prompt;
     }
