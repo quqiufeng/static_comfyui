@@ -7,16 +7,20 @@
 # Environment variables:
 #   SD_CLI            - path to img_hires binary (default: ./build/img_hires)
 #   MODEL_DIR         - model directory (default: /data/models/image)
-#   MODEL             - full checkpoint path (default: dreamshaperXL_lightningDPMSDE.safetensors)
-#   VAE_MODEL         - VAE model (default: ae.safetensors, ignored in checkpoint mode)
-#   VAE_TILE_SIZE     - tile size as NxN or single int (default: 128x128)
+#   MODEL             - full checkpoint path (default: DreamShaperXL_Turbo_v2_1.safetensors)
+#   VAE_MODEL         - external VAE model (default: ae_sdcpp.safetensors, requires USE_EXTERNAL_VAE=1)
+#   CLIP_L_MODEL      - external CLIP-L model (default: clip_l_sdcpp.safetensors)
+#   CLIP_G_MODEL      - external CLIP-G model (default: clip_g_sdcpp.safetensors)
+#   USE_EXTERNAL_CLIP - default 1, set 0 to use checkpoint built-in CLIP
+#   USE_EXTERNAL_VAE  - default 0, set 1 to use external VAE (often fails with checkpoints)
+#   VAE_TILE_SIZE     - tile size as NxN or single int (default: 32x32)
 #   VAE_TILE_OVERLAP  - overlap ratio (default: 0.5)
-#   SAMPLING_METHOD   - sampler name (default: dpm++2m_sde)
+#   SAMPLING_METHOD   - sampler name (default: euler)
 #   SCHEDULER         - scheduler name (default: karras)
-#   CFG_SCALE         - CFG scale (default: 2.0)
-#   STEPS             - base steps (default: 6)
-#   HIRES_STEPS       - HiRes steps (default: 3)
-#   HIRES_STRENGTH    - HiRes denoising strength (default: 0.5)
+#   CFG_SCALE         - CFG scale (default: 3.0)
+#   STEPS             - base steps (default: 20)
+#   HIRES_STEPS       - HiRes steps (default: 45)
+#   HIRES_STRENGTH    - HiRes denoising strength (default: 0.35)
 #   SEED              - random seed (default: random)
 #
 # Examples:
@@ -37,7 +41,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODEL_DIR="${MODEL_DIR:-/data/models/image}"
 SD_CLI="${SD_CLI:-$SCRIPT_DIR/build/img_hires}"
 MODEL="${MODEL:-$MODEL_DIR/DreamShaperXL_Turbo_v2_1.safetensors}"
-VAE_MODEL="${VAE_MODEL:-$MODEL_DIR/ae.safetensors}"
+VAE_MODEL="${VAE_MODEL:-$MODEL_DIR/ae_sdcpp.safetensors}"
+CLIP_L_MODEL="${CLIP_L_MODEL:-$MODEL_DIR/clip_l_sdcpp.safetensors}"
+CLIP_G_MODEL="${CLIP_G_MODEL:-$MODEL_DIR/clip_g_sdcpp.safetensors}"
+
+# Use external VAE/CLIP with checkpoint model? External CLIP is enabled by default
+# because it improves prompt following; external VAE is off by default because it
+# fails to load with many checkpoints. Override with USE_EXTERNAL_VAE=1 / USE_EXTERNAL_CLIP=0.
+USE_EXTERNAL_VAE="${USE_EXTERNAL_VAE:-0}"
+USE_EXTERNAL_CLIP="${USE_EXTERNAL_CLIP:-1}"
 
 VAE_TILE_SIZE="${VAE_TILE_SIZE:-32x32}"
 VAE_TILE_OVERLAP="${VAE_TILE_OVERLAP:-0.5}"
@@ -82,7 +94,7 @@ echo "========================================"
 if [ ! -f "$SD_CLI" ]; then echo -e "${RED}Error: img_hires binary not found: $SD_CLI${NC}"; exit 1; fi
 if [ ! -x "$SD_CLI" ]; then echo -e "${RED}Error: img_hires binary not executable: $SD_CLI${NC}"; exit 1; fi
 
-for model in "$MODEL" "$VAE_MODEL"; do
+for model in "$MODEL" "$VAE_MODEL" "$CLIP_L_MODEL" "$CLIP_G_MODEL"; do
     if [ ! -f "$model" ]; then echo -e "${RED}Error: model not found: $model${NC}"; exit 1; fi
 done
 
@@ -169,6 +181,10 @@ echo -e "Low-res Pass: ${GREEN}${LOW_W}x${LOW_H} -> ${WIDTH}x${HEIGHT}${NC}"
 echo -e "Steps: $STEPS -> $HIRES_STEPS (HiRes)"
 echo -e "CFG Scale: ${CYAN}$CFG_SCALE${NC}"
 echo -e "HiRes Strength: $HIRES_STRENGTH"
+echo -e "Model:  ${CYAN}$MODEL${NC}"
+echo -e "VAE:    ${CYAN}$VAE_MODEL${NC}"
+echo -e "CLIP-L: ${CYAN}$CLIP_L_MODEL${NC}"
+echo -e "CLIP-G: ${CYAN}$CLIP_G_MODEL${NC}"
 echo -e "Sampler: ${CYAN}$SAMPLING_METHOD${NC} + ${CYAN}$SCHEDULER${NC}"
 echo -e "VAE Tile: ${CYAN}${VAE_TILE_INT}x${VAE_TILE_INT}${NC} (overlap $VAE_TILE_OVERLAP)"
 echo "----------------------------------------"
@@ -182,7 +198,6 @@ echo "Generating...  $(date '+%H:%M:%S')"
 
 SD_CMD=("$SD_CLI"
   --model "$MODEL"
-  --vae "$VAE_MODEL"
   --negative "$NEGATIVE_PROMPT"
   --cfg "$CFG_SCALE"
   --method "$SAMPLING_METHOD"
@@ -211,6 +226,14 @@ SD_CMD=("$SD_CLI"
   "$PROMPT"
   "$OUTPUT_PATH"
 )
+
+if [ "$USE_EXTERNAL_VAE" -eq 1 ]; then
+    SD_CMD+=(--vae "$VAE_MODEL")
+fi
+
+if [ "$USE_EXTERNAL_CLIP" -eq 1 ]; then
+    SD_CMD+=(--clip-l "$CLIP_L_MODEL" --clip-g "$CLIP_G_MODEL")
+fi
 
 if [ -n "$LORA_CONFIG" ]; then
     SD_CMD+=(--lora "$LORA_CONFIG")

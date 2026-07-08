@@ -118,6 +118,9 @@ int main(int argc, char** argv) {
     std::string clip_l = "/data/models/image/clip_l.safetensors";
     std::string clip_g = "/data/models/image/clip_g.safetensors";
     std::string vae    = "/data/models/image/ae.safetensors";
+    bool clip_l_overridden = false;
+    bool clip_g_overridden = false;
+    bool vae_overridden    = false;
     std::string neg    = "blurry, low quality, worst quality, jpeg artifacts, noise, grain, soft focus, out of focus, hazy, unclear, bad anatomy, deformed";
     std::string output;
     std::string prompt;
@@ -160,10 +163,13 @@ int main(int argc, char** argv) {
             llm = argv[++i];
         } else if (std::strcmp(argv[i], "--clip-l") == 0 && i + 1 < argc) {
             clip_l = argv[++i];
+            clip_l_overridden = true;
         } else if (std::strcmp(argv[i], "--clip-g") == 0 && i + 1 < argc) {
             clip_g = argv[++i];
+            clip_g_overridden = true;
         } else if (std::strcmp(argv[i], "--vae") == 0 && i + 1 < argc) {
             vae = argv[++i];
+            vae_overridden = true;
         } else if ((std::strcmp(argv[i], "-n") == 0 || std::strcmp(argv[i], "--negative") == 0) && i + 1 < argc) {
             neg = argv[++i];
         } else if ((std::strcmp(argv[i], "-o") == 0 || std::strcmp(argv[i], "--output") == 0) && i + 1 < argc) {
@@ -275,12 +281,13 @@ int main(int argc, char** argv) {
 
     // Mutually exclusive model modes: SDXL checkpoint vs GGUF+LLM
     if (!model.empty()) {
-        // SDXL checkpoint already contains VAE, CLIP-L, CLIP-G; ignore standalone components
-        vae = "";
+        // SDXL checkpoint contains UNet/VAE/CLIP-L/CLIP-G; external diffusion/LLM are not used
         diffusion_model = "";
         llm = "";
-        clip_l = "";
-        clip_g = "";
+        // Use external VAE/CLIP only when explicitly requested
+        if (!clip_l_overridden) clip_l = "";
+        if (!clip_g_overridden) clip_g = "";
+        if (!vae_overridden)    vae = "";
     } else {
         // GGUF+LLM mode: no full checkpoint, VAE/diffusion/LLM required, external CLIP optional
         model = "";
@@ -315,6 +322,9 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "  model:  %s\n", model.empty() ? diffusion_model.c_str() : model.c_str());
     std::fprintf(stderr, "  diffusion_model: %s\n", diffusion_model.c_str());
     std::fprintf(stderr, "  llm:    %s\n", llm.c_str());
+    std::fprintf(stderr, "  clip_l: %s\n", clip_l.c_str());
+    std::fprintf(stderr, "  clip_g: %s\n", clip_g.c_str());
+    std::fprintf(stderr, "  vae:    %s\n", vae.c_str());
     std::fprintf(stderr, "  prompt: %s\n", prompt.c_str());
     std::fprintf(stderr, "  low-res: %dx%d -> target: %dx%d\n", low_w, low_h, hires_width, hires_height);
     std::fprintf(stderr, "  steps: %d (HiRes: %d), cfg=%.1f, seed=%ld\n", steps, hires ? hires_steps : 0, cfg, seed);
