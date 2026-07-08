@@ -126,7 +126,7 @@ int main(int argc, char** argv) {
     // SDXL native bucket: 1216x832 (3:2 landscape)
     int W = 1216, H = 832;
     int target_W = 1216, target_H = 832;
-    int steps = 30;
+    int steps = 12;
     int hires_steps = 90;
     float cfg = 4.0f;
     float hires_strength = 0.3f;
@@ -161,13 +161,13 @@ int main(int argc, char** argv) {
     sd_ctx_params_t ctx_params;
     sd_ctx_params_init(&ctx_params);
     ctx_params.model_path  = model;
-    ctx_params.clip_l_path = clip_l;
-    ctx_params.clip_g_path = clip_g;
+    ctx_params.clip_l_path = nullptr;
+    ctx_params.clip_g_path = nullptr;
     ctx_params.vae_path    = nullptr;
     ctx_params.n_threads   = 8;
     ctx_params.wtype       = SD_TYPE_F16;
     ctx_params.rng_type    = STD_DEFAULT_RNG;
-    ctx_params.diffusion_flash_attn = true;
+    ctx_params.diffusion_flash_attn = false;
 
     sd_ctx_t* ctx = new_sd_ctx(&ctx_params);
     if (!ctx) {
@@ -185,8 +185,8 @@ int main(int argc, char** argv) {
     img_params.seed            = seed;
     img_params.batch_count     = 1;
 
-    img_params.sample_params.guidance.txt_cfg = cfg;
-    img_params.sample_params.sample_method    = DPMPP2M_SDE_SAMPLE_METHOD;
+    img_params.sample_params.guidance.txt_cfg = 3.0f;
+    img_params.sample_params.sample_method    = EULER_SAMPLE_METHOD;
     img_params.sample_params.scheduler        = KARRAS_SCHEDULER;
     img_params.sample_params.sample_steps     = steps;
     img_params.sample_params.eta              = 0.0f;
@@ -212,8 +212,9 @@ int main(int argc, char** argv) {
     // img_params.freeu.s1      = 0.9f;
     // img_params.freeu.s2      = 0.2f;
 
-    img_params.sag.enabled = true;
-    img_params.sag.scale   = 0.7f;
+    // SAG disabled
+    img_params.sag.enabled = false;
+    img_params.sag.scale   = 0.0f;
 
     // 3. Base pass: generate at W x H (ComfyUI EmptyLatentImage -> KSampler)
     sd_image_t* base_images = nullptr;
