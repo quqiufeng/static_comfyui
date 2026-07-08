@@ -107,9 +107,10 @@ static sd_image_t resize_image_bilinear(const sd_image_t& src, int dst_w, int ds
 int main(int argc, char** argv) {
     const char* model  = "/data/models/image/RealVisXL_V5.0_fp16.safetensors";
     const char* prompt = "solo,single woman,half body portrait of a young woman, "
+                         "realistic skin texture, natural pores, candid photo, film grain, RAW photo, "
                          "soft natural lighting, elegant pose, studio lighting, "
-                         "sharp eyes, clean white background, medium close up";
-    const char* neg    = "blurry, low quality, worst quality, jpeg artifacts, noise, grain, "
+                         "natural eyes, clean white background, medium close up";
+    const char* neg    = "blurry, low quality, worst quality, jpeg artifacts, "
                          "soft focus, out of focus, hazy, unclear, bad anatomy, deformed, "
                          "border artifacts, edge distortion, tiling artifacts, edge artifacts, "
                          "frame distortion, warped edges, stretched proportions, asymmetrical face, "
@@ -206,7 +207,7 @@ int main(int argc, char** argv) {
     // img_params.freeu.s2      = 0.2f;
 
     img_params.sag.enabled = true;
-    img_params.sag.scale   = 1.0f;
+    img_params.sag.scale   = 0.5f;
 
     // 3. Base pass: generate at W x H (ComfyUI EmptyLatentImage -> KSampler)
     sd_image_t* base_images = nullptr;
@@ -263,7 +264,7 @@ int main(int argc, char** argv) {
         // hires_params.freeu.s2      = 0.2f;
 
         hires_params.sag.enabled = true;
-        hires_params.sag.scale   = 1.0f;
+        hires_params.sag.scale   = 0.5f;
 
         hires_params.vae_tiling_params.enabled        = true;
         hires_params.vae_tiling_params.tile_size_x    = 32;
