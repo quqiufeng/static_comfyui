@@ -274,13 +274,12 @@ int main(int argc, char** argv) {
 
     // Mutually exclusive model modes: SDXL checkpoint vs GGUF+LLM
     if (!model.empty()) {
-        // SDXL checkpoint already contains CLIP/VAE/UNet, ignore standalone paths
+        // SDXL checkpoint already contains VAE, ignore standalone VAE/diffusion/LLM
+        vae = "";
         diffusion_model = "";
         llm = "";
-        clip_l = "";
-        clip_g = "";
     } else {
-        // GGUF+LLM mode: no full checkpoint
+        // GGUF+LLM mode: no full checkpoint, VAE required
         model = "";
     }
 
