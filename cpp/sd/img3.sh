@@ -51,11 +51,11 @@ CLIP_G_MODEL="${CLIP_G_MODEL:-$MODEL_DIR/clip_g_sdcpp.safetensors}"
 USE_EXTERNAL_VAE="${USE_EXTERNAL_VAE:-0}"
 USE_EXTERNAL_CLIP="${USE_EXTERNAL_CLIP:-1}"
 
-# FreeU / SAG
-FREEU="${FREEU:-1}"
+# FreeU / SAG (RealVisXL usually does not need them)
+FREEU="${FREEU:-0}"
 FREEU_B1="${FREEU_B1:-1.4}"
 FREEU_B2="${FREEU_B2:-1.5}"
-SAG="${SAG:-1}"
+SAG="${SAG:-0}"
 SAG_SCALE="${SAG_SCALE:-1.0}"
 
 VAE_TILE_SIZE="${VAE_TILE_SIZE:-32x32}"
