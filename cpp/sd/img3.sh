@@ -1,22 +1,22 @@
 #!/bin/bash
 # =============================================================================
-# img3.sh - SDXL HiRes Fix + VAE tiling using our own img_hires CLI
+# img3.sh - RealVisXL V5.0 Lightning + HiRes Fix wrapper
 # =============================================================================
 # Usage: ./img3.sh "prompt" ~/output.png 2560 1440
 #
 # Environment variables:
 #   SD_CLI            - path to img_hires binary (default: ./build/img_hires)
 #   MODEL_DIR         - model directory (default: /data/models/image)
-#   MODEL             - full SDXL checkpoint (default: sd_xl_base_1.0.safetensors)
-#   VAE_MODEL         - VAE model (default: ae.safetensors)
+#   MODEL             - checkpoint (default: RealVisXL_V5.0_Lightning_fp16.safetensors)
+#   VAE_MODEL         - VAE model (default: ae.safetensors, ignored in checkpoint mode)
 #   VAE_TILE_SIZE     - tile size as NxN or single int (default: 128x128)
 #   VAE_TILE_OVERLAP  - overlap ratio (default: 0.5)
-#   SAMPLING_METHOD   - sampler name (default: euler)
-#   SCHEDULER         - scheduler name (default: discrete)
-#   CFG_SCALE         - CFG scale (default: 7.0)
-#   STEPS             - base steps (default: 20)
-#   HIRES_STEPS       - HiRes steps (default: 45)
-#   HIRES_STRENGTH    - HiRes denoising strength (default: 0.35)
+#   SAMPLING_METHOD   - sampler name (default: dpm++2m_sde)
+#   SCHEDULER         - scheduler name (default: karras)
+#   CFG_SCALE         - CFG scale (default: 2.0)
+#   STEPS             - base steps (default: 6)
+#   HIRES_STEPS       - HiRes steps (default: 3)
+#   HIRES_STRENGTH    - HiRes denoising strength (default: 0.5)
 #   SEED              - random seed (default: random)
 # =============================================================================
 set -euo pipefail
@@ -31,18 +31,19 @@ NC="\033[0m"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODEL_DIR="${MODEL_DIR:-/data/models/image}"
 SD_CLI="${SD_CLI:-$SCRIPT_DIR/build/img_hires}"
-MODEL="${MODEL:-$MODEL_DIR/sd_xl_base_1.0.safetensors}"
+MODEL="${MODEL:-$MODEL_DIR/RealVisXL_V5.0_Lightning_fp16.safetensors}"
 VAE_MODEL="${VAE_MODEL:-$MODEL_DIR/ae.safetensors}"
 
 VAE_TILE_SIZE="${VAE_TILE_SIZE:-128x128}"
 VAE_TILE_OVERLAP="${VAE_TILE_OVERLAP:-0.5}"
 
-SAMPLING_METHOD="${SAMPLING_METHOD:-dpm++2m}"
+# RealVisXL V5.0 Lightning recommended settings (DPM++ SDE Karras, 4-6 steps, CFG 1-2)
+SAMPLING_METHOD="${SAMPLING_METHOD:-dpm++2m_sde}"
 SCHEDULER="${SCHEDULER:-karras}"
-CFG_SCALE="${CFG_SCALE:-7.0}"
-STEPS="${STEPS:-30}"
-HIRES_STEPS="${HIRES_STEPS:-45}"
-HIRES_STRENGTH="${HIRES_STRENGTH:-0.35}"
+CFG_SCALE="${CFG_SCALE:-2.0}"
+STEPS="${STEPS:-6}"
+HIRES_STEPS="${HIRES_STEPS:-3}"
+HIRES_STRENGTH="${HIRES_STRENGTH:-0.5}"
 
 LORA_CONFIG=""
 
@@ -90,7 +91,7 @@ if ! [[ "$VAE_TILE_INT" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
-NEGATIVE_PROMPT="${NEGATIVE_PROMPT:-blurry, low quality, worst quality, jpeg artifacts, noise, grain, soft focus, out of focus, hazy, unclear, bad anatomy, deformed, watermark, text, logo, signature}"
+NEGATIVE_PROMPT="${NEGATIVE_PROMPT:-(worst quality, low quality, illustration, 3d, 2d, painting, cartoons, sketch), open mouth, bad anatomy, bad hands, signature, watermarks, ugly, imperfect eyes, skewed eyes, unnatural face, unnatural body, error, extra limb, missing limbs}"
 
 if [ -n "$OUTPUT_FILE" ]; then
     if [[ "$OUTPUT_FILE" == *"/"* ]]; then
@@ -174,15 +175,11 @@ SD_CMD=("$SD_CLI"
   --cfg "$CFG_SCALE"
   --method "$SAMPLING_METHOD"
   --scheduler "$SCHEDULER"
+  --no-quality-prefix
   --diffusion-fa
   --vae-tiling
   --vae-tile-size "$VAE_TILE_INT"
   --vae-tile-overlap "$VAE_TILE_OVERLAP"
-  --freeu
-  --freeu-b1 1.4
-  --freeu-b2 1.5
-  --sag
-  --sag-scale 1.0
   --clarity 0.4
   --sharpen 0.8
   --sharpen-radius 1
