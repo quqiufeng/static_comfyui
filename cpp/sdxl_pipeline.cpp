@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <cmath>
 
 static bool save_png(const char* path, const uint8_t* data, int w, int h, int channels) {
     FILE* fp = fopen(path, "wb");
@@ -55,6 +56,52 @@ static bool save_png(const char* path, const uint8_t* data, int w, int h, int ch
     png_destroy_write_struct(&png, &info);
     fclose(fp);
     return true;
+}
+
+// ComfyUI-style LatentUpscale approximation: bilinear resize of RGB(A) uint8 image.
+// We cannot access the raw latent tensor through the stable-diffusion.cpp C API, so
+// we decode the base image, upscale in pixel space, then feed it back as init_image
+// for an img2img pass at the target resolution. This is equivalent to:
+//   EmptyLatentImage -> KSampler(base) -> LatentUpscale -> KSampler(refine)
+// except the upscale happens in pixel space before VAE re-encode.
+static sd_image_t resize_image_bilinear(const sd_image_t& src, int dst_w, int dst_h) {
+    sd_image_t dst;
+    dst.width   = dst_w;
+    dst.height  = dst_h;
+    dst.channel = src.channel;
+    dst.data    = (uint8_t*)malloc(dst_w * dst_h * src.channel);
+
+    float sx = (src.width  > 1) ? (float)(src.width  - 1) / (dst_w - 1) : 0.f;
+    float sy = (src.height > 1) ? (float)(src.height - 1) / (dst_h - 1) : 0.f;
+
+    for (int y = 0; y < dst_h; y++) {
+        float fy = y * sy;
+        int y0 = (int)floorf(fy);
+        int y1 = (int)ceilf(fy);
+        if (y1 >= src.height) y1 = src.height - 1;
+        float wy = fy - y0;
+        for (int x = 0; x < dst_w; x++) {
+            float fx = x * sx;
+            int x0 = (int)floorf(fx);
+            int x1 = (int)ceilf(fx);
+            if (x1 >= src.width) x1 = src.width - 1;
+            float wx = fx - x0;
+            for (int c = 0; c < (int)src.channel; c++) {
+                uint8_t v00 = src.data[(y0 * src.width + x0) * src.channel + c];
+                uint8_t v10 = src.data[(y0 * src.width + x1) * src.channel + c];
+                uint8_t v01 = src.data[(y1 * src.width + x0) * src.channel + c];
+                uint8_t v11 = src.data[(y1 * src.width + x1) * src.channel + c];
+                float v0 = v00 + (v10 - v00) * wx;
+                float v1 = v01 + (v11 - v01) * wx;
+                float v  = v0 + (v1 - v0) * wy;
+                int iv = (int)roundf(v);
+                if (iv < 0) iv = 0;
+                if (iv > 255) iv = 255;
+                dst.data[(y * dst_w + x) * src.channel + c] = (uint8_t)iv;
+            }
+        }
+    }
+    return dst;
 }
 
 int main(int argc, char** argv) {
@@ -161,33 +208,88 @@ int main(int argc, char** argv) {
     // img_params.sag.enabled = true;
     // img_params.sag.scale   = 1.0f;
 
-    // 3. Generate
-    sd_image_t* images = nullptr;
-    int num_images = 0;
-    if (!generate_image(ctx, &img_params, &images, &num_images)) {
-        fprintf(stderr, "generate_image failed\n");
+    // 3. Base pass: generate at W x H (ComfyUI EmptyLatentImage -> KSampler)
+    sd_image_t* base_images = nullptr;
+    int base_num = 0;
+    if (!generate_image(ctx, &img_params, &base_images, &base_num)) {
+        fprintf(stderr, "generate_image (base) failed\n");
         free_sd_ctx(ctx);
         return 1;
     }
-
-    if (!images || num_images == 0) {
-        fprintf(stderr, "No images generated\n");
+    if (!base_images || base_num == 0) {
+        fprintf(stderr, "No base images generated\n");
         free_sd_ctx(ctx);
         return 1;
     }
+    sd_image_t base_image = base_images[0];
 
-    // 4. Save PNG
+    // 4. ComfyUI-style HiRes: pixel-space upscale -> img2img at target resolution.
+    //    This mimics LatentUpscale + KSampler: the upscaled image is VAE-encoded
+    //    by the second generate_image call, noise is injected, and the UNet refines
+    //    it for hires_steps at the target resolution.
+    sd_image_t* final_images = nullptr;
+    int final_num = 0;
+    int actual_target_w = target_W;
+    int actual_target_h = target_H;
+    if (target_W != base_image.width || target_H != base_image.height) {
+        fprintf(stderr, "HiRes upscale: %dx%d -> %dx%d (bilinear pixel-space)\n",
+                base_image.width, base_image.height, target_W, target_H);
+
+        sd_image_t upscaled = resize_image_bilinear(base_image, target_W, target_H);
+        free_sd_images(base_images, base_num);
+        base_images = nullptr;
+
+        sd_img_gen_params_t hires_params;
+        sd_img_gen_params_init(&hires_params);
+        hires_params.prompt          = prompt;
+        hires_params.negative_prompt = neg;
+        hires_params.width           = target_W;
+        hires_params.height          = target_H;
+        hires_params.seed            = seed + 1;
+        hires_params.batch_count     = 1;
+        hires_params.strength        = hires_strength;
+        hires_params.init_image      = upscaled;
+
+        hires_params.sample_params.guidance.txt_cfg = cfg;
+        hires_params.sample_params.sample_method    = EULER_SAMPLE_METHOD;
+        hires_params.sample_params.scheduler        = KARRAS_SCHEDULER;
+        hires_params.sample_params.sample_steps     = hires_steps;
+        hires_params.sample_params.eta              = 0.0f;
+
+        hires_params.vae_tiling_params.enabled        = true;
+        hires_params.vae_tiling_params.tile_size_x    = 32;
+        hires_params.vae_tiling_params.tile_size_y    = 32;
+        hires_params.vae_tiling_params.target_overlap = 0.5f;
+
+        if (!generate_image(ctx, &hires_params, &final_images, &final_num)) {
+            fprintf(stderr, "generate_image (hires) failed\n");
+            free(upscaled.data);
+            free_sd_ctx(ctx);
+            return 1;
+        }
+        free(upscaled.data);
+        if (!final_images || final_num == 0) {
+            fprintf(stderr, "No hires images generated\n");
+            free_sd_ctx(ctx);
+            return 1;
+        }
+    } else {
+        final_images = base_images;
+        final_num    = base_num;
+    }
+
+    // 5. Save PNG
     fprintf(stderr, "Saving %dx%d (channels=%d) to %s\n",
-            images[0].width, images[0].height, images[0].channel, output);
-    if (!save_png(output, images[0].data, images[0].width, images[0].height, images[0].channel)) {
+            final_images[0].width, final_images[0].height, final_images[0].channel, output);
+    if (!save_png(output, final_images[0].data, final_images[0].width, final_images[0].height, final_images[0].channel)) {
         fprintf(stderr, "save_png failed\n");
-        free_sd_images(images, num_images);
+        free_sd_images(final_images, final_num);
         free_sd_ctx(ctx);
         return 1;
     }
 
-    // 5. Cleanup
-    free_sd_images(images, num_images);
+    // 6. Cleanup
+    free_sd_images(final_images, final_num);
     free_sd_ctx(ctx);
     fprintf(stderr, "Done\n");
     return 0;
