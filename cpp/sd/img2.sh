@@ -303,7 +303,7 @@ if ! [[ "$HEIGHT" =~ ^[0-9]+$ ]] || [ "$HEIGHT" -le 0 ]; then echo -e "${RED}Err
 SAMPLING_METHOD="${SAMPLING_METHOD:-euler}"
 SCHEDULER="${SCHEDULER:-discrete}"
 CFG_SCALE="${CFG_SCALE:-3.2}"
-STEPS="${STEPS:-12}"
+STEPS="${STEPS:-25}"
 HIRES_STEPS="${HIRES_STEPS:-50}"
 HIRES_STRENGTH="${HIRES_STRENGTH:-0.35}"
 
