@@ -284,7 +284,7 @@ int main(int argc, char** argv) {
     }
 
     if (quality_prefix && prompt.find("masterpiece") == std::string::npos) {
-        prompt = "masterpiece, best quality, ultra-detailed, sharp focus, photorealistic, highly detailed, " + prompt;
+        prompt = "masterpiece, best quality, ultra-detailed, sharp focus, highly detailed, " + prompt;
     }
 
     if (!hires) {
