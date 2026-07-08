@@ -48,7 +48,7 @@ struct ModelConfig {
     bool keep_vae_on_cpu = false;
     bool keep_clip_on_cpu = false;
     // Weight type: SD_TYPE_F16, SD_TYPE_F32, etc. SD_TYPE_COUNT means auto.
-    int wtype = SD_TYPE_F16;
+    int wtype = SD_TYPE_COUNT;
     // RNG: STD_DEFAULT_RNG, CUDA_RNG, CPU_RNG
     int rng_type = STD_DEFAULT_RNG;
     int sampler_rng_type = RNG_TYPE_COUNT; // RNG_TYPE_COUNT means default
