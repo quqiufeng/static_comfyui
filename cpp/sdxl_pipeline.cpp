@@ -151,15 +151,15 @@ int main(int argc, char** argv) {
     img_params.hires.steps             = hires_steps;
     img_params.hires.denoising_strength  = hires_strength;
 
-    // FreeU + SAG
+    // FreeU + SAG (SAG currently disabled; FreeU only)
     img_params.freeu.enabled = true;
     img_params.freeu.b1      = 1.4f;
     img_params.freeu.b2      = 1.5f;
     img_params.freeu.s1      = 0.9f;
     img_params.freeu.s2      = 0.2f;
 
-    img_params.sag.enabled = true;
-    img_params.sag.scale   = 1.0f;
+    // img_params.sag.enabled = true;
+    // img_params.sag.scale   = 1.0f;
 
     // 3. Generate
     sd_image_t* images = nullptr;
