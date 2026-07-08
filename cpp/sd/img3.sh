@@ -40,7 +40,7 @@ NC="\033[0m"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODEL_DIR="${MODEL_DIR:-/data/models/image}"
 SD_CLI="${SD_CLI:-$SCRIPT_DIR/build/img_hires}"
-MODEL="${MODEL:-$MODEL_DIR/DreamShaperXL_Turbo_v2_1.safetensors}"
+MODEL="${MODEL:-$MODEL_DIR/RealVisXL_V5.0_fp16.safetensors}"
 VAE_MODEL="${VAE_MODEL:-$MODEL_DIR/ae_sdcpp.safetensors}"
 CLIP_L_MODEL="${CLIP_L_MODEL:-$MODEL_DIR/clip_l_sdcpp.safetensors}"
 CLIP_G_MODEL="${CLIP_G_MODEL:-$MODEL_DIR/clip_g_sdcpp.safetensors}"
@@ -61,14 +61,14 @@ SAG_SCALE="${SAG_SCALE:-1.0}"
 VAE_TILE_SIZE="${VAE_TILE_SIZE:-32x32}"
 VAE_TILE_OVERLAP="${VAE_TILE_OVERLAP:-0.5}"
 
-# Defaults aligned with sdxl_pipeline.cpp (direct /opt/sd C API reference).
-# Override any of them via environment variables for other models.
-SAMPLING_METHOD="${SAMPLING_METHOD:-euler}"
+# Defaults tuned for RealVisXL V5.0 (native SDXL, photorealism).
+# Override via environment variables for other models.
+SAMPLING_METHOD="${SAMPLING_METHOD:-dpm++2m_sde}"
 SCHEDULER="${SCHEDULER:-karras}"
-CFG_SCALE="${CFG_SCALE:-3.0}"
-STEPS="${STEPS:-20}"
-HIRES_STEPS="${HIRES_STEPS:-45}"
-HIRES_STRENGTH="${HIRES_STRENGTH:-0.35}"
+CFG_SCALE="${CFG_SCALE:-4.0}"
+STEPS="${STEPS:-30}"
+HIRES_STEPS="${HIRES_STEPS:-25}"
+HIRES_STRENGTH="${HIRES_STRENGTH:-0.25}"
 
 LORA_CONFIG=""
 
