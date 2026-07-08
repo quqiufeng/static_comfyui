@@ -774,9 +774,9 @@ cmake --build build -j$(nproc)
 - 1280×720 快速测试（5+5 steps）约 25 秒，输出正常。
 - 之前图像错误的原因是：错误地用 safetensors SDXL 模型测试，且 FreeU 实现为全 tensor 缩放；迁移后使用 img2.sh 同款 GGUF 模型，并把 FreeU 修复为 channel-half 缩放。
 
-### 13.6 对 `/opt/sd` 的 patch 记录
+### 13.6 对 `/opt/sd` 的 patch 应用与维护
 
-为支持 FreeU/SAG，对 `/opt/sd` 做了最小修改，完整 diff 保存在：
+为支持 FreeU/SAG，对 `/opt/sd` 做了最小修改。patch 文件作为本仓库的源文件维护，路径为：
 
 ```
 cpp/sd/patches/sdcpp-freeu-sag-v2.patch
@@ -792,11 +792,38 @@ cpp/sd/patches/sdcpp-freeu-sag-v2.patch
 | `src/stable-diffusion.cpp` | 在 `StableDiffusionGGML` 中加入 FreeU/SAG/Dynamic CFG 字段；在 `generate_image` 中读取参数；在采样循环中应用 SAG 与 Dynamic CFG |
 | `src/model/vae/vae.hpp` | 对 VAE decode tiling 的输出 tile 尺寸做上限保护（1024），避免消费级显卡 OOM |
 
-应用 patch：
+#### 应用 patch（推荐方式）
+
+在新的 `/opt/sd` 仓库上应用 patch，需先切到 patch 对应的 commit（`bb84971`），再应用：
 
 ```bash
 cd /opt/sd
+# 确保子模块已初始化
+git submodule update --init --recursive
+
+# 检查 patch 是否能干净应用
+git apply --check /opt/static_comfyui/cpp/sd/patches/sdcpp-freeu-sag-v2.patch
+
+# 应用 patch
 git apply /opt/static_comfyui/cpp/sd/patches/sdcpp-freeu-sag-v2.patch
+```
+
+> 注意：patch 只包含 FreeU/SAG 相关代码改动，不包含 `examples/server/frontend` 子模块的 dirty 状态标记。应用时无需关心该子模块是否 clean。
+
+#### 重新生成 patch
+
+如果在 `/opt/sd` 上继续修改了 FreeU/SAG 相关代码，并希望同步回 patch 文件，先清空 `cpp/sd/patches/` 目录，再从 `/opt/sd` 生成：
+
+```bash
+# 1. 清空旧 patch
+rm -f /opt/static_comfyui/cpp/sd/patches/*
+
+# 2. 从 /opt/sd 当前改动生成新 patch（排除子模块 dirty 标记）
+cd /opt/sd
+git diff -- . ':!examples/server/frontend' > /opt/static_comfyui/cpp/sd/patches/sdcpp-freeu-sag-v2.patch
+
+# 3. 检查生成结果
+wc -l /opt/static_comfyui/cpp/sd/patches/sdcpp-freeu-sag-v2.patch
 ```
 
 ### 13.7 已知问题与后续方向
