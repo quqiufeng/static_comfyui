@@ -7,7 +7,7 @@
 # Environment variables:
 #   SD_CLI            - path to img_hires binary (default: ./build/img_hires)
 #   MODEL_DIR         - model directory (default: /data/models/image)
-#   MODEL             - full checkpoint path (default: realvisxlV50_v50LightningBakedvae.safetensors)
+#   MODEL             - full checkpoint path (default: dreamshaperXL_lightningDPMSDE.safetensors)
 #   VAE_MODEL         - VAE model (default: ae.safetensors, ignored in checkpoint mode)
 #   VAE_TILE_SIZE     - tile size as NxN or single int (default: 128x128)
 #   VAE_TILE_OVERLAP  - overlap ratio (default: 0.5)
@@ -36,20 +36,20 @@ NC="\033[0m"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODEL_DIR="${MODEL_DIR:-/data/models/image}"
 SD_CLI="${SD_CLI:-$SCRIPT_DIR/build/img_hires}"
-MODEL="${MODEL:-$MODEL_DIR/realvisxlV50_v50LightningBakedvae.safetensors}"
+MODEL="${MODEL:-$MODEL_DIR/DreamShaperXL_Turbo_v2_1.safetensors}"
 VAE_MODEL="${VAE_MODEL:-$MODEL_DIR/ae.safetensors}"
 
 VAE_TILE_SIZE="${VAE_TILE_SIZE:-128x128}"
 VAE_TILE_OVERLAP="${VAE_TILE_OVERLAP:-0.5}"
 
-# Defaults below are tuned for RealVisXL V5.0 Lightning.
+# Defaults aligned with img2.sh for max quality at 2560x1440.
 # Override any of them via environment variables for other models.
-SAMPLING_METHOD="${SAMPLING_METHOD:-dpm++2m_sde}"
-SCHEDULER="${SCHEDULER:-karras}"
-CFG_SCALE="${CFG_SCALE:-2.0}"
-STEPS="${STEPS:-6}"
-HIRES_STEPS="${HIRES_STEPS:-3}"
-HIRES_STRENGTH="${HIRES_STRENGTH:-0.5}"
+SAMPLING_METHOD="${SAMPLING_METHOD:-euler}"
+SCHEDULER="${SCHEDULER:-discrete}"
+CFG_SCALE="${CFG_SCALE:-3.2}"
+STEPS="${STEPS:-20}"
+HIRES_STEPS="${HIRES_STEPS:-45}"
+HIRES_STRENGTH="${HIRES_STRENGTH:-0.35}"
 
 LORA_CONFIG=""
 
@@ -97,8 +97,6 @@ if ! [[ "$VAE_TILE_INT" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
-NEGATIVE_PROMPT="${NEGATIVE_PROMPT:-(worst quality, low quality, illustration, 3d, 2d, painting, cartoons, sketch), open mouth, bad anatomy, bad hands, signature, watermarks, ugly, imperfect eyes, skewed eyes, unnatural face, unnatural body, error, extra limb, missing limbs}"
-
 if [ -n "$OUTPUT_FILE" ]; then
     if [[ "$OUTPUT_FILE" == *"/"* ]]; then
         OUTPUT_DIR="$(dirname "$OUTPUT_FILE")"
@@ -116,6 +114,14 @@ else
     MD5=$(echo "$PROMPT" | md5sum | cut -c1-8)
     OUTPUT="${TIMESTAMP}_${MD5}.png"
 fi
+
+# Add quality keywords - same as img2.sh
+QUALITY_PREFIX="masterpiece, best quality, ultra-detailed, sharp focus, 8k uhd, photorealistic, highly detailed, crisp, clear, centered composition, complete face, full head, professional portrait"
+if [[ "$PROMPT" != *"masterpiece"* ]]; then
+    PROMPT="$QUALITY_PREFIX, $PROMPT"
+fi
+
+NEGATIVE_PROMPT="${NEGATIVE_PROMPT:-blurry, low quality, worst quality, jpeg artifacts, noise, grain, soft focus, out of focus, hazy, unclear, bad anatomy, deformed, border artifacts, edge distortion, tiling artifacts, edge artifacts, frame distortion, warped edges, stretched proportions, asymmetrical face, off-center, cropped, out of frame, partial face, cut off, incomplete head, cropped head, watermark, text, logo, signature, cropped shoulders, embedding:EasyNegative, embedding:bad-hands-5}"
 
 mkdir -p "$OUTPUT_DIR"
 OUTPUT_PATH="$OUTPUT_DIR/$OUTPUT"
@@ -181,11 +187,15 @@ SD_CMD=("$SD_CLI"
   --cfg "$CFG_SCALE"
   --method "$SAMPLING_METHOD"
   --scheduler "$SCHEDULER"
-  --no-quality-prefix
   --diffusion-fa
   --vae-tiling
   --vae-tile-size "$VAE_TILE_INT"
   --vae-tile-overlap "$VAE_TILE_OVERLAP"
+  --freeu
+  --freeu-b1 1.4
+  --freeu-b2 1.5
+  --sag
+  --sag-scale 1.0
   --clarity 0.4
   --sharpen 0.8
   --sharpen-radius 1
