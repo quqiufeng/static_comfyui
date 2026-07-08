@@ -106,16 +106,21 @@ static sd_image_t resize_image_bilinear(const sd_image_t& src, int dst_w, int ds
 
 int main(int argc, char** argv) {
     const char* model  = "/data/models/image/RealVisXL_V5.0_fp16.safetensors";
-    const char* prompt = "solo,single woman,half body portrait of a young woman, "
+    const char* prompt = "solo,single woman,upper body portrait of a young woman, "
                          "soft natural lighting, elegant pose, studio lighting, "
-                         "sharp eyes, clean white background, medium close up";
+                         "sharp eyes, clean white background, medium close up, "
+                         "perfect hands, detailed hands";
     const char* neg    = "blurry, low quality, worst quality, jpeg artifacts, noise, grain, "
                          "soft focus, out of focus, hazy, unclear, bad anatomy, deformed, "
+                         "bad hands, deformed hands, extra fingers, fused fingers, missing fingers, "
+                         "mutated hands, malformed hands, poorly drawn hands, extra limbs, "
                          "border artifacts, edge distortion, tiling artifacts, edge artifacts, "
                          "frame distortion, warped edges, stretched proportions, asymmetrical face, "
                          "off-center, cropped, out of frame, partial face, cut off, incomplete head, "
                          "cropped head, watermark, text, logo, signature, cropped shoulders, "
                          "embedding:EasyNegative, embedding:bad-hands-5";
+    const char* clip_l = "/data/models/image/clip_l_sdcpp.safetensors";
+    const char* clip_g = "/data/models/image/clip_g_sdcpp.safetensors";
     const char* output = "/home/quqiufeng/sdxl_pipeline_cpp.png";
 
     // Base pass: 1920x1080, HiRes target: 2560x1440 (same as sdxl_pipeline.py)
@@ -128,10 +133,12 @@ int main(int argc, char** argv) {
     int seed = 42;
 
     for (int i = 1; i < argc; i++) {
-        if      (!strcmp(argv[i], "-m") && i + 1 < argc) model  = argv[++i];
-        else if (!strcmp(argv[i], "-p") && i + 1 < argc) prompt = argv[++i];
-        else if (!strcmp(argv[i], "-n") && i + 1 < argc) neg    = argv[++i];
-        else if (!strcmp(argv[i], "-o") && i + 1 < argc) output = argv[++i];
+        if      (!strcmp(argv[i], "-m") && i + 1 < argc) model   = argv[++i];
+        else if (!strcmp(argv[i], "--clip-l") && i + 1 < argc) clip_l = argv[++i];
+        else if (!strcmp(argv[i], "--clip-g") && i + 1 < argc) clip_g = argv[++i];
+        else if (!strcmp(argv[i], "-p") && i + 1 < argc) prompt  = argv[++i];
+        else if (!strcmp(argv[i], "-n") && i + 1 < argc) neg     = argv[++i];
+        else if (!strcmp(argv[i], "-o") && i + 1 < argc) output  = argv[++i];
         else if (!strcmp(argv[i], "-W") && i + 1 < argc) W      = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-H") && i + 1 < argc) H      = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--target-W") && i + 1 < argc) target_W = atoi(argv[++i]);
@@ -154,8 +161,8 @@ int main(int argc, char** argv) {
     sd_ctx_params_t ctx_params;
     sd_ctx_params_init(&ctx_params);
     ctx_params.model_path  = model;
-    ctx_params.clip_l_path = nullptr;
-    ctx_params.clip_g_path = nullptr;
+    ctx_params.clip_l_path = clip_l;
+    ctx_params.clip_g_path = clip_g;
     ctx_params.vae_path    = nullptr;
     ctx_params.n_threads   = 8;
     ctx_params.wtype       = SD_TYPE_F16;
