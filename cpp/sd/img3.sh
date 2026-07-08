@@ -39,14 +39,14 @@ SD_CLI="${SD_CLI:-$SCRIPT_DIR/build/img_hires}"
 MODEL="${MODEL:-$MODEL_DIR/DreamShaperXL_Turbo_v2_1.safetensors}"
 VAE_MODEL="${VAE_MODEL:-$MODEL_DIR/ae.safetensors}"
 
-VAE_TILE_SIZE="${VAE_TILE_SIZE:-128x128}"
+VAE_TILE_SIZE="${VAE_TILE_SIZE:-32x32}"
 VAE_TILE_OVERLAP="${VAE_TILE_OVERLAP:-0.5}"
 
-# Defaults aligned with img2.sh for max quality at 2560x1440.
+# Defaults aligned with sdxl_pipeline.cpp (direct /opt/sd C API reference).
 # Override any of them via environment variables for other models.
 SAMPLING_METHOD="${SAMPLING_METHOD:-euler}"
-SCHEDULER="${SCHEDULER:-discrete}"
-CFG_SCALE="${CFG_SCALE:-3.2}"
+SCHEDULER="${SCHEDULER:-karras}"
+CFG_SCALE="${CFG_SCALE:-3.0}"
 STEPS="${STEPS:-20}"
 HIRES_STEPS="${HIRES_STEPS:-45}"
 HIRES_STRENGTH="${HIRES_STRENGTH:-0.35}"
@@ -121,7 +121,7 @@ if [[ "$PROMPT" != *"masterpiece"* ]]; then
     PROMPT="$QUALITY_PREFIX, $PROMPT"
 fi
 
-NEGATIVE_PROMPT="${NEGATIVE_PROMPT:-blurry, low quality, worst quality, jpeg artifacts, noise, grain, soft focus, out of focus, hazy, unclear, bad anatomy, deformed, border artifacts, edge distortion, tiling artifacts, edge artifacts, frame distortion, warped edges, stretched proportions, asymmetrical face, off-center, cropped, out of frame, partial face, cut off, incomplete head, cropped head, watermark, text, logo, signature, cropped shoulders, embedding:EasyNegative, embedding:bad-hands-5}"
+NEGATIVE_PROMPT="${NEGATIVE_PROMPT:-blurry, low quality, worst quality, jpeg artifacts, noise, grain, soft focus, out of focus, hazy, unclear, bad anatomy, deformed, disfigured, mutated, mutation, malformed, missing limbs, floating limbs, disconnected limbs, extra limbs, duplicate, morbid, mutilated, bad face, cloned face, extra face, double head, extra head, ugly, gross proportions, dehydrated, long neck, cross-eyed, asymmetrical eyes, bad eyes, bad mouth, bad nose, bad teeth, extra fingers, fused fingers, too many fingers, mutated hands, poorly drawn hands, poorly drawn face, malformed hands, missing fingers, border artifacts, edge distortion, tiling artifacts, edge artifacts, frame distortion, warped edges, stretched proportions, asymmetrical face, off-center, cropped, out of frame, partial face, cut off, incomplete head, cropped head, watermark, text, logo, signature, username, artist name, cropped shoulders, embedding:EasyNegative, embedding:bad-hands-5}"
 
 mkdir -p "$OUTPUT_DIR"
 OUTPUT_PATH="$OUTPUT_DIR/$OUTPUT"
@@ -191,11 +191,6 @@ SD_CMD=("$SD_CLI"
   --vae-tiling
   --vae-tile-size "$VAE_TILE_INT"
   --vae-tile-overlap "$VAE_TILE_OVERLAP"
-  --freeu
-  --freeu-b1 1.4
-  --freeu-b2 1.5
-  --sag
-  --sag-scale 1.0
   --clarity 0.4
   --sharpen 0.8
   --sharpen-radius 1
