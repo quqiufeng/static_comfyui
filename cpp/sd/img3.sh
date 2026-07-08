@@ -7,7 +7,7 @@
 # Environment variables:
 #   SD_CLI            - path to img_hires binary (default: ./build/img_hires)
 #   MODEL_DIR         - model directory (default: /data/models/image)
-#   MODEL             - full checkpoint path (default: RealVisXL_V5.0_Lightning_fp16.safetensors)
+#   MODEL             - full checkpoint path (default: realvisxlV50_v50LightningBakedvae.safetensors)
 #   VAE_MODEL         - VAE model (default: ae.safetensors, ignored in checkpoint mode)
 #   VAE_TILE_SIZE     - tile size as NxN or single int (default: 128x128)
 #   VAE_TILE_OVERLAP  - overlap ratio (default: 0.5)
@@ -36,7 +36,7 @@ NC="\033[0m"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODEL_DIR="${MODEL_DIR:-/data/models/image}"
 SD_CLI="${SD_CLI:-$SCRIPT_DIR/build/img_hires}"
-MODEL="${MODEL:-$MODEL_DIR/RealVisXL_V5.0_Lightning_fp16.safetensors}"
+MODEL="${MODEL:-$MODEL_DIR/realvisxlV50_v50LightningBakedvae.safetensors}"
 VAE_MODEL="${VAE_MODEL:-$MODEL_DIR/ae.safetensors}"
 
 VAE_TILE_SIZE="${VAE_TILE_SIZE:-128x128}"
