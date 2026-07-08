@@ -123,9 +123,9 @@ int main(int argc, char** argv) {
     const char* clip_g = "/data/models/image/clip_g_sdcpp.safetensors";
     const char* output = "/home/quqiufeng/sdxl_pipeline_cpp.png";
 
-    // Base pass: 1080x1920, HiRes target: 1440x2560 (portrait)
-    int W = 1080, H = 1920;
-    int target_W = 1440, target_H = 2560;
+    // SDXL native bucket: 1216x832 (3:2 landscape)
+    int W = 1216, H = 832;
+    int target_W = 1216, target_H = 832;
     int steps = 30;
     int hires_steps = 90;
     float cfg = 4.0f;
