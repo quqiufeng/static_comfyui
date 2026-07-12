@@ -6,6 +6,12 @@
 # 说明: 此脚本用于验证 my-img 项目开发完成后的功能，并兼容本项目的 C++ 推理后端
 # =============================================================================
 #
+# 【最终定稿提示词 - 单人正面半身人像】
+# solo,single woman,half body portrait of a young woman, facing camera, front
+# view, soft natural lighting, studio lighting, sharp eyes, pleasant warm
+# light-colored background, medium shot
+# =============================================================================
+#
 # ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 # ┃                           【优化过程全记录】                                  ┃
 # ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
@@ -304,8 +310,8 @@ if ! [[ "$HEIGHT" =~ ^[0-9]+$ ]] || [ "$HEIGHT" -le 0 ]; then echo -e "${RED}Err
 SAMPLING_METHOD="${SAMPLING_METHOD:-euler}"
 SCHEDULER="${SCHEDULER:-discrete}"
 CFG_SCALE="${CFG_SCALE:-2.5}"
-STEPS="${STEPS:-15}"
-HIRES_STEPS="${HIRES_STEPS:-35}"
+STEPS="${STEPS:-20}"
+HIRES_STEPS="${HIRES_STEPS:-45}"
 HIRES_STRENGTH="${HIRES_STRENGTH:-0.35}"
 
 if [ "$WIDTH" -ge 1920 ] && [ "$HEIGHT" -ge 1080 ]; then
@@ -315,7 +321,7 @@ else
 fi
 
 # Add quality keywords - enhanced for realism and edge stability
-QUALITY_PREFIX="masterpiece, best quality, ultra-detailed, sharp focus, 8k uhd, photorealistic, highly detailed, crisp, clear, centered composition, complete face, full head, professional portrait"
+QUALITY_PREFIX="masterpiece, best quality, ultra-detailed, sharp focus, 8k uhd, photorealistic, highly detailed, crisp, clear, centered composition, professional portrait, medium shot, realistic skin texture, soft lighting"
 if [[ "$PROMPT" != *"masterpiece"* ]]; then
     PROMPT="$QUALITY_PREFIX, $PROMPT"
 fi
@@ -454,14 +460,14 @@ SD_CMD=("$SD_CLI"
   --vae-tiling
   --vae-tile-size "$VAE_TILE_INT"
   --vae-tile-overlap "$VAE_TILE_OVERLAP"
-  # --freeu
-  # --freeu-b1 1.4
-  # --freeu-b2 1.5
+  --freeu
+  --freeu-b1 1.3
+  --freeu-b2 1.4
   # --sag
   # --sag-scale 1.0
-  --clarity 0.4
-  --sharpen 0.8
-  --sharpen-radius 2
+  --clarity 0.2
+  --sharpen 0.3
+  --sharpen-radius 1
   --smart-sharpen 0.5
   --smart-sharpen-radius 2
   --edge-sharpen 1.5
