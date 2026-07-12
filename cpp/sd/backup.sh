@@ -303,9 +303,9 @@ if ! [[ "$HEIGHT" =~ ^[0-9]+$ ]] || [ "$HEIGHT" -le 0 ]; then echo -e "${RED}Err
 # 风景推荐: dpm++2m + karras + cfg 1.5 + strength 0.35
 SAMPLING_METHOD="${SAMPLING_METHOD:-euler}"
 SCHEDULER="${SCHEDULER:-discrete}"
-CFG_SCALE="${CFG_SCALE:-3.2}"
-STEPS="${STEPS:-20}"
-HIRES_STEPS="${HIRES_STEPS:-45}"
+CFG_SCALE="${CFG_SCALE:-2.5}"
+STEPS="${STEPS:-15}"
+HIRES_STEPS="${HIRES_STEPS:-35}"
 HIRES_STRENGTH="${HIRES_STRENGTH:-0.35}"
 
 if [ "$WIDTH" -ge 1920 ] && [ "$HEIGHT" -ge 1080 ]; then
@@ -454,11 +454,11 @@ SD_CMD=("$SD_CLI"
   --vae-tiling
   --vae-tile-size "$VAE_TILE_INT"
   --vae-tile-overlap "$VAE_TILE_OVERLAP"
-  --freeu
-  --freeu-b1 1.4
-  --freeu-b2 1.5
-  --sag
-  --sag-scale 1.0
+  # --freeu
+  # --freeu-b1 1.4
+  # --freeu-b2 1.5
+  # --sag
+  # --sag-scale 1.0
   --clarity 0.4
   --sharpen 0.8
   --sharpen-radius 2
