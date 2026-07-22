@@ -124,6 +124,66 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
   ./comfycli-bin test_remote_2560.json --output-dir ./output
 ```
 
+## 已实现节点
+
+以下 ComfyUI 节点已在 `comfycli/nodes.static.py` 中实现，可直接在工作流 JSON 中使用。节点数量持续按需求扩展。
+
+### 模型加载
+
+| 节点 | 输出 | 说明 |
+|------|------|------|
+| `CheckpointLoaderSimple` | `MODEL`, `CLIP`, `VAE` | 加载 SDXL/SD1.5 等 checkpoint（safetensors），sd.cpp 后端自动识别 |
+| `DiffusionModelLoader` | `MODEL`, `CLIP`, `VAE` | 加载 GGUF 格式的 diffusion 模型 + LLM 文本编码器（Flux 风格） |
+| `DualCLIPLoader` | `CLIP` | 兼容 ComfyUI 拓扑的占位节点（后端 pipeline 已内含 CLIP） |
+
+### 条件 / 文本编码
+
+| 节点 | 输出 | 说明 |
+|------|------|------|
+| `CLIPTextEncode` | `CONDITIONING` | 文本编码，后端 CLIP 内部处理 |
+| `CLIPSetLastLayer` | `CLIP` | 设置 CLIP 输出层（当前为兼容占位，后端使用默认层） |
+| `ConditioningCombine` | `CONDITIONING` | 拼接两个条件文本，用逗号连接 |
+| `ConditioningConcat` | `CONDITIONING` | 同 `ConditioningCombine`，兼容标准 ComfyUI 命名 |
+| `ConditioningAverage` | `CONDITIONING` | 按 `conditioning_to_strength` 决定文本拼接顺序 |
+
+### 图像 / 潜空间
+
+| 节点 | 输出 | 说明 |
+|------|------|------|
+| `EmptyLatentImage` | `LATENT` | 创建指定尺寸的空白潜空间 |
+| `LatentUpscale` | `LATENT` | 直接修改 `LATENT` 的 width/height（后端采样时使用目标尺寸） |
+| `LatentCrop` | `LATENT` | 同 `LatentUpscale`，裁剪到目标尺寸 |
+| `LoadImage` | `IMAGE`, `MASK` | 从文件路径加载图片，返回图片路径（当前 MASK 为占位） |
+| `PreviewImage` | `IMAGE` | 透传图片路径，用于工作流可视化 |
+| `VAEDecode` | `IMAGE` | 兼容节点，后端采样已完成 VAE decode |
+| `SaveImage` | - | 输出节点，保存图片到指定目录 |
+
+### 采样与优化
+
+| 节点 | 输出 | 说明 |
+|------|------|------|
+| `KSampler` | `LATENT` | 核心采样节点，支持 sampler/scheduler/seed/cfg/steps |
+| `KSamplerAdvanced` | `LATENT`, `IMAGE` | 扩展参数（start_at_step / end_at_step / return_noise 等占位） |
+| `HiResFix` | `LATENT` | 原生高清修复节点，支持 hires_steps/hires_strength、FreeU、SAG、VAE Tiling 及后处理 |
+| `ADetailer` | `IMAGE` | 对生成结果进行局部重绘修复 |
+
+### 模型增强 / 风格注入
+
+| 节点 | 输出 | 说明 |
+|------|------|------|
+| `LORALoader` | `MODEL` | 加载 LoRA 并合并到当前 pipeline |
+| `IPAdapterApply` | `MODEL` | 应用 IPAdapter 风格/人脸参考 |
+| `CLIPVisionLoader` | `CLIP_VISION` | 加载 CLIP Vision ONNX 模型 |
+| `IPAdapterModelLoader` | `IPADAPTER` | 加载 IPAdapter ONNX 模型 |
+
+### 工具
+
+| 节点 | 输出 | 说明 |
+|------|------|------|
+| `Reroute` | `*` | 透传任意输入，仅用于整理连线 |
+
+> **注意**：StaticPy 无运行期自定义节点加载能力。新增节点需在 `comfycli/nodes.static.py` 中注册并重新编译。
+
 ## 技术架构
 
 ```
@@ -315,7 +375,7 @@ Phase 3: 组件级推理
   [ ] 如需在 StaticPy 层暴露更多采样参数/ControlNet 节点，可继续扩展
 
 Phase 4: 节点 → DAG → 入口（MVP 已通）
-  [x] nodes.static.py           最小节点集：CheckpointLoaderSimple / KSampler / SaveImage
+  [x] nodes.static.py           已支持节点：CheckpointLoaderSimple / DualCLIPLoader / CLIPTextEncode / CLIPSetLastLayer / ConditioningCombine / ConditioningConcat / ConditioningAverage / EmptyLatentImage / LatentUpscale / LatentCrop / KSampler / KSamplerAdvanced / LORALoader / DiffusionModelLoader / HiResFix / ADetailer / IPAdapterApply / CLIPVisionLoader / IPAdapterModelLoader / LoadImage / PreviewImage / Reroute / VAEDecode / SaveImage
   [x] execution.static.py       PromptExecutor（拓扑排序 + 输入链接解析）
   [x] main.static.py            CLI 入口（workflow JSON / --checkpoint --prompt）
   [ ] 200+ 完整节点集（按需逐步补充）
@@ -333,7 +393,7 @@ Phase 5: 端到端验证（workflow + prompt 均已通）
 - 无自定义节点动态加载——自定义节点需编译期注册
 - CLI 先行，无 WebSocket/HTTP UI
 - 同步执行，无 asyncio
-- 目前仅实现最小节点集，完整 ComfyUI 节点需要逐步补齐
+- 已实现 24 个核心节点，完整 ComfyUI 节点集仍在按需扩展中
 
 ## 项目文件
 

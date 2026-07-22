@@ -29,7 +29,7 @@ comfycli/*.static.py  ──→  concat_src.py  ──→  comfycli/_bundle.stat
 comfycli/
 ├── main.static.py              # 主入口 (StaticPy 源码)
 ├── execution.static.py         # 节点 DAG 调度
-├── nodes.static.py             # ComfyUI 节点定义（当前为最小 MVP）
+├── nodes.static.py             # ComfyUI 节点定义（已实现 24 个核心节点，按需扩展）
 ├── cli_args.static.py          # 命令行参数解析
 ├── folder_paths.static.py      # 路径管理
 ├── model_base.static.py        # 模型基类（保留，但当前由 sd.cpp 内置）
