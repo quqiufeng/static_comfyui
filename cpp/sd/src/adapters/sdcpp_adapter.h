@@ -194,6 +194,9 @@ int sd_pipeline_generate(sd_pipeline_t pipeline,
                          float sag_scale,
                          const char* output_path);
 
+/** Utility: create directory and all parents if missing. Returns 0 on success. */
+int sd_ensure_dir(const char* path);
+
 #ifdef __cplusplus
 }
 #endif

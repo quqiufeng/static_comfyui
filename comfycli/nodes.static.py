@@ -1,4 +1,4 @@
-from sd_backend import sd_create, sd_free, sd_load, sd_generate_with_options, SD_WTYPE_AUTO
+from sd_backend import sd_create, sd_free, sd_load, sd_generate_with_options, sd_ensure_directory, SD_WTYPE_AUTO
 
 
 NODE_CLASS_MAPPINGS: dict = make_dict()
@@ -25,41 +25,26 @@ def make_sd_pipeline_handle(pipeline: ptr) -> SDPipelineHandle:
     return SDPipelineHandle(pipeline)
 
 
-def checkpoint_loader_simple(inputs):
-    print("DEBUG inputs dict keys:")
-    keys = dict_keys(inputs)
-    i = 0
-    while i < len(keys):
-        print("  key=" + keys[i])
-        i = i + 1
+def resolve_model_path(name: str) -> str:
+    if str_starts_with(name, "/"):
+        return name
+    return "/data/models/image/" + name
 
+
+def checkpoint_loader_simple(inputs):
     ckpt_name = dict_get(inputs, "ckpt_name")
     clip_l_name = dict_get(inputs, "clip_l_name")
     clip_g_name = dict_get(inputs, "clip_g_name")
 
-    print("DEBUG ckpt_name=[" + ckpt_name + "]")
-    print("DEBUG clip_l_name=[" + clip_l_name + "]")
-    print("DEBUG clip_g_name=[" + clip_g_name + "]")
-
-    base_path = "/data/models/image/"
-    if str_starts_with(ckpt_name, "/"):
-        ckpt_path = ckpt_name
-    else:
-        ckpt_path = base_path + ckpt_name
-
+    ckpt_path = resolve_model_path(ckpt_name)
     if clip_l_name is None:
         clip_l_path = ""
-    elif str_starts_with(clip_l_name, "/"):
-        clip_l_path = clip_l_name
     else:
-        clip_l_path = base_path + clip_l_name
-
+        clip_l_path = resolve_model_path(clip_l_name)
     if clip_g_name is None:
         clip_g_path = ""
-    elif str_starts_with(clip_g_name, "/"):
-        clip_g_path = clip_g_name
     else:
-        clip_g_path = base_path + clip_g_name
+        clip_g_path = resolve_model_path(clip_g_name)
 
     pipeline = sd_create()
     rc = sd_load(pipeline, ckpt_path, clip_l_path, clip_g_path, "", SD_WTYPE_AUTO, 8, 0)
@@ -75,49 +60,59 @@ register_node("CheckpointLoaderSimple", "Load Checkpoint",
               "checkpoint_loader_simple", ("MODEL",), False)
 
 
+def get_int(inputs, key: str, default: int) -> int:
+    v = dict_get(inputs, key)
+    if v is None:
+        return default
+    return v
+
+
+def get_float(inputs, key: str, default: float) -> float:
+    v = dict_get(inputs, key)
+    if v is None:
+        return default
+    return v
+
+
+def get_str(inputs, key: str, default: str) -> str:
+    v = dict_get(inputs, key)
+    if v is None:
+        return default
+    return v
+
+
 def sd_txt2img(inputs):
     model: SDPipelineHandle = dict_get(inputs, "model")
     pipeline = model.pipeline
 
-    prompt = dict_get(inputs, "prompt")
-    negative_prompt = dict_get(inputs, "negative_prompt")
-    if negative_prompt is None:
-        negative_prompt = ""
+    prompt = get_str(inputs, "prompt", "")
+    negative_prompt = get_str(inputs, "negative_prompt", "")
 
-    width = dict_get(inputs, "width")
-    if width is None:
-        width = 1024
-    height = dict_get(inputs, "height")
-    if height is None:
-        height = 1024
-    steps = dict_get(inputs, "steps")
-    if steps is None:
-        steps = 20
-    cfg = dict_get(inputs, "cfg")
-    if cfg is None:
-        cfg = 7.0
-    sample_method = dict_get(inputs, "sample_method")
-    if sample_method is None:
-        sample_method = "euler_a"
-    scheduler = dict_get(inputs, "scheduler")
-    if scheduler is None:
-        scheduler = "discrete"
-    seed = dict_get(inputs, "seed")
-    if seed is None:
-        seed = 42
+    width = get_int(inputs, "width", 1024)
+    height = get_int(inputs, "height", 1024)
+    steps = get_int(inputs, "steps", 20)
+    cfg = get_float(inputs, "cfg", 7.0)
+    sample_method = get_str(inputs, "sample_method", "euler_a")
+    scheduler = get_str(inputs, "scheduler", "discrete")
+    seed = get_int(inputs, "seed", 42)
 
-    output_dir = dict_get(inputs, "output_dir")
-    if output_dir is None:
-        output_dir = "/tmp/comfy_output"
-    filename_prefix = dict_get(inputs, "filename_prefix")
-    if filename_prefix is None:
-        filename_prefix = "comfy"
+    vae_tiling = get_int(inputs, "vae_tiling", 0)
+    vae_tile_size = get_int(inputs, "vae_tile_size", 0)
+    vae_tile_overlap = get_float(inputs, "vae_tile_overlap", 0.5)
+
+    output_dir = get_str(inputs, "output_dir", "/tmp/comfy_output")
+    filename_prefix = get_str(inputs, "filename_prefix", "comfy")
     output_path = output_dir + "/" + filename_prefix + ".png"
+
+    rc = sd_ensure_directory(output_dir)
+    if rc != 0:
+        print("Failed to create output dir: " + output_dir)
+        return (None,)
 
     rc = sd_generate_with_options(pipeline, prompt, negative_prompt,
                                   width, height, steps, cfg,
                                   sample_method, scheduler, seed,
-                                  0, 0, 0.0,
+                                  vae_tiling, vae_tile_size, vae_tile_overlap,
                                   0, 0, 0, 0, 0.0,
                                   0, 0.0, 0.0,
                                   0, 0.0,

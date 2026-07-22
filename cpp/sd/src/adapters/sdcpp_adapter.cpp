@@ -218,6 +218,9 @@ Image SDPipeline::generate(const ImageGenerationParams& params) {
 
 #include <png.h>
 #include <cstdio>
+#include <filesystem>
+
+namespace fs = std::filesystem;
 
 static void sdcpp_log_cb(enum sd_log_level_t level, const char* log, void* data) {
     (void)data;
@@ -398,6 +401,17 @@ int sd_pipeline_generate(sd_pipeline_t pipeline,
     std::fprintf(stderr, "[C API] saved %s (%dx%d, %d ch)\n", output_path, image.width, image.height, image.channels);
 
     return 0;
+}
+
+int sd_ensure_dir(const char* path) {
+    if (!path || path[0] == '\0') return -1;
+    try {
+        fs::create_directories(fs::path(path));
+        return 0;
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[C API] sd_ensure_dir failed for %s: %s\n", path, e.what());
+        return -1;
+    }
 }
 
 } // extern "C"
