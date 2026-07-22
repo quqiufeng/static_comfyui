@@ -502,6 +502,11 @@ int sd_pipeline_generate_hires(sd_pipeline_t pipeline,
                                 float clarity,
                                 float sharpen_amount,
                                 int sharpen_radius,
+                                float smart_sharpen_strength,
+                                int smart_sharpen_radius,
+                                float edge_sharpen_amount,
+                                int edge_sharpen_radius,
+                                float edge_sharpen_threshold,
                                 const char* output_path) {
     if (!pipeline || !prompt || !output_path) return -1;
 
@@ -561,14 +566,23 @@ int sd_pipeline_generate_hires(sd_pipeline_t pipeline,
                  image.empty(), image.width, image.height, image.channels);
     if (image.empty()) return -4;
 
-    bool has_postproc = (clarity > 0.0f || sharpen_amount > 0.0f);
+    bool has_postproc = (clarity > 0.0f || sharpen_amount > 0.0f ||
+                         smart_sharpen_strength > 0.0f || edge_sharpen_amount > 0.0f);
     if (has_postproc) {
-        std::fprintf(stderr, "[C API] postproc: clarity=%.2f sharpen=%.2f(r=%d)\n",
-                     clarity, sharpen_amount, sharpen_radius);
+        std::fprintf(stderr, "[C API] postproc: clarity=%.2f sharpen=%.2f(r=%d)"
+                     " smart=%.2f(r=%d) edge=%.2f(r=%d,t=%.2f)\n",
+                     clarity, sharpen_amount, sharpen_radius,
+                     smart_sharpen_strength, smart_sharpen_radius,
+                     edge_sharpen_amount, edge_sharpen_radius, edge_sharpen_threshold);
         postproc::Params pp;
-        pp.clarity         = clarity;
-        pp.sharpen_amount  = sharpen_amount;
-        pp.sharpen_radius  = sharpen_radius > 0 ? sharpen_radius : 1;
+        pp.clarity                = clarity;
+        pp.sharpen_amount         = sharpen_amount;
+        pp.sharpen_radius         = sharpen_radius > 0 ? sharpen_radius : 1;
+        pp.smart_sharpen_strength = smart_sharpen_strength;
+        pp.smart_sharpen_radius   = smart_sharpen_radius > 0 ? smart_sharpen_radius : 2;
+        pp.edge_sharpen_amount    = edge_sharpen_amount;
+        pp.edge_sharpen_radius    = edge_sharpen_radius > 0 ? edge_sharpen_radius : 2;
+        pp.edge_sharpen_threshold = edge_sharpen_threshold >= 0.0f ? edge_sharpen_threshold : 0.3f;
         if (!postproc::apply(image.data.data(), image.width, image.height, image.channels, pp)) {
             std::fprintf(stderr, "[C API] postproc failed\n");
             return -5;

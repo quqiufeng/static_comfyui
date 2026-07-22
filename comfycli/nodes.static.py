@@ -289,6 +289,11 @@ def hires_fix(inputs):
     clarity = get_float(inputs, "clarity", 0.2)
     sharpen = get_float(inputs, "sharpen", 0.3)
     sharpen_radius = get_int(inputs, "sharpen_radius", 1)
+    smart_sharpen = get_float(inputs, "smart_sharpen", 0.5)
+    smart_sharpen_radius = get_int(inputs, "smart_sharpen_radius", 2)
+    edge_sharpen = get_float(inputs, "edge_sharpen", 1.5)
+    edge_sharpen_radius = get_int(inputs, "edge_sharpen_radius", 2)
+    edge_sharpen_threshold = get_float(inputs, "edge_sharpen_threshold", 0.3)
 
     output_dir = get_str(inputs, "output_dir", "/tmp/comfy_output")
     filename_prefix = get_str(inputs, "filename_prefix", "comfy")
@@ -307,6 +312,9 @@ def hires_fix(inputs):
                            freeu, freeu_b1, freeu_b2,
                            sag, sag_scale,
                            clarity, sharpen, sharpen_radius,
+                           smart_sharpen, smart_sharpen_radius,
+                           edge_sharpen, edge_sharpen_radius,
+                           edge_sharpen_threshold,
                            output_path)
     if rc != 0:
         print("HiResFix generate failed, rc=" + string_of_int(rc))

@@ -7,7 +7,7 @@ extern fn sd_pipeline_free(pipeline: ptr) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_load(pipeline: ptr, model_path: str, clip_l_path: str, clip_g_path: str, vae_path: str, wtype: int, n_threads: int, diffusion_fa: int) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_load_ex(pipeline: ptr, model_path: str, clip_l_path: str, clip_g_path: str, vae_path: str, wtype: int, n_threads: int, diffusion_fa: int, diffusion_model_path: str, llm_path: str) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_generate(pipeline: ptr, prompt: str, negative_prompt: str, width: int, height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires: int, hires_width: int, hires_height: int, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, output_path: str) -> int from "sdcpp_adapter"
-extern fn sd_pipeline_generate_hires(pipeline: ptr, prompt: str, negative_prompt: str, target_width: int, target_height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, clarity: float, sharpen_amount: float, sharpen_radius: int, output_path: str) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_generate_hires(pipeline: ptr, prompt: str, negative_prompt: str, target_width: int, target_height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, clarity: float, sharpen_amount: float, sharpen_radius: int, smart_sharpen_strength: float, smart_sharpen_radius: int, edge_sharpen_amount: float, edge_sharpen_radius: int, edge_sharpen_threshold: float, output_path: str) -> int from "sdcpp_adapter"
 
 extern fn sd_ensure_dir(path: str) -> int from "sdcpp_adapter"
 
@@ -85,6 +85,9 @@ def sd_generate_hires(pipeline: ptr, prompt: str, negative_prompt: str,
                        freeu: int, freeu_b1: float, freeu_b2: float,
                        sag: int, sag_scale: float,
                        clarity: float, sharpen_amount: float, sharpen_radius: int,
+                       smart_sharpen_strength: float, smart_sharpen_radius: int,
+                       edge_sharpen_amount: float, edge_sharpen_radius: int,
+                       edge_sharpen_threshold: float,
                        output_path: str) -> int:
     return sd_pipeline_generate_hires(pipeline, prompt, negative_prompt,
                                        target_width, target_height,
@@ -95,6 +98,9 @@ def sd_generate_hires(pipeline: ptr, prompt: str, negative_prompt: str,
                                        freeu, freeu_b1, freeu_b2,
                                        sag, sag_scale,
                                        clarity, sharpen_amount, sharpen_radius,
+                                       smart_sharpen_strength, smart_sharpen_radius,
+                                       edge_sharpen_amount, edge_sharpen_radius,
+                                       edge_sharpen_threshold,
                                        output_path)
 
 

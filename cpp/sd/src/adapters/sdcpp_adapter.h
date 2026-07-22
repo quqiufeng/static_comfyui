@@ -244,6 +244,11 @@ int sd_pipeline_generate_hires(sd_pipeline_t pipeline,
                                 float clarity,
                                 float sharpen_amount,
                                 int sharpen_radius,
+                                float smart_sharpen_strength,
+                                int smart_sharpen_radius,
+                                float edge_sharpen_amount,
+                                int edge_sharpen_radius,
+                                float edge_sharpen_threshold,
                                 const char* output_path);
 
 /** Utility: create directory and all parents if missing. Returns 0 on success. */
