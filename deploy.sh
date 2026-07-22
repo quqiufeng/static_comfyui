@@ -65,7 +65,7 @@ fi
 echo "  GLIBC 源: $GLIBC_SRC"
 
 LIBMISSING=0
-for lib in libm.so.6 libc.so.6 libpthread.so.0 librt.so.1 libdl.so.2 ld-linux-x86-64.so.2 libstdc++.so.6; do
+for lib in libm.so.6 libc.so.6 libpthread.so.0 librt.so.1 libdl.so.2 ld-linux-x86-64.so.2 libstdc++.so.6 libgomp.so.1; do
   f=$(find "$GLIBC_SRC" -name "$lib" 2>/dev/null | head -1)
   if [ -n "$f" ]; then
     cp -L "$f" "$DIST_DIR/lib/"
@@ -73,21 +73,6 @@ for lib in libm.so.6 libc.so.6 libpthread.so.0 librt.so.1 libdl.so.2 ld-linux-x8
   else
     echo "    ✗ $lib  未找到"
     LIBMISSING=$((LIBMISSING + 1))
-  fi
-done
-
-# torch 运行时 .so
-TORCH_LIB="/data/venv/lib/python3.12/site-packages/torch/lib"
-if [ ! -d "$TORCH_LIB" ]; then
-  echo "错误: torch lib 目录不存在: $TORCH_LIB"
-  echo "请确保 Python 虚拟环境可用或设置正确的路径"
-  exit 1
-fi
-for lib in libtorch.so libtorch_cpu.so libtorch_cuda.so libc10.so libc10_cuda.so libgomp*.so* libshm.so; do
-  f=$(find "$TORCH_LIB" -maxdepth 1 -name "$lib" 2>/dev/null | head -1)
-  if [ -n "$f" ]; then
-    cp -L "$f" "$DIST_DIR/lib/"
-    echo "    ✓ $lib"
   fi
 done
 
@@ -140,8 +125,8 @@ echo "CUDA 可用: $(nvidia-smi 2>/dev/null && echo '是' || echo '否')"
 echo ""
 echo "=== 依赖 .so 检查 ==="
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-for lib in libtorch.so libc10.so libcudart.so; do
-  f=$(find "$SCRIPT_DIR/lib" -name "$lib*" 2>/dev/null | head -1)
+for lib in libsdcpp_adapter.so libgomp.so.1; do
+  f=$(find "$SCRIPT_DIR" -maxdepth 1 -name "$lib*" 2>/dev/null | head -1)
   if [ -n "$f" ]; then echo "  ✓ $lib"; else echo "  ✗ $lib (未找到)"; fi
 done
 echo "  LD_LIBRARY_PATH=$SCRIPT_DIR/lib:$SCRIPT_DIR"

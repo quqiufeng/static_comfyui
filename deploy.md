@@ -59,7 +59,7 @@ dist/
 ├── comfycli-bin                 # ELF 二进制
 ├── comfycli-bin.so              # Chez AOT 编译产物
 ├── libsdcpp_adapter.so          # stable-diffusion.cpp 推理后端
-├── lib/                          # 依赖运行时 + GLIBC 兼容层
+├── lib/                          # GLIBC 兼容层 + 基础运行时
 │   ├── ld-linux-x86-64.so.2     # 动态链接器 (GLIBC 兼容)
 │   ├── libc.so.6                 # GLIBC 兼容
 │   ├── libm.so.6                 # GLIBC 兼容
@@ -67,12 +67,7 @@ dist/
 │   ├── librt.so.1                # GLIBC 兼容
 │   ├── libdl.so.2                # GLIBC 兼容
 │   ├── libstdc++.so.6            # libstdc++ 兼容
-│   ├── libtorch.so               # PyTorch C++ 运行时（过渡保留，ELF 仍链接）
-│   ├── libtorch_cpu.so           # PyTorch CPU 算子
-│   ├── libtorch_cuda.so          # PyTorch CUDA 算子
-│   ├── libc10.so                 # c10 运行时
-│   ├── libc10_cuda.so            # c10 CUDA 支持
-│   └── libgomp*.so*              # OpenMP 运行时
+│   └── libgomp.so.1              # OpenMP 运行时
 ├── run.sh                        # 启动脚本 (自动设 LD_LIBRARY_PATH)
 ├── check_env.sh                  # 环境检查脚本
 └── comfycli_deploy[_glibc2.35].tar.gz  # 部署 tarball
@@ -85,8 +80,7 @@ dist/
 | `comfycli-bin` | 本地编译 | 主程序（编排逻辑） |
 | `comfycli-bin.so` | 本地编译 | Chez AOT Scheme 机器码 |
 | `libsdcpp_adapter.so` | 本地编译 | stable-diffusion.cpp 推理 API |
-| `libtorch.so` / `libtorch_cpu.so` / `libtorch_cuda.so` / `libc10.so` / `libc10_cuda.so` | `/data/venv/.../torch/lib/` | PyTorch 运行时符号（ELF 仍依赖，**远程无需 pip install torch**） |
-| `libgomp*.so*` | `/data/venv/.../torch/lib/` | OpenMP 并行 |
+| `libgomp.so.1` | `/lib/x86_64-linux-gnu/` | OpenMP 并行 |
 | `libc.so.6` / `libm.so.6` / `libpthread.so.0` / `librt.so.1` / `libdl.so.2` / `ld-linux-x86-64.so.2` | `/lib/x86_64-linux-gnu/` (或 `/opt/deb/<version>/`) | **GLIBC 兼容层**，远程系统 GLIBC 过旧时用这里打包的版本 |
 | `libstdc++.so.6` | `/lib/x86_64-linux-gnu/` (或 `/opt/deb/<version>/`) | C++ ABI 兼容 |
 | `run.sh` | deploy.sh 生成 | 自动设 `LD_LIBRARY_PATH=lib/` 后启动 |
@@ -251,12 +245,15 @@ objdump -T comfycli-bin | grep -oP 'GLIBC_\S+' | sort -t. -k1,1n -k2,2n -k3,3n |
 | 内存 | 4GB | 16GB |
 | 显存 | 4GB | 8GB+ |
 
+远程需要：
+- NVIDIA 驱动（兼容本地 CUDA 版本）
+- CUDA Runtime（`libcudart.so.12`）和 cuBLAS（`libcublas.so.12` / `libcublasLt.so.12`），通常安装 CUDA toolkit 后自带
+- GLIBC ≥ 目标版本（通过 `lib/` 兼容层解决）
+
 远程不需要：
 - ❌ Python 解释器
 - ❌ pip
 - ❌ venv / conda
-- ❌ CUDA toolkit
-- ❌ cuDNN 单独安装
 - ❌ PyTorch pip 包
 
 ---
@@ -299,14 +296,17 @@ ssh root@remote_host "ls -la /opt/comfycli/output/"
 
 ---
 
-## 体积优化（未来）
+## 体积优化
 
-当前部署包较大（~700MB），主要来源：
+本次已移除 `libtorch.so` 等 PyTorch 运行时依赖，部署包从 ~700MB 降到约 ~200MB。
+
+当前体积主要来源：
 
 - `libsdcpp_adapter.so` 静态嵌入了 sd.cpp + ggml + CUDA 后端 (~185MB)
-- `libtorch.so` 等 PyTorch 运行时符号仍被 ELF 链接（~400MB+）
+- GLIBC / libstdc++ 兼容层 (~20MB)
+- `comfycli-bin` / `comfycli-bin.so` (~6MB)
 
-后续可通过以下方式瘦身：
-1. 从 ELF 链接中移除 libtorch，彻底摆脱 torch 依赖
-2. 对 `libsdcpp_adapter.so` 做动态依赖拆分（CUDA 后端单独 .so）
-3. 只打包目标架构需要的 CUDA 计算能力
+后续进一步瘦身方向：
+1. 对 `libsdcpp_adapter.so` 做动态依赖拆分（CUDA 后端单独 .so）
+2. 只打包目标架构需要的 CUDA 计算能力
+3. 可选：将 CUDA Runtime / cuBLAS 也打包到 `lib/`，实现真正的零外部依赖（但会显著增大包体积）

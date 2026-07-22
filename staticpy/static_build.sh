@@ -176,9 +176,6 @@ CCODE
         "$SCHEME_DIR/zlib/libz.a" \
         -ldl -lpthread -lm -ltinfo \
         "${GLIBC_LDFLAGS[@]}" \
-        -L/data/venv/lib/python3.12/site-packages/torch/lib \
-        -Wl,--no-as-needed -lc10 -ltorch_cpu -ltorch -Wl,--as-needed \
-        -Wl,-rpath,/data/venv/lib/python3.12/site-packages/torch/lib \
         2>&1
 
     echo "  -> ELF cached"

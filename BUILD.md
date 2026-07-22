@@ -128,11 +128,11 @@ bash staticpy/static_build.sh comfycli/_bundle.static.py comfycli-bin
 ### 本地开发
 
 ```bash
-LD_LIBRARY_PATH=cpp/sd/build:/data/venv/lib/python3.12/site-packages/torch/lib \
+LD_LIBRARY_PATH=cpp/sd/build \
   ./comfycli-bin workflow.json --output-dir ./output
 ```
 
-注意：`/data/venv/lib/python3.12/site-packages/torch/lib` 目前仍用于链接 `libtorch.so` 等符号（ELF 仍带 torch rpath），实际运行时推理不再经过 torch。
+注意：ELF 不再依赖 `libtorch.so` 等 PyTorch 运行时符号，只需 `libsdcpp_adapter.so` 所在的目录。
 
 ### 环境变量
 
@@ -184,6 +184,6 @@ LD_LIBRARY_PATH=cpp/sd/build:/data/venv/lib/python3.12/site-packages/torch/lib \
 |------|------|
 | 类型错误 | `python3 staticpy/static_translate.py comfycli/_bundle.static.py` 看 stderr |
 | Scheme 编译错误 | 查看 `/tmp/staticpy-cache/${STEM}_${HASH}.ss` |
-| 运行时找不到 .so | `LD_LIBRARY_PATH=cpp/sd/build:/data/venv/lib/python3.12/site-packages/torch/lib ./comfycli-bin` |
+| 运行时找不到 .so | `LD_LIBRARY_PATH=cpp/sd/build ./comfycli-bin` |
 | FFI 符号未找到 | `nm -D cpp/sd/build/libsdcpp_adapter.so \| grep symbol` |
 | 生成阶段 OOM | sd.cpp 已对大图自动启用 VAE tiling；仍 OOM 时降分辨率或显式调小 tile |

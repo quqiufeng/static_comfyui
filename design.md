@@ -61,12 +61,12 @@ workflow.json / --prompt
 
 ```bash
 # 本地 workflow 模式
-LD_LIBRARY_PATH=cpp/sd/build:/data/venv/lib/python3.12/site-packages/torch/lib \
+LD_LIBRARY_PATH=cpp/sd/build \
   ./comfycli-bin /tmp/test_workflow.json --output-dir /tmp/comfy_output
 # → /tmp/comfy_output/test_cat.png (1024×1024)
 
 # 本地 prompt 模式
-LD_LIBRARY_PATH=cpp/sd/build:/data/venv/lib/python3.12/site-packages/torch/lib \
+LD_LIBRARY_PATH=cpp/sd/build \
   ./comfycli-bin --checkpoint /data/models/image/sd_xl_base_1.0.safetensors \
   --prompt "a photo of a cat" --output /tmp/comfy_output/prompt_cat.png
 # → /tmp/comfy_output/prompt_cat.png (1024×1024)

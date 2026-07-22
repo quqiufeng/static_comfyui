@@ -34,7 +34,7 @@
 # ./cpp/sd/build/libsdcpp_adapter.so  — C++ SD 推理后端
 
 # 本地运行
-LD_LIBRARY_PATH=cpp/sd/build:/data/venv/lib/python3.12/site-packages/torch/lib \
+LD_LIBRARY_PATH=cpp/sd/build \
   ./comfycli-bin workflow.json --output-dir ./output
 
 # 部署打包（依赖 .so + GLIBC 兼容层）

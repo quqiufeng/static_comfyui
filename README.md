@@ -48,11 +48,11 @@ ComfyUI 是优秀的 Stable Diffusion 工作流引擎，但 Python 解释器带�
 ./build.sh
 
 # 2. 运行（workflow 模式）
-LD_LIBRARY_PATH=cpp/sd/build:/data/venv/lib/python3.12/site-packages/torch/lib \
+LD_LIBRARY_PATH=cpp/sd/build \
   ./comfycli-bin workflow.json --output-dir ./output
 
 # 3. 或 prompt 模式
-LD_LIBRARY_PATH=cpp/sd/build:/data/venv/lib/python3.12/site-packages/torch/lib \
+LD_LIBRARY_PATH=cpp/sd/build \
   ./comfycli-bin --checkpoint /data/models/image/sd_xl_base_1.0.safetensors \
   --prompt "a photo of a cat" --output ./out.png
 
