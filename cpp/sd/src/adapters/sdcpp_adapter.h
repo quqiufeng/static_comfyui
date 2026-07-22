@@ -169,6 +169,17 @@ int sd_pipeline_load(sd_pipeline_t pipeline,
                      int n_threads,
                      int diffusion_fa);
 
+int sd_pipeline_load_ex(sd_pipeline_t pipeline,
+                        const char* model_path,
+                        const char* clip_l_path,
+                        const char* clip_g_path,
+                        const char* vae_path,
+                        int wtype,
+                        int n_threads,
+                        int diffusion_fa,
+                        const char* diffusion_model_path,
+                        const char* llm_path);
+
 int sd_pipeline_generate(sd_pipeline_t pipeline,
                          const char* prompt,
                          const char* negative_prompt,
@@ -193,6 +204,47 @@ int sd_pipeline_generate(sd_pipeline_t pipeline,
                          int sag,
                          float sag_scale,
                          const char* output_path);
+
+/**
+ * Compute HiRes Fix base resolution from target dimensions.
+ * Follows the same algorithm as img_hires.cpp compute_hires_resolution().
+ * Returns (low_w << 32) | low_h as int64_t.
+ */
+int64_t sd_compute_hires_resolution(int target_w, int target_h);
+
+/**
+ * All-in-one HiRes Fix generation:
+ *   Computes base resolution via sd_compute_hires_resolution,
+ *   loads the model (via sd_pipeline_load_ex),
+ *   generates with hires enabled,
+ *   applies post-processing (clarity/sharpen),
+ *   and saves to output_path.
+ * Returns 0 on success, non-zero on error.
+ */
+int sd_pipeline_generate_hires(sd_pipeline_t pipeline,
+                                const char* prompt,
+                                const char* negative_prompt,
+                                int target_width,
+                                int target_height,
+                                int steps,
+                                float cfg,
+                                const char* sample_method,
+                                const char* scheduler,
+                                int64_t seed,
+                                int vae_tiling,
+                                int vae_tile_size,
+                                float vae_tile_overlap,
+                                int hires_steps,
+                                float hires_strength,
+                                int freeu,
+                                float freeu_b1,
+                                float freeu_b2,
+                                int sag,
+                                float sag_scale,
+                                float clarity,
+                                float sharpen_amount,
+                                int sharpen_radius,
+                                const char* output_path);
 
 /** Utility: create directory and all parents if missing. Returns 0 on success. */
 int sd_ensure_dir(const char* path);

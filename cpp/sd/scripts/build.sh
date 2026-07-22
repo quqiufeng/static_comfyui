@@ -31,9 +31,18 @@ echo "JOBS:         ${JOBS}"
 echo ""
 
 # 1. 确保 /opt/sd 已编译
-if [ ! -f "/opt/sd/build/libstable-diffusion.a" ]; then
-    echo -e "${YELLOW}/opt/sd build not found, running build_sd.sh first...${NC}"
-    "${PROJ_DIR}/build_sd.sh"
+SD_BACKEND_DL="${SD_BACKEND_DL:-1}"
+if [ "${SD_BACKEND_DL}" = "1" ]; then
+    SD_CHECK_LIB="/opt/sd/build-dl/bin/libstable-diffusion.so"
+    SD_BUILD_SCRIPT="${PROJ_DIR}/build_sd_dl.sh"
+else
+    SD_CHECK_LIB="/opt/sd/build/libstable-diffusion.a"
+    SD_BUILD_SCRIPT="${PROJ_DIR}/build_sd.sh"
+fi
+
+if [ ! -f "${SD_CHECK_LIB}" ]; then
+    echo -e "${YELLOW}${SD_CHECK_LIB} not found, running ${SD_BUILD_SCRIPT} first...${NC}"
+    "${SD_BUILD_SCRIPT}"
 fi
 
 # 2. 配置并编译
@@ -42,7 +51,11 @@ rm -rf build
 mkdir build
 
 echo -e "${BLUE}Configuring CMake...${NC}"
-cmake -S . -B build -DCMAKE_BUILD_TYPE="${BUILD_TYPE}"
+if [ "${SD_BACKEND_DL}" = "1" ]; then
+    cmake -S . -B build -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" -DSD_BACKEND_DL=ON
+else
+    cmake -S . -B build -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" -DSD_BACKEND_DL=OFF
+fi
 
 echo ""
 echo -e "${BLUE}Building...${NC}"

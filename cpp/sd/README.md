@@ -689,17 +689,25 @@ v1 CLI 中使用的 API 在 `include/stable-diffusion.h` 中的定位如下：
 ```bash
 cd /opt/static_comfyui/cpp/sd
 
-# 1. 先编译 /opt/sd 后端（CUDA 版）
-./build_sd.sh
+# 1. 先编译 /opt/sd 后端为动态后端共享库（CUDA 后端独立为 libggml-cuda.so）
+./build_sd_dl.sh
 
-# 2. 再编译适配层 + 示例
+# 2. 再编译适配层 + 示例（默认 SD_BACKEND_DL=ON）
 rm -rf build && mkdir build
-cmake -S . -B build
+cmake -S . -B build -DSD_BACKEND_DL=ON
 cmake --build build -j$(nproc)
 
 # 产物
-#   build/libsdcpp_adapter.a
+#   build/libsdcpp_adapter.so  (很小，依赖 /opt/sd/build-dl/bin 下的共享库)
 #   build/sdxl_txt2img
+```
+
+如需使用旧版静态链接模式（所有依赖打进 libsdcpp_adapter.so）：
+
+```bash
+./build_sd.sh
+cmake -S . -B build -DSD_BACKEND_DL=OFF
+cmake --build build -j$(nproc)
 ```
 
 ### 13.4 端到端验证结果

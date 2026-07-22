@@ -31,16 +31,24 @@
 # 产物
 # ./comfycli-bin      — 独立 ELF 二进制
 # ./comfycli-bin.so   — Chez AOT 编译产物
-# ./cpp/sd/build/libsdcpp_adapter.so  — C++ SD 推理后端
+# ./cpp/sd/build/libsdcpp_adapter.so  — C++ 适配层（很小，依赖 sd.cpp/ggml 共享库）
+# /opt/sd/build-dl/bin/libstable-diffusion.so / libggml.so / libggml-base.so / libggml-cuda.so — sd.cpp 共享库
 
-# 本地运行
-LD_LIBRARY_PATH=cpp/sd/build \
+# 本地运行（动态后端模式，需让 ggml 找到 CUDA 后端插件）
+LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
+  GGML_BACKEND_PATH=/opt/sd/build-dl/bin/libggml-cuda.so \
   ./comfycli-bin workflow.json --output-dir ./output
 
-# 部署打包（依赖 .so + GLIBC 兼容层）
-GLIBC_TARGET=2.35 ./deploy.sh
+# 部署打包（默认 GPU，假设远程已有 CUDA Runtime）
+./deploy.sh
 
-# 打包 + SCP 到远程
+# 部署打包 + 包含 CUDA Runtime（远程无需 CUDA Toolkit）
+WITH_CUDA=1 ./deploy.sh
+
+# CPU-only 部署（不含 libggml-cuda.so，35MB 左右）
+WITH_CUDA_BACKEND=0 ./deploy.sh
+
+# 打包 + SCP 到远程（依赖 SSH 密钥配置）
 GLIBC_TARGET=2.35 ./deploy.sh --scp user@remote_host
 
 # 远程运行（零 pip）
@@ -48,6 +56,8 @@ ssh user@remote_host "bash /opt/comfycli/run.sh workflow.json --output-dir ./out
 ```
 
 注意：`build.sh` 只编译不部署，`deploy.sh` 负责打包 + 传输，职责分离。
+后端已切换为动态加载模式：`libsdcpp_adapter.so` 只含适配层，运行时在可执行文件目录或当前目录查找 `libggml-cuda.so` / `libggml-cpu-*.so`。
+`WITH_CUDA=1` 会把 `libcudart.so.12` / `libcublas.so.12` / `libcublasLt.so.12` 一起打包；默认只打包 CUDA 后端插件，不打包 CUDA Runtime。
 
 ## 了解最近开发日志
 
@@ -92,6 +102,10 @@ code search 工具位于 `/opt/my_db/tools/`，ComfyUI 索引在 `/opt/code_cach
 # 模式 1：直接命令行出图
 comfycli-bin --checkpoint /data/models/image/sd_xl_base_1.0.safetensors --prompt "cat" --output ./out.png
 
+# 模式 1 扩展：覆盖分辨率/采样/seed 等参数
+comfycli-bin --checkpoint ... --prompt "cat" --output ./out.png \
+  --width 512 --height 512 --steps 5 --seed 1 --cfg 7.0 --sampler euler_a --scheduler discrete
+
 # 模式 2：执行 ComfyUI workflow JSON
 comfycli-bin workflow.json --output-dir ./output
 ```
@@ -103,9 +117,10 @@ comfycli-bin workflow.json --output-dir ./output
 
 ## 已搭建的基础设施
 - `staticpy/` — StaticPy 编译器 (`static_translate.py`)、运行时 (`prelude`/`stdlib`)、构建脚本
-- `cpp/sd/` — stable-diffusion.cpp 推理后端封装 (`sdcpp_adapter.h/.cpp` + `build.sh`)
+- `cpp/sd/` — stable-diffusion.cpp 推理后端封装 (`sdcpp_adapter.h/.cpp` + `build.sh` / `build_sd_dl.sh`)
 - `build.sh` — 编译 ELF + `libsdcpp_adapter.so`
-- `deploy.sh` — 打包依赖 .so + GLIBC 兼容层 + SCP
+- `deploy.sh` — 打包依赖 .so + GLIBC 兼容层 + 动态后端插件 + 可选 CUDA Runtime
+- `comfycli_remote.sh` + `xgc_ctl.py` + `.env` + `remote_server.md` — Xiangongyun 远程 GPU 部署
 - `design.md` — 架构设计、文件映射、C++ 依赖清单
 - code search: ComfyUI 全量索引 (656 文件, 20,141 chunks, 2,633 函数)
 
@@ -148,14 +163,57 @@ comfycli-bin workflow.json --output-dir ./output
 - [ ] 如需在 StaticPy 层暴露更多采样参数/ControlNet 节点，可继续扩展
 
 ### Phase 4: 节点 → DAG → 入口（MVP 已通）
-- [x] `nodes.static.py`          最小节点集：CheckpointLoaderSimple / KSampler / SaveImage
+- [x] `nodes.static.py`          最小节点集：CheckpointLoaderSimple / DualCLIPLoader / CLIPTextEncode / EmptyLatentImage / KSampler / VAEDecode / SaveImage
 - [x] `execution.static.py`      PromptExecutor（拓扑排序 + 输入链接解析）
-- [x] `main.static.py`           CLI 入口（workflow JSON 模式已通）
+- [x] `main.static.py`           CLI 入口（workflow JSON + prompt-only 模式已通）
+- [x] `cli_args.static.py`       扩展 CLI 参数：--width/--height/--steps/--seed/--cfg/--sampler/--scheduler
+- [x] `deploy.sh`                支持动态后端拆分：CPU-only 35MB，GPU 64MB（远程有 CUDA Runtime），`WITH_CUDA=1` 439MB（含 CUDA Runtime）
+- [x] `cpp/sd/CMakeLists.txt`      支持 `SD_BACKEND_DL=ON`：CUDA 后端以 `libggml-cuda.so` 插件形式独立加载
+- [x] `comfycli_remote.sh`       远程 GPU 实例一键部署脚本（Xiangongyun + scp + run）
 - [ ] 200+ 完整节点集（按需逐步补充）
 
 ### Phase 5: 端到端验证（workflow + prompt 均已通）
 - [x] workflow SDXL → 图片输出（1024×1024，sd_xl_base_1.0 + clip_l/clip_g）
 - [x] `--prompt` 命令行模式验证（自动生成 CheckpointLoaderSimple / KSampler / SaveImage 节点）
+- [x] `WITH_CUDA=1 ./deploy.sh` 打包部署验证（含 CUDA Runtime）
+- [x] 默认 `./deploy.sh` 打包部署验证（含 CUDA 后端插件，不含 CUDA Runtime）
+- [x] `WITH_CUDA_BACKEND=0 ./deploy.sh` CPU-only 打包验证（35MB）
+- [x] 远程 Xiangongyun 部署脚本 `comfycli_remote.sh` 就绪
+
+## 远程 GPU 部署
+
+针对 Xiangongyun（仙宫云）远程 GPU 实例，已提供一键部署脚本：
+
+- `xgc_ctl.py`：复用 ReScheme 的 Xiangongyun API 控制器，负责实例生命周期（deploy / wait / ssh / shutdown_destroy）。
+- `.env`：Xiangongyun API Token + 镜像 ID，脚本自动读取。
+- `comfycli_remote.sh`：端到端脚本，自动完成本地编译打包、创建远程实例、同步模型文件、上传二进制、远程运行、下载输出。
+- `remote_server.md`：包含完整的 ComfyUI 远程部署说明。
+
+典型用法：
+
+```bash
+# 工作流模式
+bash comfycli_remote.sh \
+  --workflow test_workflow.json \
+  --output-dir ./output \
+  --name comfy-4090 \
+  --with-cuda \
+  --run
+
+# prompt-only 模式
+bash comfycli_remote.sh \
+  --checkpoint /data/models/image/sd_xl_base_1.0.safetensors \
+  --prompt "a red apple" \
+  --output /tmp/apple.png \
+  --width 512 --height 512 --steps 5 \
+  --name comfy-4090 --with-cuda
+
+# 销毁止损
+python3 xgc_ctl.py shutdown_destroy <instance_id>
+```
+
+注意：模型文件（如 sd_xl_base、clip_l、clip_g）较大，脚本默认只打印 scp 命令；
+加 `--sync-models` 会自动执行模型同步。远程实例必须有模型文件才能运行推理。
 
 ## 命名约定
 - ComfyUI 的 `a.py` → `a.static.py`

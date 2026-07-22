@@ -10,6 +10,13 @@ class CliArgs:
     cuda_device: str
     highvram: bool
     lowvram: bool
+    width: int
+    height: int
+    steps: int
+    cfg: float
+    seed: int
+    sampler: str
+    scheduler: str
 
 
 def parse_cli_args() -> dict:
@@ -26,6 +33,13 @@ def parse_cli_args() -> dict:
     cuda_device: str = "0"
     highvram: bool = False
     lowvram: bool = False
+    width: int = 1024
+    height: int = 1024
+    steps: int = 20
+    cfg: float = 7.0
+    seed: int = 42
+    sampler: str = "euler_a"
+    scheduler: str = "discrete"
 
     i: int = 1
     while i < argc:
@@ -52,6 +66,34 @@ def parse_cli_args() -> dict:
                 output_dir = py_list_ref(args_list, i)
         elif arg == "--cpu":
             cpu = True
+        elif arg == "--width" or arg == "-W":
+            i = i + 1
+            if i < argc:
+                width = string_to_int(py_list_ref(args_list, i))
+        elif arg == "--height" or arg == "-H":
+            i = i + 1
+            if i < argc:
+                height = string_to_int(py_list_ref(args_list, i))
+        elif arg == "--steps" or arg == "-s":
+            i = i + 1
+            if i < argc:
+                steps = string_to_int(py_list_ref(args_list, i))
+        elif arg == "--seed" or arg == "-S":
+            i = i + 1
+            if i < argc:
+                seed = string_to_int(py_list_ref(args_list, i))
+        elif arg == "--cfg" or arg == "-C":
+            i = i + 1
+            if i < argc:
+                cfg = string_to_float(py_list_ref(args_list, i))
+        elif arg == "--sampler":
+            i = i + 1
+            if i < argc:
+                sampler = py_list_ref(args_list, i)
+        elif arg == "--scheduler":
+            i = i + 1
+            if i < argc:
+                scheduler = py_list_ref(args_list, i)
         elif arg == "--cuda-device" or arg == "--cuda_device":
             i = i + 1
             if i < argc:
@@ -76,6 +118,13 @@ def parse_cli_args() -> dict:
     dict_set(result, "cuda_device", cuda_device)
     dict_set(result, "highvram", highvram)
     dict_set(result, "lowvram", lowvram)
+    dict_set(result, "width", width)
+    dict_set(result, "height", height)
+    dict_set(result, "steps", steps)
+    dict_set(result, "cfg", cfg)
+    dict_set(result, "seed", seed)
+    dict_set(result, "sampler", sampler)
+    dict_set(result, "scheduler", scheduler)
     return result
 
 
@@ -92,6 +141,13 @@ def print_help():
     print("  --prompt, -p <text>             Text prompt")
     print("  --output, -o <path>             Output image path")
     print("  --output-dir <path>             Output directory")
+    print("  --width, -W <int>               Image width (default: 1024)")
+    print("  --height, -H <int>              Image height (default: 1024)")
+    print("  --steps, -s <int>                 Sampling steps (default: 20)")
+    print("  --seed, -S <int>                  Random seed (default: 42)")
+    print("  --cfg, -C <float>               CFG scale (default: 7.0)")
+    print("  --sampler <name>                Sampler name (default: euler_a)")
+    print("  --scheduler <name>              Scheduler name (default: discrete)")
     print("  --cpu                           CPU mode (no GPU)")
     print("  --cuda-device <id>              CUDA device ID (default: 0)")
     print("  --highvram, --gpu-only          Keep all models on GPU")

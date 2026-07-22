@@ -44,7 +44,7 @@ def scheme_name(name):
 # ====== C 类型映射 ======
 TYPE_MAP = {
     "int": "int",
-    "float": "double",
+    "float": "float",
     "double": "double",
     "bool": "boolean",
     "str": "string",

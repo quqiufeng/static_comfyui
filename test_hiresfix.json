@@ -1,0 +1,69 @@
+{
+  "3": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "/data/models/image/sd_xl_base_1.0.safetensors"
+    }
+  },
+  "10": {
+    "class_type": "DualCLIPLoader",
+    "inputs": {
+      "clip_name1": "clip_g.safetensors",
+      "clip_name2": "clip_l.safetensors"
+    }
+  },
+  "4": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "portrait of a young woman, soft natural lighting, sharp focus",
+      "clip": ["10", 0]
+    }
+  },
+  "5": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "blurry, low quality, ugly",
+      "clip": ["10", 0]
+    }
+  },
+  "6": {
+    "class_type": "HiResFix",
+    "inputs": {
+      "model": ["3", 0],
+      "positive": ["4", 0],
+      "negative": ["5", 0],
+      "width": 1024,
+      "height": 1024,
+      "steps": 10,
+      "cfg": 2.5,
+      "sampler_name": "euler",
+      "scheduler": "discrete",
+      "seed": 42,
+      "vae_tiling": 0,
+      "hires_steps": 15,
+      "hires_strength": 0.35,
+      "freeu": 1,
+      "freeu_b1": 1.3,
+      "freeu_b2": 1.4,
+      "sag": 0,
+      "sag_scale": 1.0,
+      "clarity": 0.2,
+      "sharpen": 0.3,
+      "sharpen_radius": 1
+    }
+  },
+  "7": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": ["6", 0],
+      "vae": ["3", 2]
+    }
+  },
+  "8": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": ["7", 0],
+      "filename_prefix": "hiresfix_test"
+    }
+  }
+}

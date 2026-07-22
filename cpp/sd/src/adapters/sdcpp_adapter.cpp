@@ -1,8 +1,10 @@
 #include "sdcpp_adapter.h"
+#include "postproc.h"
 
 #include <stable-diffusion.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <utility>
 
 // Forward declaration for log callback used in constructor.
@@ -315,6 +317,44 @@ int sd_pipeline_load(sd_pipeline_t pipeline,
     return ok ? 0 : -2;
 }
 
+int sd_pipeline_load_ex(sd_pipeline_t pipeline,
+                         const char* model_path,
+                         const char* clip_l_path,
+                         const char* clip_g_path,
+                         const char* vae_path,
+                         int wtype,
+                         int n_threads,
+                         int diffusion_fa,
+                         const char* diffusion_model_path,
+                         const char* llm_path) {
+    if (!pipeline) return -1;
+
+    sd::SDPipeline* p = static_cast<sd::SDPipeline*>(pipeline);
+    sd::ModelConfig config;
+
+    if (model_path) config.model_path = model_path;
+    if (diffusion_model_path) config.diffusion_model_path = diffusion_model_path;
+    if (llm_path) config.llm_path = llm_path;
+    if (clip_l_path) config.clip_l_path = clip_l_path;
+    if (clip_g_path) config.clip_g_path = clip_g_path;
+    if (vae_path) config.vae_path = vae_path;
+    config.wtype                = wtype;
+    config.n_threads            = n_threads > 0 ? n_threads : 8;
+    config.diffusion_flash_attn = diffusion_fa != 0;
+
+    std::fprintf(stderr, "[C API] sd_pipeline_load_ex: model=%s diff=%s llm=%s clip_l=%s clip_g=%s vae=%s\n",
+                 model_path ? model_path : "(null)",
+                 diffusion_model_path ? diffusion_model_path : "(null)",
+                 llm_path ? llm_path : "(null)",
+                 clip_l_path ? clip_l_path : "(null)",
+                 clip_g_path ? clip_g_path : "(null)",
+                 vae_path ? vae_path : "(null)");
+
+    bool ok = p->load(config);
+    std::fprintf(stderr, "[C API] p->load returned %d, is_loaded=%d\n", ok ? 1 : 0, p->is_loaded() ? 1 : 0);
+    return ok ? 0 : -2;
+}
+
 int sd_pipeline_generate(sd_pipeline_t pipeline,
                          const char* prompt,
                          const char* negative_prompt,
@@ -397,6 +437,147 @@ int sd_pipeline_generate(sd_pipeline_t pipeline,
     if (!save_png(output_path, image.data.data(), image.width, image.height, image.channels)) {
         std::fprintf(stderr, "[C API] save_png failed for %s\n", output_path);
         return -5;
+    }
+    std::fprintf(stderr, "[C API] saved %s (%dx%d, %d ch)\n", output_path, image.width, image.height, image.channels);
+
+    return 0;
+}
+
+int64_t sd_compute_hires_resolution(int target_w, int target_h) {
+    int low_w, low_h;
+
+    if (target_w == 3840 && target_h == 2160) {
+        low_w = 2560; low_h = 1440;
+    } else if (target_w == 2560 && target_h == 1440) {
+        low_w = 1920; low_h = 1080;
+    } else if (target_w == 1920 && target_h == 1080) {
+        low_w = 1536; low_h = 864;
+    } else if (target_w == 1280 && target_h == 720) {
+        low_w = 1024; low_h = 576;
+    } else {
+        int tw = target_w / 8;
+        int th = target_h / 8;
+        int lw = (tw * 4 / 5 + 7) / 8 * 8;
+        int lh = (th * 4 / 5 + 7) / 8 * 8;
+        low_w = lw * 8;
+        low_h = lh * 8;
+    }
+
+    if (low_w < 512 || low_h < 512) {
+        float ratio = static_cast<float>(target_w) / target_h;
+        if (low_w < low_h) {
+            low_w = 512;
+            low_h = static_cast<int>(low_w / ratio / 8) * 8;
+            if (low_h < 512) low_h = 512;
+        } else {
+            low_h = 512;
+            low_w = static_cast<int>(low_h * ratio / 8) * 8;
+            if (low_w < 512) low_w = 512;
+        }
+    }
+
+    return (static_cast<int64_t>(low_w) << 32) | static_cast<int64_t>(low_h);
+}
+
+int sd_pipeline_generate_hires(sd_pipeline_t pipeline,
+                                const char* prompt,
+                                const char* negative_prompt,
+                                int target_width,
+                                int target_height,
+                                int steps,
+                                float cfg,
+                                const char* sample_method,
+                                const char* scheduler,
+                                int64_t seed,
+                                int vae_tiling,
+                                int vae_tile_size,
+                                float vae_tile_overlap,
+                                int hires_steps,
+                                float hires_strength,
+                                int freeu,
+                                float freeu_b1,
+                                float freeu_b2,
+                                int sag,
+                                float sag_scale,
+                                float clarity,
+                                float sharpen_amount,
+                                int sharpen_radius,
+                                const char* output_path) {
+    if (!pipeline || !prompt || !output_path) return -1;
+
+    sd::SDPipeline* p = static_cast<sd::SDPipeline*>(pipeline);
+    if (!p->is_loaded()) return -3;
+
+    int64_t packed = sd_compute_hires_resolution(target_width, target_height);
+    int low_w = static_cast<int>(packed >> 32);
+    int low_h = static_cast<int>(packed & 0xFFFFFFFF);
+
+    std::fprintf(stderr, "[C API] sd_pipeline_generate_hires: target=%dx%d base=%dx%d\n",
+                 target_width, target_height, low_w, low_h);
+
+    sd::ImageGenerationParams params;
+    params.prompt          = prompt;
+    params.negative_prompt = negative_prompt ? negative_prompt : "";
+    params.width           = low_w;
+    params.height          = low_h;
+    params.steps           = steps > 0 ? steps : 20;
+    params.cfg_scale       = cfg > 0.0f ? cfg : 7.0f;
+    params.sample_method   = sample_method ? sample_method : "euler";
+    params.scheduler       = scheduler ? scheduler : "discrete";
+    params.seed            = seed;
+
+    params.hires_enabled  = true;
+    params.hires_width    = target_width;
+    params.hires_height   = target_height;
+    params.hires_steps    = hires_steps > 0 ? hires_steps : 20;
+    params.hires_strength = hires_strength >= 0.0f && hires_strength <= 1.0f ? hires_strength : 0.35f;
+
+    if (vae_tiling != 0) {
+        params.vae_tiling       = true;
+        params.vae_tile_size_x  = vae_tile_size > 0 ? vae_tile_size : 128;
+        params.vae_tile_size_y  = params.vae_tile_size_x;
+        params.vae_tile_overlap = vae_tile_overlap >= 0.0f && vae_tile_overlap <= 1.0f
+                                  ? vae_tile_overlap : 0.5f;
+    } else if (target_width > 512 || target_height > 512) {
+        params.vae_tiling       = true;
+        params.vae_tile_size_x  = 64;
+        params.vae_tile_size_y  = 64;
+        params.vae_tile_overlap = 0.5f;
+    }
+
+    if (freeu != 0) {
+        params.freeu_enabled = true;
+        params.freeu_b1      = freeu_b1 > 0.0f ? freeu_b1 : 1.3f;
+        params.freeu_b2      = freeu_b2 > 0.0f ? freeu_b2 : 1.4f;
+    }
+
+    if (sag != 0) {
+        params.sag_enabled = true;
+        params.sag_scale   = sag_scale >= 0.0f ? sag_scale : 1.0f;
+    }
+
+    sd::Image image = p->generate(params);
+    std::fprintf(stderr, "[C API] generate_hires returned empty=%d w=%d h=%d c=%d\n",
+                 image.empty(), image.width, image.height, image.channels);
+    if (image.empty()) return -4;
+
+    bool has_postproc = (clarity > 0.0f || sharpen_amount > 0.0f);
+    if (has_postproc) {
+        std::fprintf(stderr, "[C API] postproc: clarity=%.2f sharpen=%.2f(r=%d)\n",
+                     clarity, sharpen_amount, sharpen_radius);
+        postproc::Params pp;
+        pp.clarity         = clarity;
+        pp.sharpen_amount  = sharpen_amount;
+        pp.sharpen_radius  = sharpen_radius > 0 ? sharpen_radius : 1;
+        if (!postproc::apply(image.data.data(), image.width, image.height, image.channels, pp)) {
+            std::fprintf(stderr, "[C API] postproc failed\n");
+            return -5;
+        }
+    }
+
+    if (!save_png(output_path, image.data.data(), image.width, image.height, image.channels)) {
+        std::fprintf(stderr, "[C API] save_png failed for %s\n", output_path);
+        return -6;
     }
     std::fprintf(stderr, "[C API] saved %s (%dx%d, %d ch)\n", output_path, image.width, image.height, image.channels);
 

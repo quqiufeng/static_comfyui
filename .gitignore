@@ -223,6 +223,8 @@ comfyui_ref/
 # StaticPy generated executables
 sd_generate*.elf
 *.elf
+comfycli-bin
+comfycli/_bundle.static.py
 
 # C++ build artifacts in cpp/
 cpp/sdxl_pipeline

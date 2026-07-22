@@ -8,15 +8,31 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # ---------------------------------------------------------------------------
 # Paths to /opt/sd (stable-diffusion.cpp)
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Dynamic vs static backend mode
+# - SD_BACKEND_DL=ON:  use /opt/sd/build-dl with shared libs + dynamic backend plugins
+#                      (libggml-cuda.so loaded at runtime, smaller CPU-only package)
+# - SD_BACKEND_DL=OFF: use /opt/sd/build with static libs (legacy, all-in-one)
+# ---------------------------------------------------------------------------
 set(SD_DIR "/opt/sd" CACHE PATH "Path to stable-diffusion.cpp source")
-set(SD_BUILD_DIR "${SD_DIR}/build" CACHE PATH "Path to stable-diffusion.cpp build directory")
+option(SD_BACKEND_DL "Use shared sd.cpp/ggml with dynamic backend loading" ON)
+
+if(SD_BACKEND_DL)
+    set(SD_BUILD_DIR_DEFAULT "${SD_DIR}/build-dl")
+else()
+    set(SD_BUILD_DIR_DEFAULT "${SD_DIR}/build")
+endif()
+set(SD_BUILD_DIR "${SD_BUILD_DIR_DEFAULT}" CACHE PATH "Path to stable-diffusion.cpp build directory")
+
+message(STATUS "SD_BACKEND_DL: ${SD_BACKEND_DL}")
+message(STATUS "SD_BUILD_DIR:  ${SD_BUILD_DIR}")
 
 if(NOT EXISTS ${SD_DIR})
     message(FATAL_ERROR "SD_DIR not found: ${SD_DIR}")
 endif()
 
 if(NOT EXISTS ${SD_BUILD_DIR})
-    message(FATAL_ERROR "SD_BUILD_DIR not found: ${SD_BUILD_DIR}. Please run build_sd.sh first.")
+    message(FATAL_ERROR "SD_BUILD_DIR not found: ${SD_BUILD_DIR}. Please run build_sd.sh or build_sd_dl.sh first.")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -28,13 +44,23 @@ find_library(CUDA_DRIVER_LIB cuda PATHS "${CUDA_LIB_DIR}/stubs" NO_DEFAULT_PATH 
 find_library(CULIBOS_LIB culibos PATHS ${CUDA_LIB_DIR} NO_DEFAULT_PATH REQUIRED)
 
 # ---------------------------------------------------------------------------
-# Static libraries from /opt/sd/build
+# Libraries from /opt/sd
 # ---------------------------------------------------------------------------
-find_library(SD_LIB stable-diffusion PATHS ${SD_BUILD_DIR} NO_DEFAULT_PATH REQUIRED)
-find_library(GGML_LIB ggml PATHS ${SD_BUILD_DIR}/ggml/src NO_DEFAULT_PATH REQUIRED)
-find_library(GGML_CPU_LIB ggml-cpu PATHS ${SD_BUILD_DIR}/ggml/src NO_DEFAULT_PATH REQUIRED)
-find_library(GGML_BASE_LIB ggml-base PATHS ${SD_BUILD_DIR}/ggml/src NO_DEFAULT_PATH REQUIRED)
-find_library(GGML_CUDA_LIB ggml-cuda PATHS ${SD_BUILD_DIR}/ggml/src/ggml-cuda NO_DEFAULT_PATH REQUIRED)
+if(SD_BACKEND_DL)
+    # Shared libs: stable-diffusion, ggml, ggml-base; backends are loaded at runtime
+    find_library(SD_LIB stable-diffusion PATHS ${SD_BUILD_DIR}/bin NO_DEFAULT_PATH REQUIRED)
+    find_library(GGML_LIB ggml PATHS ${SD_BUILD_DIR}/bin NO_DEFAULT_PATH REQUIRED)
+    find_library(GGML_BASE_LIB ggml-base PATHS ${SD_BUILD_DIR}/bin NO_DEFAULT_PATH REQUIRED)
+    set(GGML_CPU_LIB "")
+    set(GGML_CUDA_LIB "")
+else()
+    # Static libs: everything linked into libsdcpp_adapter.so
+    find_library(SD_LIB stable-diffusion PATHS ${SD_BUILD_DIR} NO_DEFAULT_PATH REQUIRED)
+    find_library(GGML_LIB ggml PATHS ${SD_BUILD_DIR}/ggml/src NO_DEFAULT_PATH REQUIRED)
+    find_library(GGML_CPU_LIB ggml-cpu PATHS ${SD_BUILD_DIR}/ggml/src NO_DEFAULT_PATH REQUIRED)
+    find_library(GGML_BASE_LIB ggml-base PATHS ${SD_BUILD_DIR}/ggml/src NO_DEFAULT_PATH REQUIRED)
+    find_library(GGML_CUDA_LIB ggml-cuda PATHS ${SD_BUILD_DIR}/ggml/src/ggml-cuda NO_DEFAULT_PATH REQUIRED)
+endif()
 
 message(STATUS "SD_LIB:        ${SD_LIB}")
 message(STATUS "GGML_LIB:      ${GGML_LIB}")
@@ -72,35 +98,53 @@ foreach(target sdcpp_adapter sdcpp_adapter_shared)
     target_include_directories(${target}
         PUBLIC
             ${CMAKE_CURRENT_SOURCE_DIR}/src/adapters
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/postproc
             ${SD_DIR}/include
             ${SD_DIR}
             ${SD_DIR}/thirdparty
     )
 endforeach()
 
-# The shared adapter must embed all sd.cpp / ggml / CUDA dependencies so that
-# StaticPy can dlopen it without knowing the upstream link order.
-target_link_libraries(sdcpp_adapter_shared PRIVATE
-    ${SD_LIB}
-    webp
-    webpmux
-    ${GGML_LIB}
-    dl
-    ${GGML_CPU_LIB}
-    ${GGML_CUDA_LIB}
-    ${GGML_BASE_LIB}
-    CUDA::cudart
-    CUDA::cublas
-    CUDA::cublasLt
-    ${CULIBOS_LIB}
-    ${CUDA_DRIVER_LIB}
-    gomp
-    pthread
-    webp
-    sharpyuv
-    png
-    m
-)
+# The shared adapter links to sd.cpp / ggml shared libs; CUDA backend is loaded at runtime.
+if(SD_BACKEND_DL)
+    target_link_libraries(sdcpp_adapter_shared PRIVATE
+        postproc
+        ${SD_LIB}
+        webp
+        webpmux
+        ${GGML_LIB}
+        ${GGML_BASE_LIB}
+        dl
+        gomp
+        pthread
+        webp
+        sharpyuv
+        png
+        m
+    )
+else()
+    target_link_libraries(sdcpp_adapter_shared PRIVATE
+        ${SD_LIB}
+        webp
+        webpmux
+        ${GGML_LIB}
+        dl
+        ${GGML_CPU_LIB}
+        ${GGML_CUDA_LIB}
+        ${GGML_BASE_LIB}
+        CUDA::cudart
+        CUDA::cublas
+        CUDA::cublasLt
+        ${CULIBOS_LIB}
+        ${CUDA_DRIVER_LIB}
+        gomp
+        pthread
+        webp
+        sharpyuv
+        png
+        m
+    )
+endif()
 
 # ---------------------------------------------------------------------------
 # Common link libraries for sd.cpp executables
@@ -109,29 +153,49 @@ target_link_libraries(sdcpp_adapter_shared PRIVATE
 #   ggml-cpu -> ggml-cuda -> ggml-base -> gomp/pthread ->
 #   cudart/cublas/cublasLt/culibos/cuda -> webp/sharpyuv -> m
 # ---------------------------------------------------------------------------
-set(SD_COMMON_LINK_LIBS
-    sdcpp_adapter
-    postproc
-    ${SD_LIB}
-    webp
-    webpmux
-    ${GGML_LIB}
-    dl
-    ${GGML_CPU_LIB}
-    ${GGML_CUDA_LIB}
-    ${GGML_BASE_LIB}
-    CUDA::cudart
-    CUDA::cublas
-    CUDA::cublasLt
-    ${CULIBOS_LIB}
-    ${CUDA_DRIVER_LIB}
-    gomp
-    pthread
-    webp
-    sharpyuv
-    png
-    m
-)
+# Common link libraries for sd.cpp executables
+if(SD_BACKEND_DL)
+    set(SD_COMMON_LINK_LIBS
+        sdcpp_adapter
+        postproc
+        ${SD_LIB}
+        webp
+        webpmux
+        ${GGML_LIB}
+        ${GGML_BASE_LIB}
+        dl
+        gomp
+        pthread
+        webp
+        sharpyuv
+        png
+        m
+    )
+else()
+    set(SD_COMMON_LINK_LIBS
+        sdcpp_adapter
+        postproc
+        ${SD_LIB}
+        webp
+        webpmux
+        ${GGML_LIB}
+        dl
+        ${GGML_CPU_LIB}
+        ${GGML_CUDA_LIB}
+        ${GGML_BASE_LIB}
+        CUDA::cudart
+        CUDA::cublas
+        CUDA::cublasLt
+        ${CULIBOS_LIB}
+        ${CUDA_DRIVER_LIB}
+        gomp
+        pthread
+        webp
+        sharpyuv
+        png
+        m
+    )
+endif()
 
 function(add_sd_example target)
     add_executable(${target} ${ARGN})

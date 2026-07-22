@@ -386,6 +386,13 @@ class CliArgs:
     cuda_device: str
     highvram: bool
     lowvram: bool
+    width: int
+    height: int
+    steps: int
+    cfg: float
+    seed: int
+    sampler: str
+    scheduler: str
 
 
 def parse_cli_args() -> dict:
@@ -402,6 +409,13 @@ def parse_cli_args() -> dict:
     cuda_device: str = "0"
     highvram: bool = False
     lowvram: bool = False
+    width: int = 1024
+    height: int = 1024
+    steps: int = 20
+    cfg: float = 7.0
+    seed: int = 42
+    sampler: str = "euler_a"
+    scheduler: str = "discrete"
 
     i: int = 1
     while i < argc:
@@ -428,6 +442,34 @@ def parse_cli_args() -> dict:
                 output_dir = py_list_ref(args_list, i)
         elif arg == "--cpu":
             cpu = True
+        elif arg == "--width" or arg == "-W":
+            i = i + 1
+            if i < argc:
+                width = string_to_int(py_list_ref(args_list, i))
+        elif arg == "--height" or arg == "-H":
+            i = i + 1
+            if i < argc:
+                height = string_to_int(py_list_ref(args_list, i))
+        elif arg == "--steps" or arg == "-s":
+            i = i + 1
+            if i < argc:
+                steps = string_to_int(py_list_ref(args_list, i))
+        elif arg == "--seed" or arg == "-S":
+            i = i + 1
+            if i < argc:
+                seed = string_to_int(py_list_ref(args_list, i))
+        elif arg == "--cfg" or arg == "-C":
+            i = i + 1
+            if i < argc:
+                cfg = string_to_float(py_list_ref(args_list, i))
+        elif arg == "--sampler":
+            i = i + 1
+            if i < argc:
+                sampler = py_list_ref(args_list, i)
+        elif arg == "--scheduler":
+            i = i + 1
+            if i < argc:
+                scheduler = py_list_ref(args_list, i)
         elif arg == "--cuda-device" or arg == "--cuda_device":
             i = i + 1
             if i < argc:
@@ -452,6 +494,13 @@ def parse_cli_args() -> dict:
     dict_set(result, "cuda_device", cuda_device)
     dict_set(result, "highvram", highvram)
     dict_set(result, "lowvram", lowvram)
+    dict_set(result, "width", width)
+    dict_set(result, "height", height)
+    dict_set(result, "steps", steps)
+    dict_set(result, "cfg", cfg)
+    dict_set(result, "seed", seed)
+    dict_set(result, "sampler", sampler)
+    dict_set(result, "scheduler", scheduler)
     return result
 
 
@@ -468,6 +517,13 @@ def print_help():
     print("  --prompt, -p <text>             Text prompt")
     print("  --output, -o <path>             Output image path")
     print("  --output-dir <path>             Output directory")
+    print("  --width, -W <int>               Image width (default: 1024)")
+    print("  --height, -H <int>              Image height (default: 1024)")
+    print("  --steps, -s <int>                 Sampling steps (default: 20)")
+    print("  --seed, -S <int>                  Random seed (default: 42)")
+    print("  --cfg, -C <float>               CFG scale (default: 7.0)")
+    print("  --sampler <name>                Sampler name (default: euler_a)")
+    print("  --scheduler <name>              Scheduler name (default: discrete)")
     print("  --cpu                           CPU mode (no GPU)")
     print("  --cuda-device <id>              CUDA device ID (default: 0)")
     print("  --highvram, --gpu-only          Keep all models on GPU")
@@ -1007,7 +1063,10 @@ def controlnet_apply(unet_features, control_features, strength: float):
 extern fn sd_pipeline_create() -> ptr from "sdcpp_adapter"
 extern fn sd_pipeline_free(pipeline: ptr) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_load(pipeline: ptr, model_path: str, clip_l_path: str, clip_g_path: str, vae_path: str, wtype: int, n_threads: int, diffusion_fa: int) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_load_ex(pipeline: ptr, model_path: str, clip_l_path: str, clip_g_path: str, vae_path: str, wtype: int, n_threads: int, diffusion_fa: int, diffusion_model_path: str, llm_path: str) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_generate(pipeline: ptr, prompt: str, negative_prompt: str, width: int, height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires: int, hires_width: int, hires_height: int, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, output_path: str) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_generate_hires(pipeline: ptr, prompt: str, negative_prompt: str, target_width: int, target_height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, clarity: float, sharpen_amount: float, sharpen_radius: int, output_path: str) -> int from "sdcpp_adapter"
+
 extern fn sd_ensure_dir(path: str) -> int from "sdcpp_adapter"
 
 # SD weight type constants (matching stable-diffusion.h sd_type_t)
@@ -1065,26 +1124,57 @@ def sd_generate_with_options(pipeline: ptr, prompt: str, negative_prompt: str,
 
 def sd_ensure_directory(path: str) -> int:
     return sd_ensure_dir(path)
+
+
+def sd_load_ex(pipeline: ptr, model_path: str, clip_l_path: str, clip_g_path: str,
+               vae_path: str, wtype: int, n_threads: int, diffusion_fa: int,
+               diffusion_model_path: str, llm_path: str) -> int:
+    return sd_pipeline_load_ex(pipeline, model_path, clip_l_path, clip_g_path,
+                               vae_path, wtype, n_threads, diffusion_fa,
+                               diffusion_model_path, llm_path)
+
+
+def sd_generate_hires(pipeline: ptr, prompt: str, negative_prompt: str,
+                       target_width: int, target_height: int,
+                       steps: int, cfg: float,
+                       sample_method: str, scheduler: str, seed: int,
+                       vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float,
+                       hires_steps: int, hires_strength: float,
+                       freeu: int, freeu_b1: float, freeu_b2: float,
+                       sag: int, sag_scale: float,
+                       clarity: float, sharpen_amount: float, sharpen_radius: int,
+                       output_path: str) -> int:
+    return sd_pipeline_generate_hires(pipeline, prompt, negative_prompt,
+                                       target_width, target_height,
+                                       steps, cfg,
+                                       sample_method, scheduler, seed,
+                                       vae_tiling, vae_tile_size, vae_tile_overlap,
+                                       hires_steps, hires_strength,
+                                       freeu, freeu_b1, freeu_b2,
+                                       sag, sag_scale,
+                                       clarity, sharpen_amount, sharpen_radius,
+                                       output_path)
 # === nodes.static.py ===
 
 NODE_CLASS_MAPPINGS: dict = make_dict()
 NODE_DISPLAY_NAMES: dict = make_dict()
 
 
-def register_node(class_type: str, display: str, func_name: str, ret_types: list,
-                  is_output: bool):
-    meta = make_dict()
-    dict_set(meta, "display", display)
-    dict_set(meta, "function", func_name)
-    dict_set(meta, "return_types", ret_types)
-    dict_set(meta, "output_node", is_output)
-    dict_set(NODE_CLASS_MAPPINGS, class_type, meta)
-    dict_set(NODE_DISPLAY_NAMES, class_type, display)
-
-
 @dataclass
 class SDPipelineHandle:
     pipeline: ptr
+
+
+@dataclass
+class Conditioning:
+    text: str
+
+
+@dataclass
+class LatentImage:
+    width: int
+    height: int
+    batch_size: int
 
 
 def make_sd_pipeline_handle(pipeline: ptr) -> SDPipelineHandle:
@@ -1097,33 +1187,15 @@ def resolve_model_path(name: str) -> str:
     return "/data/models/image/" + name
 
 
-def checkpoint_loader_simple(inputs):
-    ckpt_name = dict_get(inputs, "ckpt_name")
-    clip_l_name = dict_get(inputs, "clip_l_name")
-    clip_g_name = dict_get(inputs, "clip_g_name")
-
-    ckpt_path = resolve_model_path(ckpt_name)
-    if clip_l_name is None:
-        clip_l_path = ""
-    else:
-        clip_l_path = resolve_model_path(clip_l_name)
-    if clip_g_name is None:
-        clip_g_path = ""
-    else:
-        clip_g_path = resolve_model_path(clip_g_name)
-
-    pipeline = sd_create()
-    rc = sd_load(pipeline, ckpt_path, clip_l_path, clip_g_path, "", SD_WTYPE_AUTO, 8, 0)
-    if rc != 0:
-        print("SD checkpoint load failed, rc=" + string_of_int(rc))
-        return (None,)
-
-    handle = make_sd_pipeline_handle(pipeline)
-    return (handle,)
-
-
-register_node("CheckpointLoaderSimple", "Load Checkpoint",
-              "checkpoint_loader_simple", ("MODEL",), False)
+def register_node(class_type: str, display: str, func_name: str, ret_types: list,
+                  is_output: bool):
+    meta = make_dict()
+    dict_set(meta, "display", display)
+    dict_set(meta, "function", func_name)
+    dict_set(meta, "return_types", ret_types)
+    dict_set(meta, "output_node", is_output)
+    dict_set(NODE_CLASS_MAPPINGS, class_type, meta)
+    dict_set(NODE_DISPLAY_NAMES, class_type, display)
 
 
 def get_int(inputs, key: str, default: int) -> int:
@@ -1147,20 +1219,103 @@ def get_str(inputs, key: str, default: str) -> str:
     return v
 
 
-def sd_txt2img(inputs):
-    model: SDPipelineHandle = dict_get(inputs, "model")
-    pipeline = model.pipeline
+def checkpoint_loader_simple(inputs):
+    ckpt_name = dict_get(inputs, "ckpt_name")
+    clip_l_name = dict_get(inputs, "clip_l_name")
+    clip_g_name = dict_get(inputs, "clip_g_name")
 
-    prompt = get_str(inputs, "prompt", "")
-    negative_prompt = get_str(inputs, "negative_prompt", "")
+    ckpt_path = resolve_model_path(ckpt_name)
+    if clip_l_name is None:
+        clip_l_path = ""
+    else:
+        clip_l_path = resolve_model_path(clip_l_name)
+    if clip_g_name is None:
+        clip_g_path = ""
+    else:
+        clip_g_path = resolve_model_path(clip_g_name)
 
+    pipeline = sd_create()
+    rc = sd_load(pipeline, ckpt_path, clip_l_path, clip_g_path, "", SD_WTYPE_AUTO, 8, 0)
+    if rc != 0:
+        print("SD checkpoint load failed, rc=" + string_of_int(rc))
+        return (None, None, None)
+
+    handle = make_sd_pipeline_handle(pipeline)
+    return (handle, handle, handle)
+
+
+register_node("CheckpointLoaderSimple", "Load Checkpoint",
+              "checkpoint_loader_simple", ("MODEL", "CLIP", "VAE"), False)
+
+
+def dual_clip_loader(inputs):
+    clip_name1 = get_str(inputs, "clip_name1", "")
+    clip_name2 = get_str(inputs, "clip_name2", "")
+    type_name = get_str(inputs, "type", "sdxl")
+    # In this backend CLIP is bundled with the pipeline; the loader is a no-op
+    # placeholder that satisfies the standard ComfyUI link topology.
+    return (None,)
+
+
+register_node("DualCLIPLoader", "Dual CLIP Loader",
+              "dual_clip_loader", ("CLIP",), False)
+
+
+def clip_text_encode(inputs):
+    text = get_str(inputs, "text", "")
+    clip = dict_get(inputs, "clip")
+    # clip is ignored here because sd.cpp handles CLIP encode internally.
+    return (Conditioning(text),)
+
+
+register_node("CLIPTextEncode", "CLIP Text Encode",
+              "clip_text_encode", ("CONDITIONING",), False)
+
+
+def empty_latent_image(inputs):
     width = get_int(inputs, "width", 1024)
     height = get_int(inputs, "height", 1024)
+    batch_size = get_int(inputs, "batch_size", 1)
+    return (LatentImage(width, height, batch_size),)
+
+
+register_node("EmptyLatentImage", "Empty Latent Image",
+              "empty_latent_image", ("LATENT",), False)
+
+
+def ksampler(inputs):
+    model: SDPipelineHandle = dict_get(inputs, "model")
+    if model is None:
+        print("KSampler: model is missing")
+        return (None,)
+    pipeline = model.pipeline
+
+    positive: Conditioning = dict_get(inputs, "positive")
+    if positive is None:
+        prompt = get_str(inputs, "prompt", "")
+    else:
+        prompt = positive.text
+
+    negative: Conditioning = dict_get(inputs, "negative")
+    if negative is None:
+        negative_prompt = get_str(inputs, "negative_prompt", "")
+    else:
+        negative_prompt = negative.text
+
+    latent: LatentImage = dict_get(inputs, "latent_image")
+    if latent is None:
+        width = get_int(inputs, "width", 1024)
+        height = get_int(inputs, "height", 1024)
+    else:
+        width = latent.width
+        height = latent.height
+
     steps = get_int(inputs, "steps", 20)
     cfg = get_float(inputs, "cfg", 7.0)
-    sample_method = get_str(inputs, "sample_method", "euler_a")
-    scheduler = get_str(inputs, "scheduler", "discrete")
+    sampler_name = get_str(inputs, "sampler_name", "euler")
+    scheduler = get_str(inputs, "scheduler", "normal")
     seed = get_int(inputs, "seed", 42)
+    denoise = get_float(inputs, "denoise", 1.0)
 
     vae_tiling = get_int(inputs, "vae_tiling", 0)
     vae_tile_size = get_int(inputs, "vae_tile_size", 0)
@@ -1177,7 +1332,7 @@ def sd_txt2img(inputs):
 
     rc = sd_generate_with_options(pipeline, prompt, negative_prompt,
                                   width, height, steps, cfg,
-                                  sample_method, scheduler, seed,
+                                  sampler_name, scheduler, seed,
                                   vae_tiling, vae_tile_size, vae_tile_overlap,
                                   0, 0, 0, 0, 0.0,
                                   0, 0.0, 0.0,
@@ -1191,11 +1346,136 @@ def sd_txt2img(inputs):
 
 
 register_node("KSampler", "KSampler",
-              "sd_txt2img", ("IMAGE",), False)
+              "ksampler", ("LATENT",), False)
+
+
+def vae_decode(inputs):
+    samples = dict_get(inputs, "samples")
+    vae = dict_get(inputs, "vae")
+    # In this backend VAE decode is already performed inside KSampler, so
+    # this node just passes the already-decoded image path through.
+    if samples is None:
+        print("VAEDecode: no samples received")
+        return (None,)
+    return (samples,)
+
+
+register_node("VAEDecode", "VAE Decode",
+              "vae_decode", ("IMAGE",), False)
+
+
+def diffusion_model_loader(inputs):
+    diffusion_model_name = dict_get(inputs, "diffusion_model_name")
+    llm_name = dict_get(inputs, "llm_name")
+    vae_name = dict_get(inputs, "vae_name")
+
+    if diffusion_model_name is None:
+        print("DiffusionModelLoader: diffusion_model_name is required")
+        return (None,)
+    if llm_name is None:
+        print("DiffusionModelLoader: llm_name is required")
+        return (None,)
+
+    diffusion_model_path = resolve_model_path(diffusion_model_name)
+    llm_path = resolve_model_path(llm_name)
+    vae_path = ""
+    if vae_name is not None:
+        vae_path = resolve_model_path(vae_name)
+
+    pipeline = sd_create()
+    rc = sd_load_ex(pipeline, "", "", "", vae_path, SD_WTYPE_AUTO, 8, 1,
+                    diffusion_model_path, llm_path)
+    if rc != 0:
+        print("DiffusionModelLoader: load failed, rc=" + string_of_int(rc))
+        return (None,)
+
+    handle = make_sd_pipeline_handle(pipeline)
+    return (handle, handle, handle)
+
+
+register_node("DiffusionModelLoader", "Load Diffusion Model (GGUF)",
+              "diffusion_model_loader", ("MODEL", "CLIP", "VAE"), False)
+
+
+def hires_fix(inputs):
+    model: SDPipelineHandle = dict_get(inputs, "model")
+    if model is None:
+        print("HiResFix: model is missing")
+        return (None,)
+    pipeline = model.pipeline
+
+    positive: Conditioning = dict_get(inputs, "positive")
+    if positive is None:
+        prompt = get_str(inputs, "prompt", "")
+    else:
+        prompt = positive.text
+
+    negative: Conditioning = dict_get(inputs, "negative")
+    if negative is None:
+        negative_prompt = get_str(inputs, "negative_prompt", "")
+    else:
+        negative_prompt = negative.text
+
+    width = get_int(inputs, "width", 1024)
+    height = get_int(inputs, "height", 1024)
+
+    steps = get_int(inputs, "steps", 20)
+    cfg = get_float(inputs, "cfg", 2.5)
+    sampler_name = get_str(inputs, "sampler_name", "euler")
+    scheduler = get_str(inputs, "scheduler", "discrete")
+    seed = get_int(inputs, "seed", 0)
+    if seed == 0:
+        seed = -1
+
+    vae_tiling = get_int(inputs, "vae_tiling", 1)
+    vae_tile_size = get_int(inputs, "vae_tile_size", 128)
+    vae_tile_overlap = get_float(inputs, "vae_tile_overlap", 0.5)
+
+    hires_steps = get_int(inputs, "hires_steps", 45)
+    hires_strength = get_float(inputs, "hires_strength", 0.35)
+
+    freeu = get_int(inputs, "freeu", 1)
+    freeu_b1 = get_float(inputs, "freeu_b1", 1.3)
+    freeu_b2 = get_float(inputs, "freeu_b2", 1.4)
+
+    sag = get_int(inputs, "sag", 0)
+    sag_scale = get_float(inputs, "sag_scale", 1.0)
+
+    clarity = get_float(inputs, "clarity", 0.2)
+    sharpen = get_float(inputs, "sharpen", 0.3)
+    sharpen_radius = get_int(inputs, "sharpen_radius", 1)
+
+    output_dir = get_str(inputs, "output_dir", "/tmp/comfy_output")
+    filename_prefix = get_str(inputs, "filename_prefix", "comfy")
+    output_path = output_dir + "/" + filename_prefix + ".png"
+
+    rc = sd_ensure_directory(output_dir)
+    if rc != 0:
+        print("Failed to create output dir: " + output_dir)
+        return (None,)
+
+    rc = sd_generate_hires(pipeline, prompt, negative_prompt,
+                           width, height, steps, cfg,
+                           sampler_name, scheduler, seed,
+                           vae_tiling, vae_tile_size, vae_tile_overlap,
+                           hires_steps, hires_strength,
+                           freeu, freeu_b1, freeu_b2,
+                           sag, sag_scale,
+                           clarity, sharpen, sharpen_radius,
+                           output_path)
+    if rc != 0:
+        print("HiResFix generate failed, rc=" + string_of_int(rc))
+        return (None,)
+
+    print("HiResFix: saved " + output_path)
+    return (output_path,)
+
+
+register_node("HiResFix", "HiRes Fix",
+              "hires_fix", ("LATENT",), False)
 
 
 def save_image(inputs):
-    # Image is already saved by KSampler; this node just passes through.
     image_path = dict_get(inputs, "images")
     if image_path is None:
         print("SaveImage: no image path received")
@@ -1211,8 +1491,20 @@ register_node("SaveImage", "Save Image",
 def call_node(class_type: str, inputs):
     if class_type == "CheckpointLoaderSimple":
         return checkpoint_loader_simple(inputs)
+    elif class_type == "DualCLIPLoader":
+        return dual_clip_loader(inputs)
+    elif class_type == "CLIPTextEncode":
+        return clip_text_encode(inputs)
+    elif class_type == "EmptyLatentImage":
+        return empty_latent_image(inputs)
     elif class_type == "KSampler":
-        return sd_txt2img(inputs)
+        return ksampler(inputs)
+    elif class_type == "DiffusionModelLoader":
+        return diffusion_model_loader(inputs)
+    elif class_type == "HiResFix":
+        return hires_fix(inputs)
+    elif class_type == "VAEDecode":
+        return vae_decode(inputs)
     elif class_type == "SaveImage":
         return save_image(inputs)
     else:
@@ -1322,7 +1614,9 @@ def make_workflow_node(class_type: str, inputs) -> dict:
     return node
 
 
-def build_prompt_workflow(checkpoint: str, prompt: str, output_path: str, output_dir: str) -> str:
+def build_prompt_workflow(checkpoint: str, prompt: str, output_path: str, output_dir: str,
+                          width: int, height: int, steps: int, cfg: float,
+                          seed: int, sampler: str, scheduler: str) -> str:
     # Determine output directory and filename prefix.
     if output_path is not None and str_length(output_path) > 0:
         out_dir = path_dirname(output_path)
@@ -1354,13 +1648,13 @@ def build_prompt_workflow(checkpoint: str, prompt: str, output_path: str, output
     dict_set(sampler_inputs, "model", py_list("1", 0))
     dict_set(sampler_inputs, "prompt", prompt)
     dict_set(sampler_inputs, "negative_prompt", "")
-    dict_set(sampler_inputs, "width", 1024)
-    dict_set(sampler_inputs, "height", 1024)
-    dict_set(sampler_inputs, "steps", 20)
-    dict_set(sampler_inputs, "cfg", 7.0)
-    dict_set(sampler_inputs, "sample_method", "euler_a")
-    dict_set(sampler_inputs, "scheduler", "discrete")
-    dict_set(sampler_inputs, "seed", 42)
+    dict_set(sampler_inputs, "width", width)
+    dict_set(sampler_inputs, "height", height)
+    dict_set(sampler_inputs, "steps", steps)
+    dict_set(sampler_inputs, "cfg", cfg)
+    dict_set(sampler_inputs, "sampler_name", sampler)
+    dict_set(sampler_inputs, "scheduler", scheduler)
+    dict_set(sampler_inputs, "seed", seed)
     dict_set(sampler_inputs, "output_dir", out_dir)
     dict_set(sampler_inputs, "filename_prefix", filename_prefix)
     dict_set(workflow, "2", make_workflow_node("KSampler", sampler_inputs))
@@ -1389,8 +1683,17 @@ def main():
         prompt = dict_get(args, "prompt")
         checkpoint = dict_get(args, "checkpoint")
         output_path = dict_get(args, "output")
+        width = get_int(args, "width", 1024)
+        height = get_int(args, "height", 1024)
+        steps = get_int(args, "steps", 20)
+        cfg = get_float(args, "cfg", 7.0)
+        seed = get_int(args, "seed", 42)
+        sampler = get_str(args, "sampler", "euler_a")
+        scheduler = get_str(args, "scheduler", "discrete")
         if checkpoint is not None and prompt is not None:
-            content = build_prompt_workflow(checkpoint, prompt, output_path, output_dir)
+            content = build_prompt_workflow(checkpoint, prompt, output_path, output_dir,
+                                              width, height, steps, cfg, seed,
+                                              sampler, scheduler)
             result = execute_prompt(content, output_dir)
         else:
             print("Usage: comfycli-bin workflow.json --output-dir ./output")

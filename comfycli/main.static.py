@@ -13,7 +13,9 @@ def make_workflow_node(class_type: str, inputs) -> dict:
     return node
 
 
-def build_prompt_workflow(checkpoint: str, prompt: str, output_path: str, output_dir: str) -> str:
+def build_prompt_workflow(checkpoint: str, prompt: str, output_path: str, output_dir: str,
+                          width: int, height: int, steps: int, cfg: float,
+                          seed: int, sampler: str, scheduler: str) -> str:
     # Determine output directory and filename prefix.
     if output_path is not None and str_length(output_path) > 0:
         out_dir = path_dirname(output_path)
@@ -45,13 +47,13 @@ def build_prompt_workflow(checkpoint: str, prompt: str, output_path: str, output
     dict_set(sampler_inputs, "model", py_list("1", 0))
     dict_set(sampler_inputs, "prompt", prompt)
     dict_set(sampler_inputs, "negative_prompt", "")
-    dict_set(sampler_inputs, "width", 1024)
-    dict_set(sampler_inputs, "height", 1024)
-    dict_set(sampler_inputs, "steps", 20)
-    dict_set(sampler_inputs, "cfg", 7.0)
-    dict_set(sampler_inputs, "sample_method", "euler_a")
-    dict_set(sampler_inputs, "scheduler", "discrete")
-    dict_set(sampler_inputs, "seed", 42)
+    dict_set(sampler_inputs, "width", width)
+    dict_set(sampler_inputs, "height", height)
+    dict_set(sampler_inputs, "steps", steps)
+    dict_set(sampler_inputs, "cfg", cfg)
+    dict_set(sampler_inputs, "sampler_name", sampler)
+    dict_set(sampler_inputs, "scheduler", scheduler)
+    dict_set(sampler_inputs, "seed", seed)
     dict_set(sampler_inputs, "output_dir", out_dir)
     dict_set(sampler_inputs, "filename_prefix", filename_prefix)
     dict_set(workflow, "2", make_workflow_node("KSampler", sampler_inputs))
@@ -80,8 +82,17 @@ def main():
         prompt = dict_get(args, "prompt")
         checkpoint = dict_get(args, "checkpoint")
         output_path = dict_get(args, "output")
+        width = get_int(args, "width", 1024)
+        height = get_int(args, "height", 1024)
+        steps = get_int(args, "steps", 20)
+        cfg = get_float(args, "cfg", 7.0)
+        seed = get_int(args, "seed", 42)
+        sampler = get_str(args, "sampler", "euler_a")
+        scheduler = get_str(args, "scheduler", "discrete")
         if checkpoint is not None and prompt is not None:
-            content = build_prompt_workflow(checkpoint, prompt, output_path, output_dir)
+            content = build_prompt_workflow(checkpoint, prompt, output_path, output_dir,
+                                              width, height, steps, cfg, seed,
+                                              sampler, scheduler)
             result = execute_prompt(content, output_dir)
         else:
             print("Usage: comfycli-bin workflow.json --output-dir ./output")

@@ -6,14 +6,15 @@
 #   ./deploy.sh                         # 打包部署包到 dist/
 #   ./deploy.sh --scp user@host         # 打包 + SCP 到远程
 #   GLIBC_TARGET=2.35 ./deploy.sh --scp user@host  # 指定目标 GLIBC 版本
+#   WITH_CUDA=1 ./deploy.sh --scp user@host         # 同时打包 CUDA Runtime
 #
 # 前提：先用 build.sh 编译好 comfycli-bin + comfycli-bin.so + libsdcpp_adapter.so
 #
 # 设计原则：
 #   - 不编译，只打包部署（编译用 build.sh）
-#   - torch 运行时 .so 打包到 dist/lib/，远程无需 pip install torch
 #   - GLIBC 兼容：从 /opt/deb/<version>/ 取目标版本 GLIBC + libstdc++
 #     打包到 dist/lib/，远程通过 run.sh 设 LD_LIBRARY_PATH 优先加载
+#   - 可选打包 CUDA Runtime（libcudart/cublas/cublasLt）到 dist/lib/
 #   - run.sh 自动设置 LD_LIBRARY_PATH，远程一条命令启动
 #
 # 准备 deb（一次性的）：
@@ -29,6 +30,12 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DIST_DIR="$PROJECT_DIR/dist"
 
+SD_BACKEND_DL="${SD_BACKEND_DL:-1}"
+SD_BUILD_DIR="${SD_BUILD_DIR:-/opt/sd/build-dl}"
+WITH_CUDA_BACKEND="${WITH_CUDA_BACKEND:-1}"
+WITH_CUDA="${WITH_CUDA:-0}"
+CUDA_DIR="${CUDA_DIR:-/data/cuda/targets/x86_64-linux/lib}"
+
 GLIBC_TARGET="${GLIBC_TARGET:-}"
 if [ -n "$GLIBC_TARGET" ]; then
   GLIBC_SYSROOT="/opt/deb/$GLIBC_TARGET"
@@ -38,8 +45,33 @@ else
   TARBALL_SUFFIX=""
 fi
 
+if [ "$WITH_CUDA" = "1" ]; then
+  TARBALL_SUFFIX="${TARBALL_SUFFIX}_cuda"
+  WITH_CUDA_BACKEND=1
+fi
+
+if [ "$WITH_CUDA_BACKEND" = "1" ] && [ ! -f "$SD_BUILD_DIR/bin/libggml-cuda.so" ]; then
+  echo "警告: WITH_CUDA_BACKEND=1 但找不到 $SD_BUILD_DIR/bin/libggml-cuda.so，已回退为 CPU-only"
+  WITH_CUDA_BACKEND=0
+fi
+
 echo "============================================"
 echo " ComfyCLI 纯二进制部署包"
+if [ "$SD_BACKEND_DL" = "1" ]; then
+  echo " 后端模式: 动态加载 (libggml-cuda.so 可独立分发)"
+else
+  echo " 后端模式: 静态链接"
+fi
+if [ "$WITH_CUDA_BACKEND" = "1" ]; then
+  echo " CUDA 后端插件: 包含"
+else
+  echo " CUDA 后端插件: 不包含（CPU-only）"
+fi
+if [ "$WITH_CUDA" = "1" ]; then
+  echo " CUDA Runtime: 打包"
+else
+  echo " CUDA Runtime: 不打包（远程需自带 CUDA Runtime）"
+fi
 echo "============================================"
 
 # ── 检查二进制是否存在 ──
@@ -82,6 +114,31 @@ if [ "$LIBMISSING" -gt 0 ]; then
   echo "  警告: $LIBMISSING 个 GLIBC 兼容库未找到"
 fi
 
+# ── 可选：打包 CUDA Runtime ──
+if [ "$WITH_CUDA" = "1" ]; then
+  echo ""
+  echo ">>> 收集 CUDA Runtime .so 到 $DIST_DIR/lib"
+  if [ ! -d "$CUDA_DIR" ]; then
+    echo "  错误: CUDA 目录不存在: $CUDA_DIR"
+    exit 1
+  fi
+  CUDA_MISSING=0
+  for lib in libcudart.so.12 libcublas.so.12 libcublasLt.so.12; do
+    f=$(find "$CUDA_DIR" -name "$lib" 2>/dev/null | head -1)
+    if [ -n "$f" ]; then
+      cp -L "$f" "$DIST_DIR/lib/"
+      echo "    ✓ $lib"
+    else
+      echo "    ✗ $lib 未找到"
+      CUDA_MISSING=$((CUDA_MISSING + 1))
+    fi
+  done
+  if [ "$CUDA_MISSING" -gt 0 ]; then
+    echo "  警告: $CUDA_MISSING 个 CUDA Runtime 库未找到"
+    exit 1
+  fi
+fi
+
 # ── 复制二进制到 dist/ ──
 echo ""
 echo ">>> 复制二进制"
@@ -95,6 +152,49 @@ elif [ -f "$PROJECT_DIR/libsdcpp_adapter.so" ]; then
   cp "$PROJECT_DIR/libsdcpp_adapter.so" "$DIST_DIR/"
 else
   echo "警告: libsdcpp_adapter.so 未找到"
+fi
+
+# ── 动态后端模式：复制 sd.cpp / ggml 共享库与后端插件 ──
+if [ "$SD_BACKEND_DL" = "1" ]; then
+  echo ""
+  echo ">>> 复制 sd.cpp / ggml 共享库到 $DIST_DIR/lib"
+  SD_LIBS=(
+    "$SD_BUILD_DIR/bin/libstable-diffusion.so"
+    "$SD_BUILD_DIR/bin/libggml.so"
+    "$SD_BUILD_DIR/bin/libggml.so.0"
+    "$SD_BUILD_DIR/bin/libggml.so.0.15.3"
+    "$SD_BUILD_DIR/bin/libggml-base.so"
+    "$SD_BUILD_DIR/bin/libggml-base.so.0"
+    "$SD_BUILD_DIR/bin/libggml-base.so.0.15.3"
+  )
+  for f in "${SD_LIBS[@]}"; do
+    if [ -f "$f" ]; then
+      cp -L "$f" "$DIST_DIR/lib/"
+      echo "    ✓ $(basename "$f")"
+    else
+      echo "    ✗ $(basename "$f") 未找到"
+    fi
+  done
+
+  echo ""
+  echo ">>> 复制 CPU 后端插件到 $DIST_DIR"
+  for f in "$SD_BUILD_DIR/bin"/libggml-cpu-*.so; do
+    if [ -f "$f" ]; then
+      cp -L "$f" "$DIST_DIR/"
+      echo "    ✓ $(basename "$f")"
+    fi
+  done
+
+  if [ "$WITH_CUDA_BACKEND" = "1" ]; then
+    echo ""
+    echo ">>> 复制 CUDA 后端插件到 $DIST_DIR"
+    if [ -f "$SD_BUILD_DIR/bin/libggml-cuda.so" ]; then
+      cp -L "$SD_BUILD_DIR/bin/libggml-cuda.so" "$DIST_DIR/"
+      echo "    ✓ libggml-cuda.so"
+    else
+      echo "    ✗ libggml-cuda.so 未找到"
+    fi
+  fi
 fi
 
 # 复制 workflow 示例（如果有）
@@ -125,10 +225,11 @@ echo "CUDA 可用: $(nvidia-smi 2>/dev/null && echo '是' || echo '否')"
 echo ""
 echo "=== 依赖 .so 检查 ==="
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-for lib in libsdcpp_adapter.so libgomp.so.1; do
-  f=$(find "$SCRIPT_DIR" -maxdepth 1 -name "$lib*" 2>/dev/null | head -1)
+for lib in libsdcpp_adapter.so libstable-diffusion.so libggml.so.0 libggml-base.so.0; do
+  f=$(find "$SCRIPT_DIR" -maxdepth 2 -name "$lib*" 2>/dev/null | head -1)
   if [ -n "$f" ]; then echo "  ✓ $lib"; else echo "  ✗ $lib (未找到)"; fi
 done
+echo "  CUDA 后端: $(find "$SCRIPT_DIR" -maxdepth 1 -name 'libggml-cuda.so*' 2>/dev/null | head -1 | xargs -r basename 2>/dev/null || echo '未找到')"
 echo "  LD_LIBRARY_PATH=$SCRIPT_DIR/lib:$SCRIPT_DIR"
 CHECKEOF
 chmod +x "$DIST_DIR/check_env.sh"
@@ -137,8 +238,12 @@ chmod +x "$DIST_DIR/check_env.sh"
 echo ""
 echo ">>> 打包部署包"
 TARBALL="$DIST_DIR/comfycli_deploy${TARBALL_SUFFIX}.tar.gz"
+TMP_TARBALL=$(mktemp -t comfycli_deploy.XXXXXX.tar.gz)
+trap 'rm -f "$TMP_TARBALL"' EXIT
 cd "$DIST_DIR"
-tar czf "$TARBALL" --exclude="*.tar.gz" .
+tar czf "$TMP_TARBALL" --exclude="*.tar.gz" .
+mv "$TMP_TARBALL" "$TARBALL"
+trap - EXIT
 echo "  -> $TARBALL ($(du -h "$TARBALL" | cut -f1))"
 
 echo ""

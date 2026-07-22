@@ -5,7 +5,10 @@
 extern fn sd_pipeline_create() -> ptr from "sdcpp_adapter"
 extern fn sd_pipeline_free(pipeline: ptr) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_load(pipeline: ptr, model_path: str, clip_l_path: str, clip_g_path: str, vae_path: str, wtype: int, n_threads: int, diffusion_fa: int) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_load_ex(pipeline: ptr, model_path: str, clip_l_path: str, clip_g_path: str, vae_path: str, wtype: int, n_threads: int, diffusion_fa: int, diffusion_model_path: str, llm_path: str) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_generate(pipeline: ptr, prompt: str, negative_prompt: str, width: int, height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires: int, hires_width: int, hires_height: int, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, output_path: str) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_generate_hires(pipeline: ptr, prompt: str, negative_prompt: str, target_width: int, target_height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, clarity: float, sharpen_amount: float, sharpen_radius: int, output_path: str) -> int from "sdcpp_adapter"
+
 extern fn sd_ensure_dir(path: str) -> int from "sdcpp_adapter"
 
 # SD weight type constants (matching stable-diffusion.h sd_type_t)
@@ -63,6 +66,36 @@ def sd_generate_with_options(pipeline: ptr, prompt: str, negative_prompt: str,
 
 def sd_ensure_directory(path: str) -> int:
     return sd_ensure_dir(path)
+
+
+def sd_load_ex(pipeline: ptr, model_path: str, clip_l_path: str, clip_g_path: str,
+               vae_path: str, wtype: int, n_threads: int, diffusion_fa: int,
+               diffusion_model_path: str, llm_path: str) -> int:
+    return sd_pipeline_load_ex(pipeline, model_path, clip_l_path, clip_g_path,
+                               vae_path, wtype, n_threads, diffusion_fa,
+                               diffusion_model_path, llm_path)
+
+
+def sd_generate_hires(pipeline: ptr, prompt: str, negative_prompt: str,
+                       target_width: int, target_height: int,
+                       steps: int, cfg: float,
+                       sample_method: str, scheduler: str, seed: int,
+                       vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float,
+                       hires_steps: int, hires_strength: float,
+                       freeu: int, freeu_b1: float, freeu_b2: float,
+                       sag: int, sag_scale: float,
+                       clarity: float, sharpen_amount: float, sharpen_radius: int,
+                       output_path: str) -> int:
+    return sd_pipeline_generate_hires(pipeline, prompt, negative_prompt,
+                                       target_width, target_height,
+                                       steps, cfg,
+                                       sample_method, scheduler, seed,
+                                       vae_tiling, vae_tile_size, vae_tile_overlap,
+                                       hires_steps, hires_strength,
+                                       freeu, freeu_b1, freeu_b2,
+                                       sag, sag_scale,
+                                       clarity, sharpen_amount, sharpen_radius,
+                                       output_path)
 
 
 def main():
