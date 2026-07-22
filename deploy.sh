@@ -34,7 +34,9 @@ SD_BACKEND_DL="${SD_BACKEND_DL:-1}"
 SD_BUILD_DIR="${SD_BUILD_DIR:-/opt/sd/build-dl}"
 WITH_CUDA_BACKEND="${WITH_CUDA_BACKEND:-1}"
 WITH_CUDA="${WITH_CUDA:-0}"
+WITH_ONNX_CUDA="${WITH_ONNX_CUDA:-0}"
 CUDA_DIR="${CUDA_DIR:-/data/cuda/targets/x86_64-linux/lib}"
+ONNXRUNTIME_DIR="${ONNXRUNTIME_DIR:-/data/venv/onnxruntime-linux-x64-gpu-1.20.1/lib}"
 
 GLIBC_TARGET="${GLIBC_TARGET:-}"
 if [ -n "$GLIBC_TARGET" ]; then
@@ -48,6 +50,10 @@ fi
 if [ "$WITH_CUDA" = "1" ]; then
   TARBALL_SUFFIX="${TARBALL_SUFFIX}_cuda"
   WITH_CUDA_BACKEND=1
+fi
+
+if [ "$WITH_ONNX_CUDA" = "1" ]; then
+  TARBALL_SUFFIX="${TARBALL_SUFFIX}_onnx_cuda"
 fi
 
 if [ "$WITH_CUDA_BACKEND" = "1" ] && [ ! -f "$SD_BUILD_DIR/bin/libggml-cuda.so" ]; then
@@ -71,6 +77,11 @@ if [ "$WITH_CUDA" = "1" ]; then
   echo " CUDA Runtime: 打包"
 else
   echo " CUDA Runtime: 不打包（远程需自带 CUDA Runtime）"
+fi
+if [ "$WITH_ONNX_CUDA" = "1" ]; then
+  echo " ONNX Runtime CUDA provider: 打包（IPAdapter 会占用 ONNX Runtime CUDA，体积 +663MB）"
+else
+  echo " ONNX Runtime CPU-only: 打包（IPAdapter 默认 CPU 推理）"
 fi
 echo "============================================"
 
@@ -112,6 +123,34 @@ echo ""
 echo "  共 $(ls "$DIST_DIR/lib" | wc -l) 个 .so 文件"
 if [ "$LIBMISSING" -gt 0 ]; then
   echo "  警告: $LIBMISSING 个 GLIBC 兼容库未找到"
+fi
+
+# ── 打包 ONNX Runtime（IPAdapter 依赖）──
+# IPAdapter 的 CLIP Vision 默认 CPU 推理，只需主库即可；
+# 如需 ONNX Runtime 内部跑在 CUDA 上，设置 WITH_ONNX_CUDA=1。
+echo ""
+echo ">>> 收集 ONNX Runtime .so 到 $DIST_DIR/lib"
+if [ ! -d "$ONNXRUNTIME_DIR" ]; then
+  echo "  错误: ONNX Runtime 目录不存在: $ONNXRUNTIME_DIR"
+  exit 1
+fi
+ONNX_MISSING=0
+ONNX_LIBS=(libonnxruntime.so.1 libonnxruntime.so.1.20.1 libonnxruntime.so)
+if [ "$WITH_ONNX_CUDA" = "1" ]; then
+  ONNX_LIBS+=(libonnxruntime_providers_shared.so libonnxruntime_providers_cuda.so)
+fi
+for lib in "${ONNX_LIBS[@]}"; do
+  f=$(find "$ONNXRUNTIME_DIR" -maxdepth 1 -name "$lib" 2>/dev/null | head -1)
+  if [ -n "$f" ]; then
+    cp -L "$f" "$DIST_DIR/lib/"
+    echo "    ✓ $lib"
+  else
+    echo "    ✗ $lib 未找到"
+    ONNX_MISSING=$((ONNX_MISSING + 1))
+  fi
+done
+if [ "$ONNX_MISSING" -gt 0 ]; then
+  echo "  警告: $ONNX_MISSING 个 ONNX Runtime 库未找到"
 fi
 
 # ── 可选：打包 CUDA Runtime ──
@@ -209,6 +248,7 @@ cat > "$DIST_DIR/run.sh" << 'RUNEOF'
 # 远程只需要 NVIDIA 驱动，无需 pip install torch
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$SCRIPT_DIR:$LD_LIBRARY_PATH"
+export GGML_BACKEND_PATH="$SCRIPT_DIR/libggml-cuda.so"
 cd "$SCRIPT_DIR"
 exec ./comfycli-bin "$@"
 RUNEOF
@@ -229,6 +269,7 @@ for lib in libsdcpp_adapter.so libstable-diffusion.so libggml.so.0 libggml-base.
   f=$(find "$SCRIPT_DIR" -maxdepth 2 -name "$lib*" 2>/dev/null | head -1)
   if [ -n "$f" ]; then echo "  ✓ $lib"; else echo "  ✗ $lib (未找到)"; fi
 done
+echo "  ONNX Runtime: $(find "$SCRIPT_DIR/lib" -maxdepth 1 -name 'libonnxruntime.so*' 2>/dev/null | head -1 | xargs -r basename 2>/dev/null || echo '未找到')"
 echo "  CUDA 后端: $(find "$SCRIPT_DIR" -maxdepth 1 -name 'libggml-cuda.so*' 2>/dev/null | head -1 | xargs -r basename 2>/dev/null || echo '未找到')"
 echo "  LD_LIBRARY_PATH=$SCRIPT_DIR/lib:$SCRIPT_DIR"
 CHECKEOF

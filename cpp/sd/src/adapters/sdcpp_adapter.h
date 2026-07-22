@@ -57,6 +57,7 @@ struct ModelConfig {
     bool flash_attn = false;
     bool diffusion_flash_attn = false;
     bool enable_mmap = false;
+    int lora_apply_mode = LORA_APPLY_AT_RUNTIME;
     // Optional backend spec (e.g. "CUDA", "CPU")
     std::string backend;
     std::string params_backend;
@@ -112,6 +113,15 @@ struct ImageGenerationParams {
     // SAG (Self-Attention Guidance)
     bool sag_enabled = false;
     float sag_scale = 1.0f;
+
+    // ADetailer
+    bool adetailer_enabled = false;
+    std::string ad_model_path;
+    std::string ad_prompt;
+    std::string ad_negative_prompt;
+    int ad_inpaint_width = 512;
+    int ad_inpaint_height = 512;
+    float ad_denoising_strength = 0.4f;
 };
 
 /**
@@ -137,6 +147,17 @@ public:
     bool is_loaded() const;
 
     Image generate(const ImageGenerationParams& params);
+
+    // LoRA management (persistent, applied at runtime during generate)
+    void set_lora(const std::string& path, float multiplier);
+    void clear_loras();
+
+    // IPAdapter: load model + reference image once, use across generations
+    void set_ipadapter(const std::string& model_path,
+                       const std::string& clip_vision_path,
+                       const std::string& image_path,
+                       float weight);
+    void set_ipadapter_enabled(bool enabled, float weight);
 
 private:
     class Impl;
@@ -250,6 +271,67 @@ int sd_pipeline_generate_hires(sd_pipeline_t pipeline,
                                 int edge_sharpen_radius,
                                 float edge_sharpen_threshold,
                                 const char* output_path);
+
+/**
+ * Load a LoRA model and associate it with the pipeline.
+ * Multiple calls add multiple LoRAs. Call with empty path to clear all.
+ */
+int sd_pipeline_load_lora(sd_pipeline_t pipeline,
+                           const char* lora_path,
+                           float multiplier);
+
+/**
+ * Load IPAdapter model + CLIP Vision model + reference image.
+ * Once loaded, IPAdapter will be applied to subsequent generate() calls.
+ */
+int sd_pipeline_set_ipadapter(sd_pipeline_t pipeline,
+                               const char* model_path,
+                               const char* clip_vision_path,
+                               const char* image_path,
+                               float weight);
+
+/**
+ * Enable/disable the loaded IPAdapter for subsequent generate() calls.
+ * Set weight <= 0 to disable.
+ */
+int sd_pipeline_set_ipadapter_enabled(sd_pipeline_t pipeline,
+                                       int enabled,
+                                       float weight);
+
+/**
+ * Generate image with ADetailer face restoration post-processing.
+ * Takes all the same params as sd_pipeline_generate plus:
+ *   - ad_model_path: path to YOLO detector model (e.g. face_yolov8m.pt)
+ *   - ad_prompt / ad_negative_prompt: optional per-region prompt override
+ * Returns 0 on success, non-zero on error.
+ */
+int sd_pipeline_generate_adetailer(sd_pipeline_t pipeline,
+                                    const char* prompt,
+                                    const char* negative_prompt,
+                                    int width,
+                                    int height,
+                                    int steps,
+                                    float cfg,
+                                    const char* sample_method,
+                                    const char* scheduler,
+                                    int64_t seed,
+                                    int vae_tiling,
+                                    int vae_tile_size,
+                                    float vae_tile_overlap,
+                                    int hires,
+                                    int hires_width,
+                                    int hires_height,
+                                    int hires_steps,
+                                    float hires_strength,
+                                    int freeu,
+                                    float freeu_b1,
+                                    float freeu_b2,
+                                    int sag,
+                                    float sag_scale,
+                                    const char* ad_model_path,
+                                    const char* ad_prompt,
+                                    const char* ad_negative_prompt,
+                                    const char* output_path);
 
 /** Utility: create directory and all parents if missing. Returns 0 on success. */
 int sd_ensure_dir(const char* path);

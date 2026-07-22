@@ -1,5 +1,6 @@
 #include "sdcpp_adapter.h"
 #include "postproc.h"
+#include "ipadapter.h"
 
 #include <stable-diffusion.h>
 
@@ -15,10 +16,16 @@ namespace sd {
 class SDPipeline::Impl {
 public:
     sd_ctx_t* ctx = nullptr;
+    int n_threads = 8;
 
     // LoRA strings must outlive generate_image call
     std::vector<std::string> lora_paths;
     std::vector<sd_lora_t> lora_entries;
+
+    // IPAdapter (lazy-load; lives for the pipeline lifetime)
+    std::unique_ptr<IPAdapter> ipadapter;
+    bool ipadapter_enabled = false;
+    float ipadapter_weight = 1.0f;
 
     ~Impl() {
         if (ctx) {
@@ -70,6 +77,7 @@ bool SDPipeline::load(const ModelConfig& config) {
         params.llm_path = config.llm_path.c_str();
     }
     params.n_threads            = config.n_threads;
+    impl_->n_threads            = config.n_threads;
     params.wtype                = static_cast<sd_type_t>(config.wtype);
     params.rng_type             = static_cast<rng_type_t>(config.rng_type);
     params.sampler_rng_type     = static_cast<rng_type_t>(config.sampler_rng_type);
@@ -77,6 +85,7 @@ bool SDPipeline::load(const ModelConfig& config) {
     params.flash_attn           = config.flash_attn;
     params.diffusion_flash_attn = config.diffusion_flash_attn;
     params.enable_mmap          = config.enable_mmap;
+    params.lora_apply_mode      = static_cast<lora_apply_mode_t>(config.lora_apply_mode);
     if (!config.backend.empty()) {
         params.backend = config.backend.c_str();
     }
@@ -92,6 +101,62 @@ bool SDPipeline::is_loaded() const {
     return impl_ && impl_->ctx != nullptr;
 }
 
+void SDPipeline::set_lora(const std::string& path, float multiplier) {
+    if (!impl_) return;
+    // If path is empty, clear all loras
+    if (path.empty()) {
+        impl_->lora_paths.clear();
+        impl_->lora_entries.clear();
+        return;
+    }
+    impl_->lora_paths.push_back(path);
+    sd_lora_t entry;
+    entry.is_high_noise = false;
+    entry.multiplier    = multiplier;
+    entry.path          = impl_->lora_paths.back().c_str();
+    impl_->lora_entries.push_back(entry);
+}
+
+void SDPipeline::clear_loras() {
+    if (!impl_) return;
+    impl_->lora_paths.clear();
+    impl_->lora_entries.clear();
+}
+
+void SDPipeline::set_ipadapter(const std::string& model_path,
+                                const std::string& clip_vision_path,
+                                const std::string& image_path,
+                                float weight) {
+    if (!impl_) return;
+    if (model_path.empty() || clip_vision_path.empty() || image_path.empty()) {
+        impl_->ipadapter.reset();
+        impl_->ipadapter_enabled = false;
+        return;
+    }
+    IPAdapterConfig config;
+    config.model_path       = model_path;
+    config.clip_vision_path = clip_vision_path;
+    config.image_path       = image_path;
+    config.weight           = weight;
+    impl_->ipadapter        = std::make_unique<IPAdapter>(config);
+    if (impl_->ipadapter && impl_->ipadapter->is_loaded() &&
+        !impl_->ipadapter->get_image_tokens().empty()) {
+        impl_->ipadapter_enabled = true;
+        impl_->ipadapter_weight  = weight;
+    } else {
+        impl_->ipadapter.reset();
+        impl_->ipadapter_enabled = false;
+    }
+}
+
+void SDPipeline::set_ipadapter_enabled(bool enabled, float weight) {
+    if (!impl_) return;
+    impl_->ipadapter_enabled = enabled;
+    if (enabled && weight > 0.0f) {
+        impl_->ipadapter_weight = weight;
+    }
+}
+
 Image SDPipeline::generate(const ImageGenerationParams& params) {
     Image result;
     if (!impl_ || !impl_->ctx) {
@@ -100,6 +165,10 @@ Image SDPipeline::generate(const ImageGenerationParams& params) {
 
     sd_img_gen_params_t img_params;
     sd_img_gen_params_init(&img_params);
+    img_params.ipadapter.tokens     = nullptr;
+    img_params.ipadapter.num_tokens = 0;
+    img_params.ipadapter.token_dim  = 0;
+    img_params.ipadapter.weight     = 0.0f;
 
     img_params.prompt          = params.prompt.c_str();
     img_params.negative_prompt = params.negative_prompt.c_str();
@@ -129,17 +198,20 @@ Image SDPipeline::generate(const ImageGenerationParams& params) {
         img_params.sample_params.eta = params.eta;
     }
 
-    // LoRA
-    impl_->lora_paths.clear();
-    impl_->lora_entries.clear();
-    for (const auto& lora : params.loras) {
-        impl_->lora_paths.push_back(lora.path);
-        sd_lora_t entry;
-        entry.is_high_noise = false;
-        entry.multiplier    = lora.multiplier;
-        entry.path          = impl_->lora_paths.back().c_str();
-        impl_->lora_entries.push_back(entry);
+    // LoRA: prefer per-call loras; fall back to persistent stored loras
+    if (!params.loras.empty()) {
+        impl_->lora_paths.clear();
+        impl_->lora_entries.clear();
+        for (const auto& lora : params.loras) {
+            impl_->lora_paths.push_back(lora.path);
+            sd_lora_t entry;
+            entry.is_high_noise = false;
+            entry.multiplier    = lora.multiplier;
+            entry.path          = impl_->lora_paths.back().c_str();
+            impl_->lora_entries.push_back(entry);
+        }
     }
+    // else: keep persistent loras loaded via set_lora()
     if (!impl_->lora_entries.empty()) {
         img_params.loras      = impl_->lora_entries.data();
         img_params.lora_count = static_cast<uint32_t>(impl_->lora_entries.size());
@@ -158,6 +230,14 @@ Image SDPipeline::generate(const ImageGenerationParams& params) {
         img_params.vae_tiling_params.tile_size_x = 64;
         img_params.vae_tiling_params.tile_size_y = 64;
         img_params.vae_tiling_params.target_overlap = 0.5f;
+    }
+    // Cap VAE tile size: 128 latent pixels = 1024 output pixels (scale=8)
+    // Prevents OOM on consumer GPUs when decoding large tiles.
+    if (img_params.vae_tiling_params.tile_size_x > 128) {
+        img_params.vae_tiling_params.tile_size_x = 128;
+    }
+    if (img_params.vae_tiling_params.tile_size_y > 128) {
+        img_params.vae_tiling_params.tile_size_y = 128;
     }
 
     // HiRes Fix
@@ -190,6 +270,17 @@ Image SDPipeline::generate(const ImageGenerationParams& params) {
         img_params.sag.scale = params.sag_scale;
     }
 
+    // IPAdapter
+    if (impl_->ipadapter_enabled && impl_->ipadapter && impl_->ipadapter->is_loaded()) {
+        const auto& tokens = impl_->ipadapter->get_image_tokens();
+        if (!tokens.empty()) {
+            img_params.ipadapter.tokens     = tokens.data();
+            img_params.ipadapter.num_tokens = impl_->ipadapter->get_num_tokens();
+            img_params.ipadapter.token_dim  = impl_->ipadapter->get_token_dim();
+            img_params.ipadapter.weight     = impl_->ipadapter_weight;
+        }
+    }
+
     sd_image_t* images = nullptr;
     int num_images = 0;
     std::fprintf(stderr, "[C++ gen] calling generate_image...\n");
@@ -209,6 +300,61 @@ Image SDPipeline::generate(const ImageGenerationParams& params) {
     }
 
     free_sd_images(images, num_images);
+
+    // ADetailer post-processing
+    if (result.data.empty()) {
+        return result;
+    }
+    if (params.adetailer_enabled && !params.ad_model_path.empty()) {
+        std::fprintf(stderr, "[C++ gen] applying ADetailer with model=%s\n", params.ad_model_path.c_str());
+        sd_adetailer_params_t ad_params{};
+        ad_params.prompt          = params.ad_prompt.empty() ? nullptr : params.ad_prompt.c_str();
+        ad_params.negative_prompt = params.ad_negative_prompt.empty() ? nullptr : params.ad_negative_prompt.c_str();
+        ad_params.extra_ad_args   = nullptr;
+
+        sd_image_t input_img;
+        input_img.width  = static_cast<int>(result.width);
+        input_img.height = static_cast<int>(result.height);
+        input_img.channel = static_cast<int>(result.channels);
+        input_img.data   = result.data.data();
+
+        sd_img_gen_params_t inpaint_params;
+        sd_img_gen_params_init(&inpaint_params);
+        inpaint_params.ipadapter.tokens = nullptr;
+        inpaint_params.ipadapter.num_tokens = 0;
+        inpaint_params.ipadapter.token_dim = 0;
+        inpaint_params.ipadapter.weight = 0.0f;
+        inpaint_params.width = params.ad_inpaint_width;
+        inpaint_params.height   = params.ad_inpaint_height;
+        inpaint_params.strength = params.ad_denoising_strength;
+
+        adetailer_ctx_t* ad_ctx = new_adetailer_ctx(params.ad_model_path.c_str(),
+                                                     impl_->n_threads,
+                                                     nullptr,
+                                                     nullptr);
+        if (ad_ctx) {
+            sd_image_t* detailed_images = nullptr;
+            int detailed_count = 0;
+            bool ad_ok = adetail_image(ad_ctx, impl_->ctx, input_img,
+                                        &ad_params, &inpaint_params,
+                                        &detailed_images, &detailed_count);
+            if (ad_ok && detailed_count > 0 && detailed_images && detailed_images[0].data) {
+                result.width    = static_cast<int>(detailed_images[0].width);
+                result.height   = static_cast<int>(detailed_images[0].height);
+                result.channels = static_cast<int>(detailed_images[0].channel);
+                size_t ad_bytes = result.width * result.height * result.channels;
+                result.data.assign(detailed_images[0].data, detailed_images[0].data + ad_bytes);
+                std::fprintf(stderr, "[C++ gen] ADetailer applied: %dx%d\n", result.width, result.height);
+            } else {
+                std::fprintf(stderr, "[C++ gen] ADetailer failed or returned no images\n");
+            }
+            free_sd_images(detailed_images, detailed_count);
+            free_adetailer_ctx(ad_ctx);
+        } else {
+            std::fprintf(stderr, "[C++ gen] new_adetailer_ctx failed\n");
+        }
+    }
+
     return result;
 }
 
@@ -592,6 +738,151 @@ int sd_pipeline_generate_hires(sd_pipeline_t pipeline,
     if (!save_png(output_path, image.data.data(), image.width, image.height, image.channels)) {
         std::fprintf(stderr, "[C API] save_png failed for %s\n", output_path);
         return -6;
+    }
+    std::fprintf(stderr, "[C API] saved %s (%dx%d, %d ch)\n", output_path, image.width, image.height, image.channels);
+
+    return 0;
+}
+
+int sd_pipeline_load_lora(sd_pipeline_t pipeline,
+                           const char* lora_path,
+                           float multiplier) {
+    if (!pipeline) return -1;
+    sd::SDPipeline* p = static_cast<sd::SDPipeline*>(pipeline);
+    if (!p->is_loaded()) return -2;
+    std::fprintf(stderr, "[C API] sd_pipeline_load_lora: path=%s mult=%.2f\n",
+                 lora_path ? lora_path : "(null)", multiplier);
+    if (!lora_path || lora_path[0] == '\0') {
+        p->clear_loras();
+    } else {
+        p->set_lora(lora_path, multiplier);
+    }
+    return 0;
+}
+
+int sd_pipeline_set_ipadapter(sd_pipeline_t pipeline,
+                               const char* model_path,
+                               const char* clip_vision_path,
+                               const char* image_path,
+                               float weight) {
+    if (!pipeline) return -1;
+    sd::SDPipeline* p = static_cast<sd::SDPipeline*>(pipeline);
+    if (!p->is_loaded()) return -2;
+    std::fprintf(stderr, "[C API] sd_pipeline_set_ipadapter: model=%s clip=%s image=%s weight=%.2f\n",
+                 model_path ? model_path : "(null)",
+                 clip_vision_path ? clip_vision_path : "(null)",
+                 image_path ? image_path : "(null)",
+                 weight);
+    p->set_ipadapter(model_path ? model_path : "",
+                      clip_vision_path ? clip_vision_path : "",
+                      image_path ? image_path : "",
+                      weight);
+    return 0;
+}
+
+int sd_pipeline_set_ipadapter_enabled(sd_pipeline_t pipeline,
+                                       int enabled,
+                                       float weight) {
+    if (!pipeline) return -1;
+    sd::SDPipeline* p = static_cast<sd::SDPipeline*>(pipeline);
+    std::fprintf(stderr, "[C API] sd_pipeline_set_ipadapter_enabled: enabled=%d weight=%.2f\n",
+                 enabled, weight);
+    p->set_ipadapter_enabled(enabled != 0, weight);
+    return 0;
+}
+
+int sd_pipeline_generate_adetailer(sd_pipeline_t pipeline,
+                                    const char* prompt,
+                                    const char* negative_prompt,
+                                    int width,
+                                    int height,
+                                    int steps,
+                                    float cfg,
+                                    const char* sample_method,
+                                    const char* scheduler,
+                                    int64_t seed,
+                                    int vae_tiling,
+                                    int vae_tile_size,
+                                    float vae_tile_overlap,
+                                    int hires,
+                                    int hires_width,
+                                    int hires_height,
+                                    int hires_steps,
+                                    float hires_strength,
+                                    int freeu,
+                                    float freeu_b1,
+                                    float freeu_b2,
+                                    int sag,
+                                    float sag_scale,
+                                    const char* ad_model_path,
+                                    const char* ad_prompt,
+                                    const char* ad_negative_prompt,
+                                    const char* output_path) {
+    if (!pipeline || !prompt || !output_path) return -1;
+
+    sd::SDPipeline* p = static_cast<sd::SDPipeline*>(pipeline);
+    if (!p->is_loaded()) return -3;
+
+    sd::ImageGenerationParams params;
+    params.prompt          = prompt;
+    params.negative_prompt = negative_prompt ? negative_prompt : "";
+    params.width           = width  > 0 ? width  : 1024;
+    params.height          = height > 0 ? height : 1024;
+    params.steps           = steps  > 0 ? steps  : 20;
+    params.cfg_scale       = cfg > 0.0f ? cfg : 7.0f;
+    params.sample_method   = sample_method ? sample_method : "euler_a";
+    params.scheduler       = scheduler ? scheduler : "discrete";
+    params.seed            = seed;
+
+    if (vae_tiling != 0) {
+        params.vae_tiling       = true;
+        params.vae_tile_size_x  = vae_tile_size > 0 ? vae_tile_size : 64;
+        params.vae_tile_size_y  = params.vae_tile_size_x;
+        params.vae_tile_overlap = vae_tile_overlap >= 0.0f && vae_tile_overlap <= 1.0f
+                                  ? vae_tile_overlap : 0.5f;
+    } else if (width > 512 || height > 512) {
+        params.vae_tiling       = true;
+        params.vae_tile_size_x  = 64;
+        params.vae_tile_size_y  = 64;
+        params.vae_tile_overlap = 0.5f;
+    }
+
+    if (hires != 0 && hires_width > 0 && hires_height > 0) {
+        params.hires_enabled  = true;
+        params.hires_width    = hires_width;
+        params.hires_height   = hires_height;
+        params.hires_steps    = hires_steps > 0 ? hires_steps : 20;
+        params.hires_strength = hires_strength >= 0.0f && hires_strength <= 1.0f
+                                ? hires_strength : 0.35f;
+    }
+
+    if (freeu != 0) {
+        params.freeu_enabled = true;
+        params.freeu_b1      = freeu_b1 > 0.0f ? freeu_b1 : 1.3f;
+        params.freeu_b2      = freeu_b2 > 0.0f ? freeu_b2 : 1.4f;
+    }
+
+    if (sag != 0) {
+        params.sag_enabled = true;
+        params.sag_scale   = sag_scale >= 0.0f ? sag_scale : 1.0f;
+    }
+
+    // ADetailer
+    if (ad_model_path && ad_model_path[0] != '\0') {
+        params.adetailer_enabled  = true;
+        params.ad_model_path      = ad_model_path;
+        params.ad_prompt          = ad_prompt ? ad_prompt : "";
+        params.ad_negative_prompt = ad_negative_prompt ? ad_negative_prompt : "";
+    }
+
+    sd::Image image = p->generate(params);
+    std::fprintf(stderr, "[C API] generate_adetailer returned empty=%d w=%d h=%d c=%d\n",
+                 image.empty(), image.width, image.height, image.channels);
+    if (image.empty()) return -4;
+
+    if (!save_png(output_path, image.data.data(), image.width, image.height, image.channels)) {
+        std::fprintf(stderr, "[C API] save_png failed for %s\n", output_path);
+        return -5;
     }
     std::fprintf(stderr, "[C API] saved %s (%dx%d, %d ch)\n", output_path, image.width, image.height, image.channels);
 

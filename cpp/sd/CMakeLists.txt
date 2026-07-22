@@ -85,12 +85,19 @@ target_include_directories(postproc
 # ---------------------------------------------------------------------------
 # Adapter library: shared build for StaticPy FFI + static build for C++ examples
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# ONNX Runtime for IPAdapter
+# ---------------------------------------------------------------------------
+set(ONNXRUNTIME_ROOT "/data/venv/onnxruntime-linux-x64-gpu-1.20.1" CACHE PATH "Path to ONNX Runtime")
+
 add_library(sdcpp_adapter STATIC
     src/adapters/sdcpp_adapter.cpp
+    src/adapters/ipadapter.cpp
 )
 
 add_library(sdcpp_adapter_shared SHARED
     src/adapters/sdcpp_adapter.cpp
+    src/adapters/ipadapter.cpp
 )
 set_target_properties(sdcpp_adapter_shared PROPERTIES OUTPUT_NAME "sdcpp_adapter")
 
@@ -102,10 +109,15 @@ foreach(target sdcpp_adapter sdcpp_adapter_shared)
             ${SD_DIR}/include
             ${SD_DIR}
             ${SD_DIR}/thirdparty
+            ${ONNXRUNTIME_ROOT}/include
+            /usr/include/opencv4
     )
 endforeach()
 
 # The shared adapter links to sd.cpp / ggml shared libs; CUDA backend is loaded at runtime.
+set(ONNXRUNTIME_LIB "${ONNXRUNTIME_ROOT}/lib/libonnxruntime.so")
+set(OPENCV_LIBS opencv_core opencv_imgproc opencv_imgcodecs)
+
 if(SD_BACKEND_DL)
     target_link_libraries(sdcpp_adapter_shared PRIVATE
         postproc
@@ -121,6 +133,8 @@ if(SD_BACKEND_DL)
         sharpyuv
         png
         m
+        ${ONNXRUNTIME_LIB}
+        ${OPENCV_LIBS}
     )
 else()
     target_link_libraries(sdcpp_adapter_shared PRIVATE
@@ -143,6 +157,8 @@ else()
         sharpyuv
         png
         m
+        ${ONNXRUNTIME_LIB}
+        ${OPENCV_LIBS}
     )
 endif()
 
@@ -170,6 +186,8 @@ if(SD_BACKEND_DL)
         sharpyuv
         png
         m
+        ${ONNXRUNTIME_LIB}
+        ${OPENCV_LIBS}
     )
 else()
     set(SD_COMMON_LINK_LIBS
@@ -194,6 +212,8 @@ else()
         sharpyuv
         png
         m
+        ${ONNXRUNTIME_LIB}
+        ${OPENCV_LIBS}
     )
 endif()
 

@@ -1,8 +1,8 @@
 diff --git a/include/stable-diffusion.h b/include/stable-diffusion.h
-index 93084fe..2994edf 100644
+index 890050a..db012af 100644
 --- a/include/stable-diffusion.h
 +++ b/include/stable-diffusion.h
-@@ -354,6 +354,26 @@ typedef struct {
+@@ -356,6 +356,33 @@ typedef struct {
      int custom_sigmas_count;
  } sd_hires_params_t;
  
@@ -26,40 +26,32 @@ index 93084fe..2994edf 100644
 +    float threshold_percentile;
 +} sd_dynamic_cfg_params_t;
 +
++typedef struct {
++    const float* tokens;   // IPAdapter image tokens [num_tokens * token_dim], flat (read-only)
++    int num_tokens;        // number of image tokens (e.g., 16 for SDXL Plus)
++    int token_dim;         // dimension per token (e.g., 2048 for SDXL Plus)
++    float weight;          // injection weight (0.0 = no effect, 1.0 = full)
++} sd_ipadapter_params_t;
++
  typedef struct {
      const sd_lora_t* loras;
      uint32_t lora_count;
-@@ -379,6 +399,9 @@ typedef struct {
+@@ -380,6 +407,10 @@ typedef struct {
      sd_tiling_params_t vae_tiling_params;
      sd_cache_params_t cache;
      sd_hires_params_t hires;
 +    sd_freeu_params_t freeu;
 +    sd_sag_params_t sag;
 +    sd_dynamic_cfg_params_t dynamic_cfg;
++    sd_ipadapter_params_t ipadapter;
      int qwen_image_layers;
      bool circular_x;
      bool circular_y;
-diff --git a/src/model/diffusion/model.hpp b/src/model/diffusion/model.hpp
-index 8ef0002..9bdb07c 100644
---- a/src/model/diffusion/model.hpp
-+++ b/src/model/diffusion/model.hpp
-@@ -76,6 +76,11 @@ struct DiffusionParams {
-     const std::vector<sd::Tensor<float>>* ref_latents = nullptr;
-     Rope::RefIndexMode ref_index_mode                 = Rope::RefIndexMode::FIXED;
-     DiffusionExtraParams extra                        = std::monostate{};
-+    bool freeu_enabled                                = false;
-+    float freeu_b1                                    = 1.3f;
-+    float freeu_b2                                    = 1.4f;
-+    float freeu_s1                                    = 0.9f;
-+    float freeu_s2                                    = 0.2f;
- };
- 
- template <typename T>
 diff --git a/src/model/diffusion/unet.hpp b/src/model/diffusion/unet.hpp
-index 253b3b4..90bf335 100644
+index 118ed63..4d9386a 100644
 --- a/src/model/diffusion/unet.hpp
 +++ b/src/model/diffusion/unet.hpp
-@@ -291,6 +291,20 @@ class UnetModelBlock : public GGMLBlock {
+@@ -301,6 +301,20 @@ class UnetModelBlock : public GGMLBlock {
  public:
      UNetConfig config;
  
@@ -80,7 +72,7 @@ index 253b3b4..90bf335 100644
      explicit UnetModelBlock(UNetConfig config = {})
          : config(config) {
          const SDVersion version           = this->config.version;
-@@ -645,6 +659,46 @@ public:
+@@ -699,6 +713,46 @@ public:
                      control_offset--;
                  }
  
@@ -127,48 +119,44 @@ index 253b3b4..90bf335 100644
                  h = ggml_concat(ctx->ggml_ctx, h, h_skip, 2);
  
                  std::string name = "output_blocks." + std::to_string(output_block_idx) + ".0";
-@@ -781,6 +835,11 @@ struct UNetModelRunner : public DiffusionModelRunner {
+@@ -749,6 +803,20 @@ struct UNetModelRunner : public DiffusionModelRunner {
+     UNetConfig config;
+     UnetModelBlock unet;
+ 
++    bool freeu_enabled = false;
++    float freeu_b1     = 1.3f;
++    float freeu_b2     = 1.4f;
++    float freeu_s1     = 0.9f;
++    float freeu_s2     = 0.2f;
++
++    void set_freeu_params(bool enabled, float b1, float b2, float s1, float s2) {
++        freeu_enabled = enabled;
++        freeu_b1      = b1;
++        freeu_b2      = b2;
++        freeu_s1      = s1;
++        freeu_s2      = s2;
++    }
++
+     UNetModelRunner(ggml_backend_t backend,
+                     const String2TensorStorage& tensor_storage_map,
+                     const std::string prefix,
+@@ -837,6 +905,11 @@ struct UNetModelRunner : public DiffusionModelRunner {
          GGML_ASSERT(diffusion_params.timesteps != nullptr);
          const auto* extra = diffusion_extra_as<UNetDiffusionExtra>(diffusion_params);
          static const std::vector<sd::Tensor<float>> empty_controls;
-+        unet.set_freeu(diffusion_params.freeu_enabled,
-+                       diffusion_params.freeu_b1,
-+                       diffusion_params.freeu_b2,
-+                       diffusion_params.freeu_s1,
-+                       diffusion_params.freeu_s2);
++        unet.set_freeu(freeu_enabled,
++                       freeu_b1,
++                       freeu_b2,
++                       freeu_s1,
++                       freeu_s2);
          return compute(n_threads,
                         *diffusion_params.x,
                         *diffusion_params.timesteps,
-diff --git a/src/model/vae/vae.hpp b/src/model/vae/vae.hpp
-index b97aece..9b994d4 100644
---- a/src/model/vae/vae.hpp
-+++ b/src/model/vae/vae.hpp
-@@ -185,6 +185,20 @@ public:
-             float tile_overlap;
-             int tile_size_x, tile_size_y;
-             get_tile_sizes(tile_size_x, tile_size_y, tile_overlap, tiling_params, input.shape()[0], input.shape()[1]);
-+
-+            // Cap output tile size to prevent OOM on consumer GPUs
-+            // 1280x768 decode needs ~6GB buffer; cap at ~1024 output to stay under ~7GB per tile
-+            const int max_output_tile = 1024;
-+            int output_tile_x         = tile_size_x * scale_factor;
-+            int output_tile_y         = tile_size_y * scale_factor;
-+            if (output_tile_x > max_output_tile || output_tile_y > max_output_tile) {
-+                float scale = (float)max_output_tile / std::max(output_tile_x, output_tile_y);
-+                tile_size_x = std::max(4, (int)(tile_size_x * scale));
-+                tile_size_y = std::max(4, (int)(tile_size_y * scale));
-+                tile_size_x = std::min(tile_size_x, (int)input.shape()[0]);
-+                tile_size_y = std::min(tile_size_y, (int)input.shape()[1]);
-+            }
-+
-             if (!silent) {
-                 LOG_DEBUG("VAE Tile size: %dx%d", tile_size_x, tile_size_y);
-             }
 diff --git a/src/stable-diffusion.cpp b/src/stable-diffusion.cpp
-index 466a88f..d7dbbcf 100644
+index 0bddba2..b5b5c8b 100644
 --- a/src/stable-diffusion.cpp
 +++ b/src/stable-diffusion.cpp
-@@ -225,6 +225,23 @@ public:
+@@ -239,6 +239,23 @@ public:
      bool is_using_v_parameterization     = false;
      bool is_using_edm_v_parameterization = false;
  
@@ -189,23 +177,28 @@ index 466a88f..d7dbbcf 100644
 +    float dynamic_cfg_mimic_scale        = 10.0f;
 +    float dynamic_cfg_threshold_percentile = 1.0f;
 +
-     std::shared_ptr<ModelManager> model_manager;
+     size_t control_net_params_mem_size = 0;
  
-     std::shared_ptr<Denoiser> denoiser = std::make_shared<CompVisDenoiser>();
-@@ -2421,6 +2438,12 @@ public:
+     std::shared_ptr<ModelManager> model_manager;
+@@ -2576,6 +2593,17 @@ public:
                      diffusion_params.extra = std::monostate{};
                  }
  
-+                diffusion_params.freeu_enabled = this->freeu_enabled;
-+                diffusion_params.freeu_b1     = this->freeu_b1;
-+                diffusion_params.freeu_b2     = this->freeu_b2;
-+                diffusion_params.freeu_s1     = this->freeu_s1;
-+                diffusion_params.freeu_s2     = this->freeu_s2;
++                if (sd_version_is_unet(version)) {
++                    auto* unet_runner = dynamic_cast<UNetModelRunner*>(work_diffusion_model.get());
++                    if (unet_runner) {
++                        unet_runner->set_freeu_params(this->freeu_enabled,
++                                                      this->freeu_b1,
++                                                      this->freeu_b2,
++                                                      this->freeu_s1,
++                                                      this->freeu_s2);
++                    }
++                }
 +
                  sd::Tensor<float> cached_output;
                  if (step_cache.before_condition(&condition, noised_input, &cached_output)) {
                      return std::move(cached_output);
-@@ -2515,6 +2538,23 @@ public:
+@@ -2670,6 +2698,23 @@ public:
                  return {};
              }
  
@@ -229,7 +222,55 @@ index 466a88f..d7dbbcf 100644
              denoised = guided.pred * c_out + x * c_skip;
              sd::guidance::GuiderOutput output;
              output.pred = denoised;
-@@ -4971,6 +5011,24 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
+@@ -4986,6 +5031,47 @@ static std::optional<ImageGenerationEmbeds> prepare_image_generation_embeds(sd_c
+     int64_t t1 = ggml_time_ms();
+     LOG_INFO("get_learned_condition completed, taking %.2fs", (t1 - prepare_start_ms) * 1.0f / 1000);
+ 
++    // IPAdapter: inject image tokens into c_crossattn
++    if (sd_img_gen_params->ipadapter.num_tokens > 0) {
++        const auto& ipa = sd_img_gen_params->ipadapter;
++        int n_ipa    = ipa.num_tokens;
++        int ipa_dim  = ipa.token_dim;
++        float weight = ipa.weight;
++        auto inject  = [&](SDCondition& c) {
++            if (c.c_crossattn.empty()) return;
++            auto old_shape = c.c_crossattn.shape();
++            int64_t ctx_dim = old_shape[0];
++            int64_t n_text  = old_shape[1];
++            int64_t batch   = 1;
++            if (old_shape.size() >= 3) {
++                batch = old_shape[2];
++                for (size_t i = 3; i < old_shape.size(); i++) batch *= old_shape[i];
++            }
++            const int64_t token_stride = n_text * batch;
++            const int64_t ipa_token_stride = n_ipa * batch;
++            std::vector<float> ipa_data(ctx_dim * ipa_token_stride, 0.0f);
++            int copy_dim = std::min(ipa_dim, (int)ctx_dim);
++            for (int b = 0; b < batch; b++) {
++                for (int t = 0; t < n_ipa; t++) {
++                    for (int d = 0; d < copy_dim; d++) {
++                        ipa_data[d * ipa_token_stride + t * batch + b] = ipa.tokens[t * ipa_dim + d] * weight;
++                    }
++                }
++            }
++            const float* old_data = c.c_crossattn.data();
++            std::vector<float> new_data(ctx_dim * (n_text + n_ipa) * batch);
++            std::copy(old_data, old_data + ctx_dim * token_stride, new_data.begin());
++            std::copy(ipa_data.begin(), ipa_data.end(), new_data.begin() + ctx_dim * token_stride);
++            auto new_shape = old_shape;
++            new_shape[1] = n_text + n_ipa;
++            c.c_crossattn = sd::Tensor<float>(new_shape, std::move(new_data));
++        };
++        inject(cond);
++        if (!uncond.empty()) {
++            inject(uncond);
++        }
++    }
++
+     ImageGenerationEmbeds embeds;
+     embeds.img_uncond = std::move(img_uncond);
+     embeds.cond       = std::move(cond);
+@@ -5312,6 +5398,24 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
      sd_ctx->sd->apply_loras(sd_img_gen_params->loras, sd_img_gen_params->lora_count);
      apply_circular_axes_to_diffusion(sd_ctx, sd_img_gen_params->circular_x, sd_img_gen_params->circular_y);
  
@@ -251,6 +292,6 @@ index 466a88f..d7dbbcf 100644
 +        sd_ctx->sd->dynamic_cfg_threshold_percentile = sd_img_gen_params->dynamic_cfg.threshold_percentile;
 +    }
 +
-     ImageVaeAxesGuard axes_guard(sd_ctx, sd_img_gen_params, request);
+     const RefImageParams ref_image_params = sd_ctx->sd->resolve_ref_image_params(sd_img_gen_params->ref_image_args);
  
-     SamplePlan plan(sd_ctx, sd_img_gen_params, request);
+     ImageVaeAxesGuard axes_guard(sd_ctx, sd_img_gen_params, request);

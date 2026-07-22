@@ -9,6 +9,11 @@ extern fn sd_pipeline_load_ex(pipeline: ptr, model_path: str, clip_l_path: str, 
 extern fn sd_pipeline_generate(pipeline: ptr, prompt: str, negative_prompt: str, width: int, height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires: int, hires_width: int, hires_height: int, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, output_path: str) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_generate_hires(pipeline: ptr, prompt: str, negative_prompt: str, target_width: int, target_height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, clarity: float, sharpen_amount: float, sharpen_radius: int, smart_sharpen_strength: float, smart_sharpen_radius: int, edge_sharpen_amount: float, edge_sharpen_radius: int, edge_sharpen_threshold: float, output_path: str) -> int from "sdcpp_adapter"
 
+extern fn sd_pipeline_load_lora(pipeline: ptr, lora_path: str, multiplier: float) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_set_ipadapter(pipeline: ptr, model_path: str, clip_vision_path: str, image_path: str, weight: float) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_set_ipadapter_enabled(pipeline: ptr, enabled: int, weight: float) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_generate_adetailer(pipeline: ptr, prompt: str, negative_prompt: str, width: int, height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires: int, hires_width: int, hires_height: int, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, ad_model_path: str, ad_prompt: str, ad_negative_prompt: str, output_path: str) -> int from "sdcpp_adapter"
+
 extern fn sd_ensure_dir(path: str) -> int from "sdcpp_adapter"
 
 # SD weight type constants (matching stable-diffusion.h sd_type_t)
@@ -62,6 +67,40 @@ def sd_generate_with_options(pipeline: ptr, prompt: str, negative_prompt: str,
                                 freeu, freeu_b1, freeu_b2,
                                 sag, sag_scale,
                                 output_path)
+
+
+def sd_generate_adetailer(pipeline: ptr, prompt: str, negative_prompt: str,
+                           width: int, height: int, steps: int, cfg: float,
+                           sample_method: str, scheduler: str, seed: int,
+                           vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float,
+                           hires: int, hires_width: int, hires_height: int,
+                           hires_steps: int, hires_strength: float,
+                           freeu: int, freeu_b1: float, freeu_b2: float,
+                           sag: int, sag_scale: float,
+                           ad_model_path: str, ad_prompt: str, ad_negative_prompt: str,
+                           output_path: str) -> int:
+    return sd_pipeline_generate_adetailer(pipeline, prompt, negative_prompt,
+                                           width, height, steps, cfg,
+                                           sample_method, scheduler, seed,
+                                           vae_tiling, vae_tile_size, vae_tile_overlap,
+                                           hires, hires_width, hires_height,
+                                           hires_steps, hires_strength,
+                                           freeu, freeu_b1, freeu_b2,
+                                           sag, sag_scale,
+                                           ad_model_path, ad_prompt, ad_negative_prompt,
+                                           output_path)
+
+
+def sd_load_lora(pipeline: ptr, lora_path: str, multiplier: float) -> int:
+    return sd_pipeline_load_lora(pipeline, lora_path, multiplier)
+
+
+def sd_set_ipadapter(pipeline: ptr, model_path: str, clip_vision_path: str, image_path: str, weight: float) -> int:
+    return sd_pipeline_set_ipadapter(pipeline, model_path, clip_vision_path, image_path, weight)
+
+
+def sd_set_ipadapter_enabled(pipeline: ptr, enabled: int, weight: float) -> int:
+    return sd_pipeline_set_ipadapter_enabled(pipeline, enabled, weight)
 
 
 def sd_ensure_directory(path: str) -> int:

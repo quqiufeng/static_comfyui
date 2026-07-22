@@ -148,7 +148,8 @@ python3 xgc_ctl.py shutdown_destroy <instance_id>
 
 | 模式 | 包大小 | 远程环境要求 | 命令 |
 |------|--------|-------------|------|
-| GPU（不含 CUDA Runtime） | ~64MB | 需已安装 CUDA 12.x | `./deploy.sh` |
+| GPU（不含 CUDA Runtime / ONNX CPU） | ~79MB | 需已安装 CUDA 12.x | `./deploy.sh` |
+| GPU（含 ONNX Runtime CUDA provider） | ~742MB | 需已安装 CUDA 12.x | `WITH_ONNX_CUDA=1 ./deploy.sh` |
 | GPU（含 CUDA Runtime） | ~439MB | 仅需 NVIDIA 驱动 | `WITH_CUDA=1 ./deploy.sh` |
 | CPU-only | ~35MB | 无需 GPU | `WITH_CUDA_BACKEND=0 ./deploy.sh` |
 

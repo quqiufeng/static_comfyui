@@ -1,0 +1,64 @@
+{
+  "1": {
+    "class_type": "DiffusionModelLoader",
+    "inputs": {
+      "diffusion_model_name": "z_image_turbo-Q5_K_M.gguf",
+      "llm_name": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+      "vae_name": "ae.safetensors"
+    }
+  },
+  "2": {
+    "class_type": "LORALoader",
+    "inputs": {
+      "model": ["1", 0],
+      "lora_name": "",
+      "lora_scale": 1.0
+    }
+  },
+  "3": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "solo,single woman,half body portrait of a young woman, soft natural lighting, elegant pose, studio lighting, sharp eyes, pleasant warm light-colored background, medium close up",
+      "clip": ["1", 0]
+    }
+  },
+  "4": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "blurry, low quality, worst quality, jpeg artifacts, noise, grain, soft focus, out of focus, hazy, unclear, bad anatomy, deformed, border artifacts, edge distortion, tiling artifacts, edge artifacts, frame distortion, warped edges, stretched proportions, asymmetrical face, off-center, cropped, out of frame, partial face, cut off, incomplete head, cropped head, watermark, text, logo, signature, cropped shoulders",
+      "clip": ["1", 0]
+    }
+  },
+  "5": {
+    "class_type": "HiResFix",
+    "inputs": {
+      "model": ["2", 0],
+      "positive": ["3", 0],
+      "negative": ["4", 0],
+      "width": 2560, "height": 1440,
+      "steps": 20, "cfg": 2.5,
+      "sampler_name": "euler", "scheduler": "discrete", "seed": 42,
+      "vae_tiling": 1, "vae_tile_size": 128, "vae_tile_overlap": 0.5,
+      "hires_steps": 45, "hires_strength": 0.35,
+      "freeu": 1, "freeu_b1": 1.3, "freeu_b2": 1.4,
+      "sag": 0, "sag_scale": 1.0,
+      "clarity": 0.2, "sharpen": 0.3, "sharpen_radius": 1,
+      "smart_sharpen": 0.5, "smart_sharpen_radius": 2,
+      "edge_sharpen": 1.5, "edge_sharpen_radius": 2, "edge_sharpen_threshold": 0.3,
+      "output_dir": "/tmp/comfy_output", "filename_prefix": "lora_test"
+    }
+  },
+  "6": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": ["5", 0],
+      "vae": ["1", 2]
+    }
+  },
+  "7": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": ["6", 0], "filename_prefix": "lora_test"
+    }
+  }
+}

@@ -14,7 +14,7 @@
 ├── build_sd.sh                     # 编译 sd.cpp（静态链接，旧，已废弃）
 ├── build_sd_dl.sh                  # 编译 sd.cpp（动态后端，当前默认）
 ├── patches/
-│   └── sdcpp-freeu-sag-v2.patch    # 唯一 patch：FreeU + SAG + VAE tiling cap
+│   └── sdcpp-freeu-sag-v2.patch    # 唯一 patch：FreeU + SAG + DynCFG（3 文件 159 行）
 ├── src/
 │   ├── adapters/
 │   │   ├── sdcpp_adapter.h         # C++ SDPipeline 类 + C API 声明
@@ -51,7 +51,7 @@ StaticPy extern fn ← sdcpp_adapter.h (C API) ← sdcpp_adapter.cpp ← stable-
 | 项目内文件 | 职责 | 和 sd.cpp 的关系 |
 |-----------|------|-----------------|
 | `sdcpp_adapter.h` | 定义 `sd::ModelConfig`、`sd::ImageGenerationParams`、`sd::SDPipeline` 类；声明 C API | 手动映射 `sd_ctx_params_t` / `sd_img_gen_params_t` 的字段 |
-| `sdcpp_adapter.cpp` | `SDPipeline::load()` 构建 `sd_ctx_params_t` 并调用 `new_sd_ctx`；`SDPipeline::generate()` 构建 `sd_img_gen_params_t` 并调用 `generate_image` | **唯一接触 sd.cpp C API 的代码** |
+| `sdcpp_adapter.cpp` | `SDPipeline::load()` 构建 `sd_ctx_params_t` 并调用 `new_sd_ctx`；`SDPipeline::generate()` 构建 `sd_img_gen_params_t` 并调用 `generate_image`；VAE tile cap 在传入前就地裁剪 | **唯一接触 sd.cpp C API 的代码** |
 | `sd_backend.static.py` | 声明 `extern fn` 和 Python 风格 wrapper | 签名必须和 `sdcpp_adapter.h` C API 一致 |
 | `nodes.static.py` | ComfyUI 节点实现 | 只调用 `sd_backend.static.py` 的 wrapper |
 
@@ -59,35 +59,74 @@ StaticPy extern fn ← sdcpp_adapter.h (C API) ← sdcpp_adapter.cpp ← stable-
 
 ## 4. 我们对 sd.cpp 的改动
 
-所有改动集中在 **一个 patch 文件** `patches/sdcpp-freeu-sag-v2.patch`（约 220 行），修改 sd.cpp 的 5 个文件：
+所有改动集中在 **一个 patch 文件** `patches/sdcpp-freeu-sag-v2.patch`（约 240 行），修改 sd.cpp 的 **3 个文件**：
 
 ### 4.1 `include/stable-diffusion.h`
-新增 3 个结构体 + 在 `sd_img_gen_params_t` 中新增对应字段：
+新增 3 个结构体 + 在 `sd_img_gen_params_t` 末尾追加对应字段：
 - `sd_freeu_params_t`：`{enabled, b1, b2, s1, s2}`
 - `sd_sag_params_t`：`{enabled, scale}`
 - `sd_dynamic_cfg_params_t`：`{enabled, percentile, mimic_scale, threshold_percentile}`
 
-### 4.2 `src/model/diffusion/model.hpp`
-在 `DiffusionParams` 结构体中新增：
+### 4.2 `src/model/diffusion/unet.hpp`
+两处独立改动：
+
+**A. `UnetModelBlock` 类**（FreeU 核心计算）
+- 新增 5 个字段 + `set_freeu()` 方法
+- 在 `forward()` 的 output block 中加入 FreeU 通道缩放逻辑：
+  - 匹配 ComfyUI `nodes_freelunch.py`：backbone 前半通道 × `b`，skip connection × `s`
+  - `channel == model_channels*4` → 用 `{b1,s1}`；`channel == model_channels*2` → 用 `{b2,s2}`
+  - **关键设计**：`UnetModelBlock` 只存储 FreeU 参数，不关心来源
+
+**B. `UNetModelRunner` 类**（FreeU 参数传递层）
+- 新增 5 个字段 + `set_freeu_params()` 方法
+- `compute(DiffusionParams&)` 中用 `this->freeu_*` 调用 `unet.set_freeu()`
+- **不修改 `DiffusionParams`**——FreeU 字段直接挂在 runner 上
+
+### 4.3 `src/stable-diffusion.cpp`
+三处独立改动：
+
+**A. `StableDiffusionGGML` 类**——新增类字段（各功能默认 disabled）：
+- FreeU: `freeu_enabled`, `freeu_b1/b2/s1/s2`
+- SAG: `sag_enabled`, `sag_scale`
+- Dynamic CFG: `dynamic_cfg_enabled`, `dynamic_cfg_percentile/mimic_scale/threshold_percentile`
+
+**B. `run_condition` lambda 中**——通过 `dynamic_cast<UNetModelRunner*>` + `sd_version_is_unet()` 设置 FreeU：
 ```cpp
-bool freeu_enabled = false;
-float freeu_b1 = 1.0f, freeu_b2 = 1.0f, freeu_s1 = 1.0f, freeu_s2 = 1.0f;
+if (sd_version_is_unet(version)) {
+    auto* unet_runner = dynamic_cast<UNetModelRunner*>(work_diffusion_model.get());
+    if (unet_runner) {
+        unet_runner->set_freeu_params(this->freeu_enabled, ...);
+    }
+}
 ```
 
-### 4.3 `src/model/diffusion/unet.hpp`
-在 `UnetModelBlock::forward()` 的输出位置加入 FreeU 缩放逻辑：将 backbone 输出乘以 `b1`，skip connection 输出乘以 `b2`（通道半拆分，匹配 ComfyUI 的 `nodes_freelunch.py` 实现）。
+**C. 采样循环的 post-compute 阶段**——插入 SAG + Dynamic CFG：
+- SAG：`guided.pred = pred * scale + uncond * (1-scale)`（100% 擦除的纯数学插值）
+- Dynamic CFG：找到 `pred` 最大绝对值，若 >1 则全张量除以该值
 
-### 4.4 `src/stable-diffusion.cpp`
-三处改动：
-1. `load()` 函数中从 `sd_ctx_params_t` 读取 FreeU 参数存入 `DiffusionParams`
-2. `generate_image()` 中从 `sd_img_gen_params_t` 读取 FreeU/SAG/Dynamic CFG 参数
-3. 采样循环中：读取 SAG scale → 应用 SAG guidance；读取 Dynamic CFG → 阈值裁剪
+**D. `generate_image()` 中**——从 `sd_img_gen_params_t` 读取参数存入类字段
 
-### 4.5 `src/model/vae/vae.hpp`
-在 VAE decode tiling 的输出位置加入 tile 大小上限（1024 像素），防止极端大图 OOM。
+### 4.4 `src/model/vae/vae.hpp` — 不移除 ⚠️ 未修改
+VAE tile 大小上限已从 patch 中移除，改由 adapter 层在调用 `generate_image` 前自行 cap。详见 §4.7。
 
-### 4.6 不需要改 sd.cpp 的功能（通过原生 C API 调用）
-LoRA、ControlNet、HiRes Fix、VAE tiling、sampler/scheduler 枚举、PhotoMaker、ESRGAN upscale、TAESD——全部通过 `sd_ctx_params_t` / `sd_img_gen_params_t` 的标准字段控制，不需要 patch。
+### 4.5 `src/model/diffusion/model.hpp` ⚠️ 未修改
+FreeU 参数不再经过 `DiffusionParams`。`UNetModelRunner` 通过自己的 `set_freeu_params()` 直接接收。
+
+### 4.6 架构设计原则：参数流向
+```
+StaticPy → adapter (sdcpp_adapter.cpp)
+  → sd_img_gen_params_t.freeu  (C API struct)
+  → StableDiffusionGGML::freeu_enabled  (class fields)
+  → UNetModelRunner::freeu_enabled  (via dynamic_cast + set_freeu_params)
+  → UnetModelBlock::freeu_enabled  (via unet.set_freeu)
+  → ggml 计算图
+```
+FreeU 参数从右上到左下垂直传递，**不污染**水平方向的现有数据结构（如 `DiffusionParams`）。
+
+### 4.7 不需要改 sd.cpp 的功能（通过原生 C API 调用）
+LoRA、ControlNet、HiRes Fix、**VAE tiling（含 tile cap）**、sampler/scheduler 枚举、PhotoMaker、ESRGAN upscale、TAESD——全部通过 `sd_ctx_params_t` / `sd_img_gen_params_t` 的标准字段控制，不需要 patch。
+
+其中 VAE tile cap（防止 OOM）在 `sdcpp_adapter.cpp` 的 `SDPipeline::generate()` 中实现：tile 尺寸上限 128 个 latent 像素（对应 scale=8 的 VAE 输出 1024px）。
 
 ---
 
@@ -118,17 +157,45 @@ git apply --check /opt/static_comfyui/cpp/sd/patches/sdcpp-freeu-sag-v2.patch
 
 ### 5.3 patch 冲突时：AI 手动 rebase
 
-patch 修改了 5 个文件，需要逐一检查每个文件在新版中的对应位置：
+patch 修改了 **3 个文件**，需要逐一检查每个文件在新版中的对应位置：
 
 **对比文件（新版 vs 旧版）：**
 
 | patch 涉及的文件 | 对比命令 | 需要检查什么 |
 |-----------------|----------|-------------|
-| `include/stable-diffusion.h` | `git diff bb84971..<new> -- include/stable-diffusion.h` | `sd_img_gen_params_t` 是否新增/删除了字段；FreeU/SAG 结构体是否已被官方加入 |
-| `src/model/diffusion/model.hpp` | `git diff bb84971..<new> -- src/model/diffusion/model.hpp` | `DiffusionParams` 是否变化；FreeU 参数是否已被官方加入 |
-| `src/model/diffusion/unet.hpp` | `git diff bb84971..<new> -- src/model/diffusion/unet.hpp` | UNet block `forward()` 签名是否变化 |
-| `src/stable-diffusion.cpp` | `git diff bb84971..<new> -- src/stable-diffusion.cpp` | `generate_image()` / `load()` 签名和内部逻辑是否变化 |
-| `src/model/vae/vae.hpp` | `git diff bb84971..<new> -- src/model/vae/vae.hpp` | VAE decode tiling 函数是否变化 |
+| `include/stable-diffusion.h` | `git diff <old>..<new> -- include/stable-diffusion.h` | `sd_img_gen_params_t` 末尾是否新增了字段（拼在 `hires` 后面）；FreeU/SAG/DynCFG 是否已被官方合入 |
+| `src/model/diffusion/unet.hpp` | `git diff <old>..<new> -- src/model/diffusion/unet.hpp` | `UnetModelBlock::forward()` signature/base class 是否变化；`UNetModelRunner` 起始位置是否偏移 |
+| `src/stable-diffusion.cpp` | `git diff <old>..<new> -- src/stable-diffusion.cpp` | `StableDiffusionGGML` class fields 位置；`run_condition` lambda 位置；`generate_image()` 内部逻辑 |
+
+**不需要对比** `model.hpp`（不再修改）和 `vae.hpp`（tile cap 移到 adapter，不涉及 sd.cpp）。
+
+**经典 rebase 步骤：**
+```bash
+cd /opt/sd
+# 保存当前 sd.cpp 的 diff（含已应用的 patch）
+git diff > /tmp/sd_our_changes.diff
+
+# 切到新版本
+git fetch origin
+git checkout <new-commit>
+git submodule update --init --recursive
+
+# 尝试应用 patch
+git apply /opt/static_comfyui/cpp/sd/patches/sdcpp-freeu-sag-v2.patch 2>&1
+
+# 如果 offset 失败，用 --reject 看具体冲突
+git apply --reject /opt/static_comfyui/cpp/sd/patches/sdcpp-freeu-sag-v2.patch 2>&1
+# 检查 *.rej 文件，手动修复后删除
+```
+
+**常见冲突处理：**
+1. **stable-diffusion.h**: 如果 upstream 在 `hires` 后新增了字段，patch 的 3 个字段拼在它们后面即可。用 `git diff` 确认 `sd_img_gen_params_t` 末尾内容，调整 offset（或直接在末尾追加）。
+2. **unet.hpp**: `UnetModelBlock::forward()` 中的 FreeU block 需要跟在 `control_offset--` 之后、`ggml_concat(h, h_skip)` 之前。找到这个位置重新插入即可。
+3. **stable-diffusion.cpp**: 三个改动独立互不影响：
+   - Class fields：插在 `is_using_edm_v_parameterization` 后面
+   - `run_condition` 中的 `dynamic_cast`：插在 `diffusion_params.extra` 赋值之后、`cached_output` 之前
+   - SAG/DynCFG：插在 `if (guided.pred.empty()) return {};` 之后、`denoised = guided.pred * c_out...` 之前
+   - `generate_image` 配线：插在 `apply_circular_axes` 之后、`resolve_ref_image_params` 之前
 
 **如果官方已经合入了 FreeU/SAG：** 删除 patch 中对应部分，只保留未合入的部分。
 **如果官方 API 大变：** 对照 patch 的修改意图，在新代码的对应位置重新实现。
@@ -215,9 +282,10 @@ git rev-parse --short HEAD > /opt/static_comfyui/cpp/sd/SD_VERSION.lock
 | FLUX / Z-Image | ✅ | ❌ | ✅ `sd_pipeline_load_ex` | ✅ `DiffusionModelLoader` |
 | HiRes Fix | ✅ | ❌ | ✅ `sd_pipeline_generate_hires` | ✅ `HiResFix` |
 | LoRA | ✅ | ❌ | ✅ `sd_pipeline_load_lora` | ✅ `LORALoader` |
-| VAE Tiling | ✅ | ❌ | ✅ `vae_tiling` / `vae_tile_size` 参数 | ✅ `HiResFix` / `KSampler` |
+| VAE Tiling | ✅ (tile cap 在 adapter) | ❌ | ✅ `vae_tiling` / `vae_tile_size` 参数 | ✅ `HiResFix` / `KSampler` |
 | FreeU | ❌ | ✅ | ✅ `freeu` / `freeu_b1` / `freeu_b2` 参数 | ✅ `HiResFix` / `KSampler` |
 | SAG | ❌ | ✅ | ✅ `sag` / `sag_scale` 参数 | ✅ `HiResFix` / `KSampler` |
+| ADetailer | ✅ | ❌ | ✅ `sd_pipeline_generate_adetailer` | ✅ `ADetailer` 节点 |
 | ControlNet | ✅ | ❌ | ❌ | ❌ |
 | PhotoMaker | ✅ | ❌ | ❌ | ❌ |
 | ESRGAN Upscale | ✅ | ❌ | ❌ | ❌ |

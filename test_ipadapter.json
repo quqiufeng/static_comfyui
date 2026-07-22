@@ -1,0 +1,57 @@
+{
+  "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "sd_xl_base_1.0.safetensors",
+      "clip_l_name": "clip_l.safetensors",
+      "clip_g_name": "clip_g.safetensors"
+    }
+  },
+  "2": {
+    "class_type": "IPAdapterApply",
+    "inputs": {
+      "model": ["1", 0],
+      "ipadapter_model": "ipadapter_sdxl_plus_v3.onnx",
+      "clip_vision_model": "clip_vision_vit_h_hidden.onnx",
+      "image_path": "/data/models/image/demo_face_0.png",
+      "weight": 0.8
+    }
+  },
+  "3": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": ["1", 1],
+      "text": "a red apple on a wooden table, photorealistic"
+    }
+  },
+  "4": {
+    "class_type": "EmptyLatentImage",
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    }
+  },
+  "5": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["2", 0],
+      "positive": ["3", 0],
+      "negative": ["3", 0],
+      "latent_image": ["4", 0],
+      "seed": 42,
+      "steps": 5,
+      "cfg": 7.0,
+      "sampler_name": "euler_a",
+      "scheduler": "normal",
+      "output_dir": "/tmp/comfy_output",
+      "filename_prefix": "ipadapter_test"
+    }
+  },
+  "6": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": ["5", 0]
+    }
+  }
+}

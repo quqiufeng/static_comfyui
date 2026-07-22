@@ -1,0 +1,47 @@
+{
+  "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "sd_xl_base_1.0.safetensors",
+      "clip_l_name": "clip_l.safetensors",
+      "clip_g_name": "clip_g.safetensors"
+    }
+  },
+  "2": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": ["1", 1],
+      "text": "a red apple on a wooden table, photorealistic"
+    }
+  },
+  "3": {
+    "class_type": "EmptyLatentImage",
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    }
+  },
+  "4": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["1", 0],
+      "positive": ["2", 0],
+      "negative": ["2", 0],
+      "latent_image": ["3", 0],
+      "seed": 42,
+      "steps": 5,
+      "cfg": 7.0,
+      "sampler_name": "euler_a",
+      "scheduler": "normal",
+      "output_dir": "/tmp/comfy_output",
+      "filename_prefix": "baseline_test"
+    }
+  },
+  "5": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": ["4", 0]
+    }
+  }
+}

@@ -58,6 +58,7 @@ ssh user@remote_host "bash /opt/comfycli/run.sh workflow.json --output-dir ./out
 注意：`build.sh` 只编译不部署，`deploy.sh` 负责打包 + 传输，职责分离。
 后端已切换为动态加载模式：`libsdcpp_adapter.so` 只含适配层，运行时在可执行文件目录或当前目录查找 `libggml-cuda.so` / `libggml-cpu-*.so`。
 `WITH_CUDA=1` 会把 `libcudart.so.12` / `libcublas.so.12` / `libcublasLt.so.12` 一起打包；默认只打包 CUDA 后端插件，不打包 CUDA Runtime。
+`WITH_ONNX_CUDA=1` 会把 ONNX Runtime CUDA provider（约 663MB）一起打包；默认只打包 `libonnxruntime.so`，IPAdapter 的 CLIP Vision 用 CPU 推理，部署包约 79MB。
 
 ## 了解最近开发日志
 
@@ -163,11 +164,11 @@ comfycli-bin workflow.json --output-dir ./output
 - [ ] 如需在 StaticPy 层暴露更多采样参数/ControlNet 节点，可继续扩展
 
 ### Phase 4: 节点 → DAG → 入口（MVP 已通）
-- [x] `nodes.static.py`          最小节点集：CheckpointLoaderSimple / DualCLIPLoader / CLIPTextEncode / EmptyLatentImage / KSampler / VAEDecode / SaveImage
+- [x] `nodes.static.py`          节点集：CheckpointLoaderSimple / DualCLIPLoader / CLIPTextEncode / CLIPSetLastLayer / ConditioningCombine / ConditioningConcat / ConditioningAverage / EmptyLatentImage / LatentUpscale / LatentCrop / KSampler / KSamplerAdvanced / LORALoader / DiffusionModelLoader / HiResFix / ADetailer / IPAdapterApply / CLIPVisionLoader / IPAdapterModelLoader / LoadImage / PreviewImage / Reroute / VAEDecode / SaveImage
 - [x] `execution.static.py`      PromptExecutor（拓扑排序 + 输入链接解析）
 - [x] `main.static.py`           CLI 入口（workflow JSON + prompt-only 模式已通）
 - [x] `cli_args.static.py`       扩展 CLI 参数：--width/--height/--steps/--seed/--cfg/--sampler/--scheduler
-- [x] `deploy.sh`                支持动态后端拆分：CPU-only 35MB，GPU 64MB（远程有 CUDA Runtime），`WITH_CUDA=1` 439MB（含 CUDA Runtime）
+- [x] `deploy.sh`                支持动态后端拆分：CPU-only 35MB，GPU 79MB（远程有 CUDA Runtime，含 IPAdapter 默认 ONNX CPU 推理），`WITH_CUDA=1` 含 CUDA Runtime，`WITH_ONNX_CUDA=1` 含 ONNX CUDA provider
 - [x] `cpp/sd/CMakeLists.txt`      支持 `SD_BACKEND_DL=ON`：CUDA 后端以 `libggml-cuda.so` 插件形式独立加载
 - [x] `comfycli_remote.sh`       远程 GPU 实例一键部署脚本（Xiangongyun + scp + run）
 - [ ] 200+ 完整节点集（按需逐步补充）
