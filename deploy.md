@@ -6,18 +6,18 @@
 
 ```
 本地 (Ubuntu 24.04, GLIBC 2.39)          远程服务器 (Ubuntu 22.04, GLIBC 2.35)
-                                          NVIDIA 驱动 ✅
-┌──────────────────┐                     Python ❌
-│  comfycli (ELF)  │ ──scp──→           pip ❌
-│  comfycli.so     │                     venv ❌
-│  libtorch_std_   │                     CUDA toolkit ❌
-│    helper.so     │                     ┌──────────────────────┐
-│  lib/            │                     │ comfycli             │
-│    libtorch.so   │                     │ comfycli.so          │
-│    libc.so.6     │                     │ libtorch_std_helper  │
-│    libstdc++.so.6│                     │ lib/                 │
-│    ...           │                     │ run.sh               │
-└──────────────────┘                     └──────────────────────┘
+                                           NVIDIA 驱动 ✅
+┌────────────────────┐                     Python ❌
+│  comfycli-bin (ELF)│ ──scp──→           pip ❌
+│  comfycli-bin.so   │                     venv ❌
+│  libsdcpp_adapter. │                     CUDA toolkit ❌
+│    so              │                     ┌──────────────────────┐
+│  lib/              │                     │ comfycli-bin       │
+│    libc.so.6       │                     │ comfycli-bin.so    │
+│    libstdc++.so.6  │                     │ libsdcpp_adapter.so│
+│    libtorch.so     │                     │ lib/               │
+│    ...             │                     │ run.sh             │
+└────────────────────┘                     └──────────────────────┘
 ```
 
 **远程只要求**：
@@ -33,9 +33,9 @@
 ./build.sh
 
 # 产物
-#   comfycli                   — 独立 ELF 二进制 (~12MB)
-#   comfycli.so                — Chez AOT 编译产物 (~6MB)
-#   cpp/libtorch_std_helper.so — C++ 推理后端 (~1MB)
+#   comfycli-bin                   — 独立 ELF 二进制 (~4MB)
+#   comfycli-bin.so                — Chez AOT 编译产物 (~1.6MB)
+#   cpp/sd/build/libsdcpp_adapter.so — stable-diffusion.cpp 推理后端 (~185MB)
 ```
 
 编译详情见 [BUILD.md](./BUILD.md)。
@@ -56,18 +56,18 @@ GLIBC_TARGET=2.35 ./deploy.sh
 
 ```
 dist/
-├── comfycli                      # ELF 二进制
-├── comfycli.so                   # Chez AOT 编译产物
-├── libtorch_std_helper.so        # C++ 推理后端
-├── lib/                          # 依赖运行时
-│   ├── ld-linux-x86-64.so.2      # 动态链接器 (GLIBC 兼容)
+├── comfycli-bin                 # ELF 二进制
+├── comfycli-bin.so              # Chez AOT 编译产物
+├── libsdcpp_adapter.so          # stable-diffusion.cpp 推理后端
+├── lib/                          # 依赖运行时 + GLIBC 兼容层
+│   ├── ld-linux-x86-64.so.2     # 动态链接器 (GLIBC 兼容)
 │   ├── libc.so.6                 # GLIBC 兼容
 │   ├── libm.so.6                 # GLIBC 兼容
 │   ├── libpthread.so.0           # GLIBC 兼容
 │   ├── librt.so.1                # GLIBC 兼容
 │   ├── libdl.so.2                # GLIBC 兼容
 │   ├── libstdc++.so.6            # libstdc++ 兼容
-│   ├── libtorch.so               # PyTorch C++ 运行时
+│   ├── libtorch.so               # PyTorch C++ 运行时（过渡保留，ELF 仍链接）
 │   ├── libtorch_cpu.so           # PyTorch CPU 算子
 │   ├── libtorch_cuda.so          # PyTorch CUDA 算子
 │   ├── libc10.so                 # c10 运行时
@@ -82,10 +82,10 @@ dist/
 
 | 内容 | 来源 | 远程作用 |
 |------|------|---------|
-| `comfycli` | 本地编译 | 主程序 |
-| `comfycli.so` | 本地编译 | Chez AOT Scheme 机器码 |
-| `libtorch_std_helper.so` | 本地编译 | C++ 推理 API |
-| `libtorch.so` / `libtorch_cpu.so` / `libtorch_cuda.so` / `libc10.so` / `libc10_cuda.so` | `/data/venv/.../torch/lib/` | PyTorch 运行时，**远程无需 pip install torch** |
+| `comfycli-bin` | 本地编译 | 主程序（编排逻辑） |
+| `comfycli-bin.so` | 本地编译 | Chez AOT Scheme 机器码 |
+| `libsdcpp_adapter.so` | 本地编译 | stable-diffusion.cpp 推理 API |
+| `libtorch.so` / `libtorch_cpu.so` / `libtorch_cuda.so` / `libc10.so` / `libc10_cuda.so` | `/data/venv/.../torch/lib/` | PyTorch 运行时符号（ELF 仍依赖，**远程无需 pip install torch**） |
 | `libgomp*.so*` | `/data/venv/.../torch/lib/` | OpenMP 并行 |
 | `libc.so.6` / `libm.so.6` / `libpthread.so.0` / `librt.so.1` / `libdl.so.2` / `ld-linux-x86-64.so.2` | `/lib/x86_64-linux-gnu/` (或 `/opt/deb/<version>/`) | **GLIBC 兼容层**，远程系统 GLIBC 过旧时用这里打包的版本 |
 | `libstdc++.so.6` | `/lib/x86_64-linux-gnu/` (或 `/opt/deb/<version>/`) | C++ ABI 兼容 |
@@ -146,7 +146,7 @@ ssh user@remote_host "bash /opt/comfycli/run.sh /path/to/workflow.json --output-
 ssh user@remote_host
 export LD_LIBRARY_PATH=/opt/comfycli/lib:/opt/comfycli
 cd /opt/comfycli
-./comfycli workflow.json --output-dir ./output
+./comfycli-bin workflow.json --output-dir ./output
 ```
 
 ### 更新部署
@@ -175,7 +175,7 @@ GLIBC_TARGET=2.35 ./deploy.sh --scp user@remote_host
 直接用本地 GLIBC 2.39 编译的二进制在 GLIBC 2.35 上运行会报：
 
 ```
-./comfycli: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.38' not found
+./comfycli-bin: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.38' not found
 ```
 
 ### 方案：sysroot 编译 + lib/ 兼容层
@@ -211,7 +211,7 @@ mkdir -p /opt/deb/2.35 && cd /opt/deb/2.35
 # Ubuntu 22.04 (GLIBC 2.35)
 wget http://archive.ubuntu.com/ubuntu/pool/main/g/glibc/libc6_2.35-0ubuntu3_amd64.deb
 wget http://archive.ubuntu.com/ubuntu/pool/main/g/glibc/libc6-dev_2.35-0ubuntu3_amd64.deb
-wget http://archive.ubuntu.com/ubuntu/pool/main/g/gcc-11/libstdc++-11-dev_11.4.0-1ubuntu1~22.04_amd64.deb
+wget http://archive.ubuntu.com/ubuntu/pool/main/gcc-11/libstdc++-11-dev_11.4.0-1ubuntu1~22.04_amd64.deb
 
 for d in *.deb; do dpkg-deb -x "$d" .; done
 
@@ -223,7 +223,7 @@ GLIBC_TARGET=2.35 ./deploy.sh --scp root@remote_host
 
 ```bash
 # 检查编译后的二进制引用了哪些 GLIBC 符号
-objdump -T comfycli | grep -oP 'GLIBC_\S+' | sort -t. -k1,1n -k2,2n -k3,3n | uniq
+objdump -T comfycli-bin | grep -oP 'GLIBC_\S+' | sort -t. -k1,1n -k2,2n -k3,3n | uniq
 
 # 如果最大版本 ≤ 2.35，则兼容性 OK
 ```
@@ -247,7 +247,7 @@ objdump -T comfycli | grep -oP 'GLIBC_\S+' | sort -t. -k1,1n -k2,2n -k3,3n | uni
 | 架构 | x86_64 | x86_64 |
 | GLIBC | 2.17 | ≥ 2.35 |
 | NVIDIA 驱动 | 与本地 CUDA 版本兼容 | ≥ 550 |
-| 磁盘 | 100MB | 1GB |
+| 磁盘 | 1GB | 2GB+ |
 | 内存 | 4GB | 16GB |
 | 显存 | 4GB | 8GB+ |
 
@@ -294,7 +294,19 @@ ssh root@remote_host "ls -la /opt/comfycli/output/"
 |------|------|---------|---------|
 | `build.sh` | 编译二进制 + C++ `.so` | ✅ | ❌ |
 | `deploy.sh` | 打包二进制 + 依赖 `.so` + GLIBC 兼容层 + SCP | ❌ | ✅ |
-| `build.sh --dist` | 编译 + 打包（内置） | ✅ | ✅ |
-| `build.sh --scp` | 编译 + 打包 + SCP（内置） | ✅ | ✅ |
 
 推荐用法：`build.sh` 只用于本地开发编译，`deploy.sh` 用于正式部署。
+
+---
+
+## 体积优化（未来）
+
+当前部署包较大（~700MB），主要来源：
+
+- `libsdcpp_adapter.so` 静态嵌入了 sd.cpp + ggml + CUDA 后端 (~185MB)
+- `libtorch.so` 等 PyTorch 运行时符号仍被 ELF 链接（~400MB+）
+
+后续可通过以下方式瘦身：
+1. 从 ELF 链接中移除 libtorch，彻底摆脱 torch 依赖
+2. 对 `libsdcpp_adapter.so` 做动态依赖拆分（CUDA 后端单独 .so）
+3. 只打包目标架构需要的 CUDA 计算能力

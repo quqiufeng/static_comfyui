@@ -57,18 +57,49 @@ target_include_directories(postproc
 )
 
 # ---------------------------------------------------------------------------
-# Adapter library (compile-only wrapper, final link order is set below)
+# Adapter library: shared build for StaticPy FFI + static build for C++ examples
 # ---------------------------------------------------------------------------
 add_library(sdcpp_adapter STATIC
     src/adapters/sdcpp_adapter.cpp
 )
 
-target_include_directories(sdcpp_adapter
-    PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/adapters
-        ${SD_DIR}/include
-        ${SD_DIR}
-        ${SD_DIR}/thirdparty
+add_library(sdcpp_adapter_shared SHARED
+    src/adapters/sdcpp_adapter.cpp
+)
+set_target_properties(sdcpp_adapter_shared PROPERTIES OUTPUT_NAME "sdcpp_adapter")
+
+foreach(target sdcpp_adapter sdcpp_adapter_shared)
+    target_include_directories(${target}
+        PUBLIC
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/adapters
+            ${SD_DIR}/include
+            ${SD_DIR}
+            ${SD_DIR}/thirdparty
+    )
+endforeach()
+
+# The shared adapter must embed all sd.cpp / ggml / CUDA dependencies so that
+# StaticPy can dlopen it without knowing the upstream link order.
+target_link_libraries(sdcpp_adapter_shared PRIVATE
+    ${SD_LIB}
+    webp
+    webpmux
+    ${GGML_LIB}
+    dl
+    ${GGML_CPU_LIB}
+    ${GGML_CUDA_LIB}
+    ${GGML_BASE_LIB}
+    CUDA::cudart
+    CUDA::cublas
+    CUDA::cublasLt
+    ${CULIBOS_LIB}
+    ${CUDA_DRIVER_LIB}
+    gomp
+    pthread
+    webp
+    sharpyuv
+    png
+    m
 )
 
 # ---------------------------------------------------------------------------
@@ -98,6 +129,7 @@ set(SD_COMMON_LINK_LIBS
     pthread
     webp
     sharpyuv
+    png
     m
 )
 
@@ -116,7 +148,7 @@ add_sd_example(img_hires examples/img_hires.cpp)
 # ---------------------------------------------------------------------------
 # Install
 # ---------------------------------------------------------------------------
-install(TARGETS sdcpp_adapter sdxl_txt2img img_hires
+install(TARGETS sdcpp_adapter sdcpp_adapter_shared sdxl_txt2img img_hires
     RUNTIME DESTINATION bin
     ARCHIVE DESTINATION lib
     LIBRARY DESTINATION lib

@@ -21,6 +21,7 @@ FILES = [
     "clip_model.static.py",
     "k_diffusion/sampling.static.py",
     "controlnet.static.py",
+    "sd_backend.static.py",
     "nodes.static.py",
     "execution.static.py",
     "main.static.py",

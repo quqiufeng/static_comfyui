@@ -8,7 +8,7 @@
 #
 # 设计原则：
 #   - 职责单一：只编译，不打包
-#   - 编译产物 = comfycli + comfycli.so + libtorch_std_helper.so
+#   - 编译产物 = comfycli-bin + comfycli-bin.so + libsdcpp_adapter.so
 #   - GLIBC 兼容：编译时用 /opt/deb/<version>/ 做 sysroot 链接，
 #     确保二进制版本标签 ≤ 目标 GLIBC（配合 deploy.sh 的 lib/ 兼容层使用）
 
@@ -31,29 +31,29 @@ echo "============================================"
 
 # ── Step 1: 编译 C++ 推理后端 ──
 echo ""
-echo ">>> Step 1: 编译 libtorch_std_helper.so"
-GLIBC_SYSROOT="$GLIBC_SYSROOT" bash "$CPP_DIR/build_torch_std_helper.sh"
+echo ">>> Step 1: 编译 libsdcpp_adapter.so"
+GLIBC_SYSROOT="$GLIBC_SYSROOT" bash "$CPP_DIR/sd/scripts/build.sh"
 echo "  OK"
 
 # ── Step 2: 编译 ELF 二进制 ──
 echo ""
-echo ">>> Step 2: 编译 comfycli"
+echo ">>> Step 2: 编译 comfycli-bin"
 GLIBC_SYSROOT="$GLIBC_SYSROOT" bash "$STATICPY_DIR/static_build.sh" \
-  "$PROJECT_DIR/comfycli/_bundle.static.py" comfycli
+  "$PROJECT_DIR/comfycli/_bundle.static.py" comfycli-bin
 echo "  OK"
 
 echo ""
 echo "  产物:"
-echo "    $PROJECT_DIR/comfycli       (ELF binary)"
-echo "    $PROJECT_DIR/comfycli.so    (AOT compiled Scheme)"
-echo "    $CPP_DIR/libtorch_std_helper.so  (C++ bridge)"
+echo "    $PROJECT_DIR/comfycli-bin       (ELF binary)"
+echo "    $PROJECT_DIR/comfycli-bin.so    (AOT compiled Scheme)"
+echo "    $CPP_DIR/sd/build/libsdcpp_adapter.so  (C++ SD backend)"
 echo ""
 echo "============================================"
 echo " 编译完成"
 echo ""
-echo " 本地运行:"
-echo "   LD_LIBRARY_PATH=cpp/:/data/venv/lib/python3.12/site-packages/torch/lib \\"
-echo "     ./comfycli workflow.json --output-dir ./output"
+echo "  本地运行:"
+echo "   LD_LIBRARY_PATH=cpp/sd/build:/data/venv/lib/python3.12/site-packages/torch/lib \\"
+echo "     ./comfycli-bin workflow.json --output-dir ./output"
 echo ""
 echo " 部署:"
 echo "   GLIBC_TARGET=2.35 ./deploy.sh --scp user@host"

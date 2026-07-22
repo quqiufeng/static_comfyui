@@ -2864,6 +2864,8 @@ def generate_extern_ffi():
             lines.append('(load-shared-object "/home/quqiufeng/libdgemm_row.so")')
         elif lib == "stock_rl" and lib not in loaded_libs:
             lines.append('(load-shared-object "libstock_rl_helper.so")')
+        elif lib == "sdcpp_adapter" and lib not in loaded_libs:
+            lines.append('(load-shared-object "/opt/static_comfyui/cpp/sd/build/libsdcpp_adapter.so")')
         loaded_libs.add(lib)
         
         # 构建参数类型列表

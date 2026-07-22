@@ -1,7 +1,7 @@
 # Static ComfyUI — AI 开发指引
 
 ## 项目目标
-用 StaticPy（Python 子集编译器）+ `libtorch_std_helper.so`（C++ libtorch 封装）
+用 StaticPy（Python 子集编译器）+ `libsdcpp_adapter.so`（stable-diffusion.cpp C API 封装）
 1:1 重写 ComfyUI，编译为独立 ELF 二进制，零 pip 依赖。
 
 ## 理解 StaticPy 语言
@@ -29,9 +29,13 @@
 ./build.sh
 
 # 产物
-# ./comfycli          — 独立 ELF 二进制
-# ./comfycli.so       — Chez AOT 编译产物
-# ./cpp/libtorch_std_helper.so  — C++ 推理后端
+# ./comfycli-bin      — 独立 ELF 二进制
+# ./comfycli-bin.so   — Chez AOT 编译产物
+# ./cpp/sd/build/libsdcpp_adapter.so  — C++ SD 推理后端
+
+# 本地运行
+LD_LIBRARY_PATH=cpp/sd/build:/data/venv/lib/python3.12/site-packages/torch/lib \
+  ./comfycli-bin workflow.json --output-dir ./output
 
 # 部署打包（依赖 .so + GLIBC 兼容层）
 GLIBC_TARGET=2.35 ./deploy.sh
@@ -86,21 +90,21 @@ code search 工具位于 `/opt/my_db/tools/`，ComfyUI 索引在 `/opt/code_cach
 ## CLI 接口（main.static.py）
 ```
 # 模式 1：直接命令行出图
-comfycli --checkpoint /data/models/image/sd_xl_base_1.0.safetensors --prompt "cat" --output ./out.png
+comfycli-bin --checkpoint /data/models/image/sd_xl_base_1.0.safetensors --prompt "cat" --output ./out.png
 
 # 模式 2：执行 ComfyUI workflow JSON
-comfycli workflow.json --output-dir ./output
+comfycli-bin workflow.json --output-dir ./output
 ```
 
 ## 模型文件位置
 所有模型在 `/data/models/image/`：
 - `sd_xl_base_1.0.safetensors` (6.5G), `clip_g.safetensors` (2.6G), `clip_l.safetensors` (1.6G), `ae.safetensors` (320M)
-- `libtorch_std_helper.so` 已内置 `torch_std_safetensors_load` + `torch_std_sdxl_unet_forward`
+- `libsdcpp_adapter.so` 已封装 `sd_pipeline_create/load/generate/free` 等 C API，供 StaticPy FFI 调用
 
 ## 已搭建的基础设施
 - `staticpy/` — StaticPy 编译器 (`static_translate.py`)、运行时 (`prelude`/`stdlib`)、构建脚本
-- `cpp/` — C++ 推理后端 (libtorch_std_helper.h/.cpp + build_torch_std_helper.sh)
-- `build.sh` — 编译 ELF + C++ .so
+- `cpp/sd/` — stable-diffusion.cpp 推理后端封装 (`sdcpp_adapter.h/.cpp` + `build.sh`)
+- `build.sh` — 编译 ELF + `libsdcpp_adapter.so`
 - `deploy.sh` — 打包依赖 .so + GLIBC 兼容层 + SCP
 - `design.md` — 架构设计、文件映射、C++ 依赖清单
 - code search: ComfyUI 全量索引 (656 文件, 20,141 chunks, 2,633 函数)
@@ -111,6 +115,8 @@ comfycli workflow.json --output-dir ./output
 - `torch.cuda_load_model(device, tensor) → tensor`
 - `torch.cuda_unload_model(tensor)`
 - `torch.cuda_soft_empty_cache()`
+
+注意：当前后端已切换至 stable-diffusion.cpp（`libsdcpp_adapter.so`），上述 torch helper 暂时未使用，但接口保留。sd.cpp 内部通过 CUDA backend 自动管理显存；1024×1024 等较大分辨率在 VAE decode 阶段会自动启用 tiling 以避免 OOM。
 
 ## StaticPy 关键约束
 - 无类继承/多态 → dataclass + 组合
@@ -133,34 +139,31 @@ comfycli workflow.json --output-dir ./output
 - [x] model_sampling.static.py         sigma 调度（采样类型枚举 + 映射）
 - [x] latent_formats.static.py         潜空间缩放（SD15/SDXL/Flux/Flux2 等）
 
-### Phase 2: 模型加载 + 显存管理（开发中）
-- [ ] sd.static.py             safetensors 加载 → 模型对象
-- [ ] model_base.static.py     模型基类
-- [ ] model_management.static.py  GPU 调调度
-- [ ] lora.static.py           LoRA 合并
+### Phase 2: 模型加载 + 显存管理（已切换为 sd.cpp 后端）
+- [x] `sd_backend.static.py`   stable-diffusion.cpp C API FFI 封装
+- [~] `sd.static.py` / `model_base.static.py` / `model_management.static.py` / `lora.static.py` — 传统 PyTorch 模型栈已由 sd.cpp 内置替代，当前通过 C API 直接加载/推理
 
 ### Phase 3: 组件级推理
-- [ ] clip_model.static.py     CLIP encode
-- [ ] k_diffusion/sampling.static.py  采样器
-- [ ] sample.static.py         采样入口
-- [ ] controlnet.static.py     ControlNet
+- [x] 由 `libsdcpp_adapter.so` 统一提供：CLIP encode、UNet 采样、VAE decode、ControlNet 等
+- [ ] 如需在 StaticPy 层暴露更多采样参数/ControlNet 节点，可继续扩展
 
-### Phase 4: 节点 → DAG → 入口
-- [ ] nodes.static.py          200+ 节点定义
-- [ ] execution.static.py      PromptExecutor
-- [ ] main.static.py           CLI 入口
+### Phase 4: 节点 → DAG → 入口（MVP 已通）
+- [x] `nodes.static.py`          最小节点集：CheckpointLoaderSimple / KSampler / SaveImage
+- [x] `execution.static.py`      PromptExecutor（拓扑排序 + 输入链接解析）
+- [x] `main.static.py`           CLI 入口（workflow JSON 模式已通）
+- [ ] 200+ 完整节点集（按需逐步补充）
 
-### Phase 5: 端到端验证
-- [ ] workflow SDXL → 图片输出
-- [ ] --prompt 命令行模式验证
+### Phase 5: 端到端验证（workflow + prompt 均已通）
+- [x] workflow SDXL → 图片输出（1024×1024，sd_xl_base_1.0 + clip_l/clip_g）
+- [x] `--prompt` 命令行模式验证（自动生成 CheckpointLoaderSimple / KSampler / SaveImage 节点）
 
 ## 命名约定
 - ComfyUI 的 `a.py` → `a.static.py`
-- 放在 `comfycli/` 目录下（尚未创建，从 Phase 0 起逐文件创建）
-- `extern fn` 走 `from "torch_std"` 库
+- 放在 `comfycli/` 目录下
+- `extern fn` 走 `from "sdcpp_adapter"` 库
 
 ## 关键设计决策
 - 命令版先不做 HTTP/WS，后续再补 UI 层
-- C++ 层基本不需要新增 helper，libtorch_std_helper.so 已覆盖 90%
+- C++ 推理后端已切换为 stable-diffusion.cpp（`libsdcpp_adapter.so`），不再依赖 libtorch helper
 - 编译（build.sh）和部署（deploy.sh）职责分离
-- ComfyUI 无自有 C/C++ 源文件，所有 C++ 来自外部 pip 包
+- 产物 ELF 命名为 `comfycli-bin`，避免与源码目录 `comfycli/` 冲突

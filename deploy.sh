@@ -7,7 +7,7 @@
 #   ./deploy.sh --scp user@host         # 打包 + SCP 到远程
 #   GLIBC_TARGET=2.35 ./deploy.sh --scp user@host  # 指定目标 GLIBC 版本
 #
-# 前提：先用 build.sh 编译好 comfycli + comfycli.so + libtorch_std_helper.so
+# 前提：先用 build.sh 编译好 comfycli-bin + comfycli-bin.so + libsdcpp_adapter.so
 #
 # 设计原则：
 #   - 不编译，只打包部署（编译用 build.sh）
@@ -43,8 +43,8 @@ echo " ComfyCLI 纯二进制部署包"
 echo "============================================"
 
 # ── 检查二进制是否存在 ──
-if [ ! -f "$PROJECT_DIR/comfycli" ] || [ ! -f "$PROJECT_DIR/comfycli.so" ]; then
-  echo "错误: 找不到 comfycli 或 comfycli.so"
+if [ ! -f "$PROJECT_DIR/comfycli-bin" ] || [ ! -f "$PROJECT_DIR/comfycli-bin.so" ]; then
+  echo "错误: 找不到 comfycli-bin 或 comfycli-bin.so"
   echo "请先运行 build.sh 编译"
   exit 1
 fi
@@ -100,16 +100,16 @@ fi
 # ── 复制二进制到 dist/ ──
 echo ""
 echo ">>> 复制二进制"
-cp "$PROJECT_DIR/comfycli" "$DIST_DIR/"
-cp "$PROJECT_DIR/comfycli.so" "$DIST_DIR/"
+cp "$PROJECT_DIR/comfycli-bin" "$DIST_DIR/"
+cp "$PROJECT_DIR/comfycli-bin.so" "$DIST_DIR/"
 
 # 复制 C++ 推理后端
-if [ -f "$PROJECT_DIR/cpp/libtorch_std_helper.so" ]; then
-  cp "$PROJECT_DIR/cpp/libtorch_std_helper.so" "$DIST_DIR/"
-elif [ -f "$PROJECT_DIR/libtorch_std_helper.so" ]; then
-  cp "$PROJECT_DIR/libtorch_std_helper.so" "$DIST_DIR/"
+if [ -f "$PROJECT_DIR/cpp/sd/build/libsdcpp_adapter.so" ]; then
+  cp "$PROJECT_DIR/cpp/sd/build/libsdcpp_adapter.so" "$DIST_DIR/"
+elif [ -f "$PROJECT_DIR/libsdcpp_adapter.so" ]; then
+  cp "$PROJECT_DIR/libsdcpp_adapter.so" "$DIST_DIR/"
 else
-  echo "警告: libtorch_std_helper.so 未找到"
+  echo "警告: libsdcpp_adapter.so 未找到"
 fi
 
 # 复制 workflow 示例（如果有）
@@ -125,7 +125,7 @@ cat > "$DIST_DIR/run.sh" << 'RUNEOF'
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$SCRIPT_DIR:$LD_LIBRARY_PATH"
 cd "$SCRIPT_DIR"
-exec ./comfycli "$@"
+exec ./comfycli-bin "$@"
 RUNEOF
 chmod +x "$DIST_DIR/run.sh"
 

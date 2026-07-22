@@ -5,6 +5,9 @@
 #include <cstddef>
 #include <utility>
 
+// Forward declaration for log callback used in constructor.
+static void sdcpp_log_cb(enum sd_log_level_t level, const char* log, void* data);
+
 namespace sd {
 
 class SDPipeline::Impl {
@@ -23,7 +26,9 @@ public:
     }
 };
 
-SDPipeline::SDPipeline() : impl_(std::make_unique<Impl>()) {}
+SDPipeline::SDPipeline() : impl_(std::make_unique<Impl>()) {
+    sd_set_log_callback(sdcpp_log_cb, nullptr);
+}
 
 SDPipeline::~SDPipeline() = default;
 
@@ -144,6 +149,13 @@ Image SDPipeline::generate(const ImageGenerationParams& params) {
         img_params.vae_tiling_params.tile_size_x = params.vae_tile_size_x;
         img_params.vae_tiling_params.tile_size_y = params.vae_tile_size_y;
         img_params.vae_tiling_params.target_overlap = params.vae_tile_overlap;
+    } else if (params.width > 512 || params.height > 512) {
+        // Auto-enable VAE tiling for large images to avoid OOM during decode.
+        // Tile size is in latent space; 64x64 latent = 512x512 pixels for SDXL VAE (scale=8).
+        img_params.vae_tiling_params.enabled      = true;
+        img_params.vae_tiling_params.tile_size_x = 64;
+        img_params.vae_tiling_params.tile_size_y = 64;
+        img_params.vae_tiling_params.target_overlap = 0.5f;
     }
 
     // HiRes Fix
@@ -178,7 +190,9 @@ Image SDPipeline::generate(const ImageGenerationParams& params) {
 
     sd_image_t* images = nullptr;
     int num_images = 0;
+    std::fprintf(stderr, "[C++ gen] calling generate_image...\n");
     bool ok = generate_image(impl_->ctx, &img_params, &images, &num_images);
+    std::fprintf(stderr, "[C++ gen] generate_image returned ok=%d images=%p num=%d\n", ok, (void*)images, num_images);
     if (!ok || !images || num_images == 0) {
         return result;
     }
@@ -197,3 +211,193 @@ Image SDPipeline::generate(const ImageGenerationParams& params) {
 }
 
 } // namespace sd
+
+/* --------------------------------------------------------------------------
+ * C API implementation
+ * -------------------------------------------------------------------------- */
+
+#include <png.h>
+#include <cstdio>
+
+static void sdcpp_log_cb(enum sd_log_level_t level, const char* log, void* data) {
+    (void)data;
+    const char* prefix = "SD";
+    switch (level) {
+        case SD_LOG_DEBUG: prefix = "SD-DEBUG"; break;
+        case SD_LOG_INFO:  prefix = "SD-INFO";  break;
+        case SD_LOG_WARN:  prefix = "SD-WARN";  break;
+        case SD_LOG_ERROR: prefix = "SD-ERROR"; break;
+        default: break;
+    }
+    std::fprintf(stderr, "[%s] %s\n", prefix, log);
+}
+
+static bool save_png(const char* path, const uint8_t* data, int w, int h, int channels) {
+    FILE* fp = std::fopen(path, "wb");
+    if (!fp) return false;
+
+    png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+    if (!png) { std::fclose(fp); return false; }
+
+    png_infop info = png_create_info_struct(png);
+    if (!info) { png_destroy_write_struct(&png, nullptr); std::fclose(fp); return false; }
+
+    if (setjmp(png_jmpbuf(png))) {
+        png_destroy_write_struct(&png, &info);
+        std::fclose(fp);
+        return false;
+    }
+
+    int color_type = (channels == 4) ? PNG_COLOR_TYPE_RGBA : PNG_COLOR_TYPE_RGB;
+    png_init_io(png, fp);
+    png_set_IHDR(png, info, w, h, 8, color_type, PNG_INTERLACE_NONE,
+                 PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+    png_write_info(png, info);
+
+    for (int y = 0; y < h; y++) {
+        png_write_row(png, data + y * w * channels);
+    }
+
+    png_write_end(png, nullptr);
+    png_destroy_write_struct(&png, &info);
+    std::fclose(fp);
+    return true;
+}
+
+extern "C" {
+
+sd_pipeline_t sd_pipeline_create(void) {
+    sd_set_log_callback(sdcpp_log_cb, nullptr);
+    return new sd::SDPipeline();
+}
+
+int sd_pipeline_free(sd_pipeline_t pipeline) {
+    if (pipeline) {
+        delete static_cast<sd::SDPipeline*>(pipeline);
+    }
+    return 0;
+}
+
+int sd_pipeline_load(sd_pipeline_t pipeline,
+                     const char* model_path,
+                     const char* clip_l_path,
+                     const char* clip_g_path,
+                     const char* vae_path,
+                     int wtype,
+                     int n_threads,
+                     int diffusion_fa) {
+    if (!pipeline || !model_path) return -1;
+
+    std::fprintf(stderr, "[C API] sd_pipeline_load: model=%s clip_l=%s clip_g=%s vae=%s wtype=%d threads=%d fa=%d\n",
+                 model_path ? model_path : "(null)",
+                 clip_l_path ? clip_l_path : "(null)",
+                 clip_g_path ? clip_g_path : "(null)",
+                 vae_path ? vae_path : "(null)",
+                 wtype, n_threads, diffusion_fa);
+
+    sd::SDPipeline* p = static_cast<sd::SDPipeline*>(pipeline);
+
+    sd::ModelConfig config;
+    config.model_path = model_path;
+    if (clip_l_path) config.clip_l_path = clip_l_path;
+    if (clip_g_path) config.clip_g_path = clip_g_path;
+    if (vae_path)    config.vae_path    = vae_path;
+    config.wtype                = wtype;
+    config.n_threads            = n_threads > 0 ? n_threads : 8;
+    config.diffusion_flash_attn = diffusion_fa != 0;
+
+    std::fprintf(stderr, "[C API] calling p->load...\n");
+    bool ok = p->load(config);
+    std::fprintf(stderr, "[C API] p->load returned %d, is_loaded=%d\n", ok ? 1 : 0, p->is_loaded() ? 1 : 0);
+    return ok ? 0 : -2;
+}
+
+int sd_pipeline_generate(sd_pipeline_t pipeline,
+                         const char* prompt,
+                         const char* negative_prompt,
+                         int width,
+                         int height,
+                         int steps,
+                         float cfg,
+                         const char* sample_method,
+                         const char* scheduler,
+                         int64_t seed,
+                         int vae_tiling,
+                         int vae_tile_size,
+                         float vae_tile_overlap,
+                         int hires,
+                         int hires_width,
+                         int hires_height,
+                         int hires_steps,
+                         float hires_strength,
+                         int freeu,
+                         float freeu_b1,
+                         float freeu_b2,
+                         int sag,
+                         float sag_scale,
+                         const char* output_path) {
+    if (!pipeline || !prompt || !output_path) return -1;
+
+    sd::SDPipeline* p = static_cast<sd::SDPipeline*>(pipeline);
+    if (!p->is_loaded()) return -3;
+
+    sd::ImageGenerationParams params;
+    params.prompt          = prompt;
+    params.negative_prompt = negative_prompt ? negative_prompt : "";
+    params.width           = width  > 0 ? width  : 1024;
+    params.height          = height > 0 ? height : 1024;
+    params.steps           = steps  > 0 ? steps  : 20;
+    params.cfg_scale       = cfg > 0.0f ? cfg : 7.0f;
+    params.sample_method   = sample_method ? sample_method : "euler_a";
+    params.scheduler       = scheduler ? scheduler : "discrete";
+    params.seed            = seed;
+
+    if (vae_tiling != 0) {
+        params.vae_tiling       = true;
+        params.vae_tile_size_x  = vae_tile_size > 0 ? vae_tile_size : 64;
+        params.vae_tile_size_y  = params.vae_tile_size_x;
+        params.vae_tile_overlap = vae_tile_overlap >= 0.0f && vae_tile_overlap <= 1.0f
+                                  ? vae_tile_overlap : 0.5f;
+    } else if (width > 512 || height > 512) {
+        // Auto-enable VAE tiling for large images to avoid OOM during decode.
+        params.vae_tiling       = true;
+        params.vae_tile_size_x  = 64;
+        params.vae_tile_size_y  = 64;
+        params.vae_tile_overlap = 0.5f;
+    }
+
+    if (hires != 0 && hires_width > 0 && hires_height > 0) {
+        params.hires_enabled  = true;
+        params.hires_width    = hires_width;
+        params.hires_height   = hires_height;
+        params.hires_steps    = hires_steps > 0 ? hires_steps : 20;
+        params.hires_strength = hires_strength >= 0.0f && hires_strength <= 1.0f
+                                ? hires_strength : 0.35f;
+    }
+
+    if (freeu != 0) {
+        params.freeu_enabled = true;
+        params.freeu_b1      = freeu_b1 > 0.0f ? freeu_b1 : 1.3f;
+        params.freeu_b2      = freeu_b2 > 0.0f ? freeu_b2 : 1.4f;
+    }
+
+    if (sag != 0) {
+        params.sag_enabled = true;
+        params.sag_scale   = sag_scale >= 0.0f ? sag_scale : 1.0f;
+    }
+
+    sd::Image image = p->generate(params);
+    std::fprintf(stderr, "[C API] generate returned empty=%d w=%d h=%d c=%d\n",
+                 image.empty(), image.width, image.height, image.channels);
+    if (image.empty()) return -4;
+
+    if (!save_png(output_path, image.data.data(), image.width, image.height, image.channels)) {
+        std::fprintf(stderr, "[C API] save_png failed for %s\n", output_path);
+        return -5;
+    }
+    std::fprintf(stderr, "[C API] saved %s (%dx%d, %d ch)\n", output_path, image.width, image.height, image.channels);
+
+    return 0;
+}
+
+} // extern "C"

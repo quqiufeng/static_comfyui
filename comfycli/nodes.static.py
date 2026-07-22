@@ -1,5 +1,4 @@
-from sd import load_checkpoint, LoadResult, CLIP, VAE, ModelPatcher
-from clip_model import encode_sdxl, clip_tokenizer_create, clip_tokenizer_free
+from sd_backend import sd_create, sd_free, sd_load, sd_generate_with_options, SD_WTYPE_AUTO
 
 
 NODE_CLASS_MAPPINGS: dict = make_dict()
@@ -17,196 +16,131 @@ def register_node(class_type: str, display: str, func_name: str, ret_types: list
     dict_set(NODE_DISPLAY_NAMES, class_type, display)
 
 
+@dataclass
+class SDPipelineHandle:
+    pipeline: ptr
+
+
+def make_sd_pipeline_handle(pipeline: ptr) -> SDPipelineHandle:
+    return SDPipelineHandle(pipeline)
+
+
 def checkpoint_loader_simple(inputs):
+    print("DEBUG inputs dict keys:")
+    keys = dict_keys(inputs)
+    i = 0
+    while i < len(keys):
+        print("  key=" + keys[i])
+        i = i + 1
+
     ckpt_name = dict_get(inputs, "ckpt_name")
+    clip_l_name = dict_get(inputs, "clip_l_name")
+    clip_g_name = dict_get(inputs, "clip_g_name")
+
+    print("DEBUG ckpt_name=[" + ckpt_name + "]")
+    print("DEBUG clip_l_name=[" + clip_l_name + "]")
+    print("DEBUG clip_g_name=[" + clip_g_name + "]")
+
+    base_path = "/data/models/image/"
     if str_starts_with(ckpt_name, "/"):
         ckpt_path = ckpt_name
     else:
-        ckpt_path = "/data/models/image/" + ckpt_name
-    result = load_checkpoint(ckpt_path)
-    return (result.model, result.clip, result.vae)
+        ckpt_path = base_path + ckpt_name
+
+    if clip_l_name is None:
+        clip_l_path = ""
+    elif str_starts_with(clip_l_name, "/"):
+        clip_l_path = clip_l_name
+    else:
+        clip_l_path = base_path + clip_l_name
+
+    if clip_g_name is None:
+        clip_g_path = ""
+    elif str_starts_with(clip_g_name, "/"):
+        clip_g_path = clip_g_name
+    else:
+        clip_g_path = base_path + clip_g_name
+
+    pipeline = sd_create()
+    rc = sd_load(pipeline, ckpt_path, clip_l_path, clip_g_path, "", SD_WTYPE_AUTO, 8, 0)
+    if rc != 0:
+        print("SD checkpoint load failed, rc=" + string_of_int(rc))
+        return (None,)
+
+    handle = make_sd_pipeline_handle(pipeline)
+    return (handle,)
 
 
 register_node("CheckpointLoaderSimple", "Load Checkpoint",
-              "checkpoint_loader_simple", ("MODEL", "CLIP", "VAE"), False)
+              "checkpoint_loader_simple", ("MODEL",), False)
 
 
-def dual_clip_loader(inputs):
-    clip_name1 = dict_get(inputs, "clip_name1")
-    clip_name2 = dict_get(inputs, "clip_name2")
-    base_path = "/data/models/image/"
-    clip_g_sd = torch.safetensors_load(base_path + clip_name1)
-    clip_l_sd = torch.safetensors_load(base_path + clip_name2)
-    result = make_dict()
-    dict_set(result, "clip_g", clip_g_sd)
-    dict_set(result, "clip_l", clip_l_sd)
-    return (result,)
+def sd_txt2img(inputs):
+    model: SDPipelineHandle = dict_get(inputs, "model")
+    pipeline = model.pipeline
 
+    prompt = dict_get(inputs, "prompt")
+    negative_prompt = dict_get(inputs, "negative_prompt")
+    if negative_prompt is None:
+        negative_prompt = ""
 
-register_node("DualCLIPLoader", "Dual CLIP Loader",
-              "dual_clip_loader", ("CLIP",), False)
-
-
-def clip_text_encode(inputs):
-    text = dict_get(inputs, "text")
-    clip_obj = dict_get(inputs, "clip")
-    clip_l = dict_get(clip_obj, "clip_l")
-    clip_g = dict_get(clip_obj, "clip_g")
-    tokenizer_l = clip_tokenizer_create("/data/models/image/clip_l_vocab.json",
-                                         "/data/models/image/clip_l_merges.txt")
-    tokenizer_g = clip_tokenizer_create("/data/models/image/clip_g_vocab.json",
-                                         "/data/models/image/clip_g_merges.txt")
-    text_emb, pooled = encode_sdxl(clip_l, clip_g, tokenizer_l, tokenizer_g, text)
-    clip_tokenizer_free(tokenizer_l)
-    clip_tokenizer_free(tokenizer_g)
-    cond = make_dict()
-    dict_set(cond, "crossattn", text_emb)
-    dict_set(cond, "pooled_output", pooled)
-    return (cond,)
-
-
-register_node("CLIPTextEncode", "CLIP Text Encode (Prompt)",
-              "clip_text_encode", ("CONDITIONING",), False)
-
-
-def empty_latent_image(inputs):
     width = dict_get(inputs, "width")
+    if width is None:
+        width = 1024
     height = dict_get(inputs, "height")
-    batch_size = 1
-    latent = torch.zeros([batch_size, 4, height // 8, width // 8])
-    result = make_dict()
-    dict_set(result, "samples", latent)
-    return (result,)
-
-
-register_node("EmptyLatentImage", "Empty Latent Image",
-              "empty_latent_image", ("LATENT",), False)
-
-
-def vae_decode(inputs):
-    vae_obj: VAE = dict_get(inputs, "vae")
-    samples = dict_get(inputs, "samples")
-    latent_tensor = dict_get(samples, "samples")
-    image = torch.vae_decode_from_dict(vae_obj.vae_ptr, latent_tensor)
-    return (image,)
-
-# VAE test: bypass UNet, use correct latent from file
-def vae_decode_test(inputs):
-    vae_obj: VAE = dict_get(inputs, "vae")
-    # Load correct latent from raw binary
-    data = file_read_binary("/tmp/correct_latent.bin")
-    if data is None:
-        return (None,)
-    # Create tensor from raw data (1,4,128,128 float16)
-    latent = torch.tensor_from_blob(data, [1, 4, 128, 128], 3)  # dtype=3 = float16
-    image = torch.vae_decode_from_dict(vae_obj.vae_ptr, latent)
-    return (image,)
-
-def vae_decode_debug(inputs):
-    vae_obj: VAE = dict_get(inputs, "vae")
-    # Load correct latent from file
-    import_data = file_read_all("/tmp/correct_latent2.bin")
-    if import_data is None:
-        return (None,)
-    # Use a bypass: just decode the native latent from KSampler
-    samples = dict_get(inputs, "samples")
-    latent_tensor = dict_get(samples, "samples")
-    image = torch.vae_decode_from_dict(vae_obj.vae_ptr, latent_tensor)
-    return (image,)
-
-
-register_node("VAEDecode", "VAE Decode",
-              "vae_decode", ("IMAGE",), False)
-
-
-def vae_encode(inputs):
-    vae: VAE = dict_get(inputs, "vae")
-    pixels = dict_get(inputs, "pixels")
-    tile_size = 512
-    overlap = 64
-    vae_ptr = vae.vae_ptr
-    latent = torch.vae_encode_tiled(vae_ptr, pixels, tile_size, overlap)
-    result = make_dict()
-    dict_set(result, "samples", latent)
-    return (result,)
-
-
-register_node("VAEEncode", "VAE Encode",
-              "vae_encode", ("LATENT",), False)
-
-
-def k_sampler_inner(inputs):
-    model: ModelPatcher = dict_get(inputs, "model")
-    seed = dict_get(inputs, "seed")
+    if height is None:
+        height = 1024
     steps = dict_get(inputs, "steps")
+    if steps is None:
+        steps = 20
     cfg = dict_get(inputs, "cfg")
-    sampler_name = dict_get(inputs, "sampler_name")
+    if cfg is None:
+        cfg = 7.0
+    sample_method = dict_get(inputs, "sample_method")
+    if sample_method is None:
+        sample_method = "euler_a"
     scheduler = dict_get(inputs, "scheduler")
-    positive = dict_get(inputs, "positive")
-    negative = dict_get(inputs, "negative")
-    latent_image = dict_get(inputs, "latent_image")
-    denoise = dict_get(inputs, "denoise")
-    cond = dict_get(positive, "crossattn")
-    uncond = dict_get(negative, "crossattn")
-    pooled_pos = dict_get(positive, "pooled_output")
-    pooled_neg = dict_get(negative, "pooled_output")
-    latent_tensor = dict_get(latent_image, "samples")
-    h = tensor_shape_dim(latent_tensor, 2)
-    w = tensor_shape_dim(latent_tensor, 3)
-    torch.manual_seed(seed)
-    noise = torch.randn([1, 4, h, w])
-    sigmas = torch.sampler_sigmas(steps, 0.029, 14.615, scheduler)
-    noise = torch.mul(noise, torch.narrow(sigmas, 0, 0, 1))
-    x = noise
-    sd_handle = model.sd_handle
-    n = 0
-    while n < steps:
-        sigma_t = torch.narrow(sigmas, 0, n, 1)
-        sigma_prev = torch.narrow(sigmas, 0, n + 1, 1)
-        # Pass CPU copy of sigma to UNet (needs CPU data_ptr)
-        s_in = torch.to_cpu(sigma_t)
-        cond_out = model_fn(sd_handle, x, s_in, cond, pooled_pos)
-        uncond_out = model_fn(sd_handle, x, s_in, uncond, pooled_neg)
-        eps = torch.add(uncond_out, torch.mul(torch.sub(cond_out, uncond_out), cfg))
-        x = torch.add(x, torch.mul(eps, torch.sub(sigma_prev, sigma_t)))
-        if n == 0:
-            # Print x stats after step 0 for comparison with Python
-            print(torch.to_cpu(torch.abs(x)))
-            print(torch.to_cpu(torch.abs(eps)))
-        n = n + 1
-    result = make_dict()
-    dict_set(result, "samples", x)
-    return (result,)
+    if scheduler is None:
+        scheduler = "discrete"
+    seed = dict_get(inputs, "seed")
+    if seed is None:
+        seed = 42
 
-
-def model_fn(sd_handle, x, sigma, text_emb, pooled_emb):
-    os_h = 1024.0
-    os_w = 1024.0
-    crop_t = 0.0
-    crop_l = 0.0
-    ts_h = 1024.0
-    ts_w = 1024.0
-    sigma_d = torch.to_cuda(sigma)
-    sigma_2 = torch.mul(sigma_d, sigma_d)
-    factor = torch.add(sigma_2, 1.0)
-    divisor = torch.pow(factor, 0.5)
-    x_scaled = torch.div(x, divisor)
-    return torch.sdxl_unet_forward(sd_handle, x_scaled, sigma, text_emb, pooled_emb,
-                                   os_h, os_w, crop_t, crop_l, ts_h, ts_w)
-
-
-register_node("KSampler", "KSampler",
-              "k_sampler_inner", ("LATENT",), False)
-
-
-def save_image(inputs):
-    images = dict_get(inputs, "images")
-    filename_prefix = dict_get(inputs, "filename_prefix")
     output_dir = dict_get(inputs, "output_dir")
     if output_dir is None:
         output_dir = "/tmp/comfy_output"
-    torch.save_image(images, output_dir + "/" + filename_prefix + ".png", 0)
-    return (images,)
+    filename_prefix = dict_get(inputs, "filename_prefix")
+    if filename_prefix is None:
+        filename_prefix = "comfy"
+    output_path = output_dir + "/" + filename_prefix + ".png"
+
+    rc = sd_generate_with_options(pipeline, prompt, negative_prompt,
+                                  width, height, steps, cfg,
+                                  sample_method, scheduler, seed,
+                                  0, 0, 0.0,
+                                  0, 0, 0, 0, 0.0,
+                                  0, 0.0, 0.0,
+                                  0, 0.0,
+                                  output_path)
+    if rc != 0:
+        print("SD generate failed, rc=" + string_of_int(rc))
+        return (None,)
+
+    return (output_path,)
+
+
+register_node("KSampler", "KSampler",
+              "sd_txt2img", ("IMAGE",), False)
+
+
+def save_image(inputs):
+    # Image is already saved by KSampler; this node just passes through.
+    image_path = dict_get(inputs, "images")
+    if image_path is None:
+        print("SaveImage: no image path received")
+        return (None,)
+    print("Image saved to: " + image_path)
+    return (image_path,)
 
 
 register_node("SaveImage", "Save Image",
@@ -216,18 +150,8 @@ register_node("SaveImage", "Save Image",
 def call_node(class_type: str, inputs):
     if class_type == "CheckpointLoaderSimple":
         return checkpoint_loader_simple(inputs)
-    elif class_type == "DualCLIPLoader":
-        return dual_clip_loader(inputs)
-    elif class_type == "CLIPTextEncode":
-        return clip_text_encode(inputs)
-    elif class_type == "EmptyLatentImage":
-        return empty_latent_image(inputs)
-    elif class_type == "VAEDecode":
-        return vae_decode(inputs)
-    elif class_type == "VAEEncode":
-        return vae_encode(inputs)
     elif class_type == "KSampler":
-        return k_sampler_inner(inputs)
+        return sd_txt2img(inputs)
     elif class_type == "SaveImage":
         return save_image(inputs)
     else:
