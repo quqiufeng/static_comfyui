@@ -1,4 +1,4 @@
-from sd_backend import sd_create, sd_free, sd_load, sd_load_ex, sd_load_lora, sd_generate_with_options, sd_generate_hires, sd_generate_adetailer, sd_ensure_directory, sd_set_ipadapter, sd_set_ipadapter_enabled, SD_WTYPE_AUTO
+from sd_backend import sd_create, sd_free, sd_load, sd_load_ex, sd_load_lora, sd_generate_full, sd_ensure_directory, sd_set_ipadapter, sd_set_ipadapter_enabled, SD_WTYPE_AUTO
 
 
 NODE_CLASS_MAPPINGS: dict = make_dict()
@@ -36,10 +36,89 @@ def make_sd_pipeline_handle(pipeline: ptr) -> SDPipelineHandle:
     return SDPipelineHandle(pipeline)
 
 
+def model_root() -> str:
+    root = os_getenv("COMFYCLI_MODEL_DIR")
+    if str_length(root) == 0:
+        return "/data/models/image"
+    return root
+
+
 def resolve_model_path(name: str) -> str:
     if str_starts_with(name, "/"):
         return name
-    return "/data/models/image/" + name
+    return model_root() + "/" + name
+
+
+def resolve_prompt_text(inputs, key: str, fallback_key: str) -> str:
+    c: Conditioning = dict_get(inputs, key)
+    if c is not None:
+        return c.text
+    return get_str(inputs, fallback_key, "")
+
+
+def conditioning_text(c: Conditioning) -> str:
+    if c is None:
+        return ""
+    return c.text
+
+
+def merge_conditioning_text(a: str, b: str) -> str:
+    if a == "" and b == "":
+        return ""
+    if a == "":
+        return b
+    if b == "":
+        return a
+    return a + ", " + b
+
+
+def parse_sampler_opts(inputs) -> dict:
+    opts = make_dict()
+    dict_set(opts, "hires_width", 0)
+    dict_set(opts, "hires_height", 0)
+    dict_set(opts, "steps", get_int(inputs, "steps", 20))
+    dict_set(opts, "cfg", get_float(inputs, "cfg", 7.0))
+    dict_set(opts, "sampler_name", get_str(inputs, "sampler_name", "euler"))
+    dict_set(opts, "scheduler", get_str(inputs, "scheduler", "normal"))
+    dict_set(opts, "seed", get_int(inputs, "seed", 42))
+    dict_set(opts, "vae_tiling", get_int(inputs, "vae_tiling", 0))
+    dict_set(opts, "vae_tile_size", get_int(inputs, "vae_tile_size", 0))
+    dict_set(opts, "vae_tile_overlap", get_float(inputs, "vae_tile_overlap", 0.5))
+    dict_set(opts, "hires_steps", 0)
+    dict_set(opts, "hires_strength", 0.0)
+    dict_set(opts, "freeu", 0)
+    dict_set(opts, "freeu_b1", 0.0)
+    dict_set(opts, "freeu_b2", 0.0)
+    dict_set(opts, "sag", 0)
+    dict_set(opts, "sag_scale", 0.0)
+    dict_set(opts, "clarity", 0.0)
+    dict_set(opts, "sharpen", 0.0)
+    dict_set(opts, "sharpen_radius", 0)
+    dict_set(opts, "smart_sharpen", 0.0)
+    dict_set(opts, "smart_sharpen_radius", 0)
+    dict_set(opts, "edge_sharpen", 0.0)
+    dict_set(opts, "edge_sharpen_radius", 0)
+    dict_set(opts, "edge_sharpen_threshold", 0.0)
+    dict_set(opts, "ad_model_path", "")
+    dict_set(opts, "ad_prompt", "")
+    dict_set(opts, "ad_negative_prompt", "")
+    return opts
+
+
+def sampler_output(inputs):
+    output_dir = get_str(inputs, "output_dir", "/tmp/comfy_output")
+    filename_prefix = get_str(inputs, "filename_prefix", "comfy")
+    return [output_dir, output_dir + "/" + filename_prefix + ".png"]
+
+
+def run_sampler(model: SDPipelineHandle, prompt: str, negative_prompt: str,
+                width: int, height: int, opts, output_dir: str, output_path: str) -> int:
+    rc = sd_ensure_directory(output_dir)
+    if rc != 0:
+        print("Failed to create output dir: " + output_dir)
+        return -1
+    return sd_generate_full(model.pipeline, prompt, negative_prompt,
+                            width, height, opts, output_path)
 
 
 def register_node(class_type: str, display: str, func_name: str, ret_types: list,
@@ -143,19 +222,9 @@ def ksampler(inputs):
     if model is None:
         print("KSampler: model is missing")
         return (None,)
-    pipeline = model.pipeline
 
-    positive: Conditioning = dict_get(inputs, "positive")
-    if positive is None:
-        prompt = get_str(inputs, "prompt", "")
-    else:
-        prompt = positive.text
-
-    negative: Conditioning = dict_get(inputs, "negative")
-    if negative is None:
-        negative_prompt = get_str(inputs, "negative_prompt", "")
-    else:
-        negative_prompt = negative.text
+    prompt = resolve_prompt_text(inputs, "positive", "prompt")
+    negative_prompt = resolve_prompt_text(inputs, "negative", "negative_prompt")
 
     latent: LatentImage = dict_get(inputs, "latent_image")
     if latent is None:
@@ -165,39 +234,14 @@ def ksampler(inputs):
         width = latent.width
         height = latent.height
 
-    steps = get_int(inputs, "steps", 20)
-    cfg = get_float(inputs, "cfg", 7.0)
-    sampler_name = get_str(inputs, "sampler_name", "euler")
-    scheduler = get_str(inputs, "scheduler", "normal")
-    seed = get_int(inputs, "seed", 42)
-    denoise = get_float(inputs, "denoise", 1.0)
-
-    vae_tiling = get_int(inputs, "vae_tiling", 0)
-    vae_tile_size = get_int(inputs, "vae_tile_size", 0)
-    vae_tile_overlap = get_float(inputs, "vae_tile_overlap", 0.5)
-
-    output_dir = get_str(inputs, "output_dir", "/tmp/comfy_output")
-    filename_prefix = get_str(inputs, "filename_prefix", "comfy")
-    output_path = output_dir + "/" + filename_prefix + ".png"
-
-    rc = sd_ensure_directory(output_dir)
-    if rc != 0:
-        print("Failed to create output dir: " + output_dir)
-        return (None,)
-
-    rc = sd_generate_with_options(pipeline, prompt, negative_prompt,
-                                  width, height, steps, cfg,
-                                  sampler_name, scheduler, seed,
-                                  vae_tiling, vae_tile_size, vae_tile_overlap,
-                                  0, 0, 0, 0, 0.0,
-                                  0, 0.0, 0.0,
-                                  0, 0.0,
-                                  output_path)
+    opts = parse_sampler_opts(inputs)
+    out = sampler_output(inputs)
+    rc = run_sampler(model, prompt, negative_prompt, width, height, opts, out[0], out[1])
     if rc != 0:
         print("SD generate failed, rc=" + string_of_int(rc))
         return (None,)
 
-    return (output_path,)
+    return (out[1],)
 
 
 register_node("KSampler", "KSampler",
@@ -281,81 +325,49 @@ def hires_fix(inputs):
     if model is None:
         print("HiResFix: model is missing")
         return (None,)
-    pipeline = model.pipeline
 
-    positive: Conditioning = dict_get(inputs, "positive")
-    if positive is None:
-        prompt = get_str(inputs, "prompt", "")
-    else:
-        prompt = positive.text
+    prompt = resolve_prompt_text(inputs, "positive", "prompt")
+    negative_prompt = resolve_prompt_text(inputs, "negative", "negative_prompt")
 
-    negative: Conditioning = dict_get(inputs, "negative")
-    if negative is None:
-        negative_prompt = get_str(inputs, "negative_prompt", "")
-    else:
-        negative_prompt = negative.text
+    target_width = get_int(inputs, "width", 1024)
+    target_height = get_int(inputs, "height", 1024)
 
-    width = get_int(inputs, "width", 1024)
-    height = get_int(inputs, "height", 1024)
-
-    steps = get_int(inputs, "steps", 20)
-    cfg = get_float(inputs, "cfg", 2.5)
-    sampler_name = get_str(inputs, "sampler_name", "euler")
-    scheduler = get_str(inputs, "scheduler", "discrete")
     seed = get_int(inputs, "seed", 0)
     if seed == 0:
         seed = -1
 
-    vae_tiling = get_int(inputs, "vae_tiling", 1)
-    vae_tile_size = get_int(inputs, "vae_tile_size", 128)
-    vae_tile_overlap = get_float(inputs, "vae_tile_overlap", 0.5)
+    opts = parse_sampler_opts(inputs)
+    dict_set(opts, "cfg", get_float(inputs, "cfg", 2.5))
+    dict_set(opts, "scheduler", get_str(inputs, "scheduler", "discrete"))
+    dict_set(opts, "seed", seed)
+    dict_set(opts, "vae_tiling", get_int(inputs, "vae_tiling", 1))
+    dict_set(opts, "vae_tile_size", get_int(inputs, "vae_tile_size", 128))
+    dict_set(opts, "hires_width", target_width)
+    dict_set(opts, "hires_height", target_height)
+    dict_set(opts, "hires_steps", get_int(inputs, "hires_steps", 45))
+    dict_set(opts, "hires_strength", get_float(inputs, "hires_strength", 0.35))
+    dict_set(opts, "freeu", get_int(inputs, "freeu", 1))
+    dict_set(opts, "freeu_b1", get_float(inputs, "freeu_b1", 1.3))
+    dict_set(opts, "freeu_b2", get_float(inputs, "freeu_b2", 1.4))
+    dict_set(opts, "sag", get_int(inputs, "sag", 0))
+    dict_set(opts, "sag_scale", get_float(inputs, "sag_scale", 1.0))
+    dict_set(opts, "clarity", get_float(inputs, "clarity", 0.2))
+    dict_set(opts, "sharpen", get_float(inputs, "sharpen", 0.3))
+    dict_set(opts, "sharpen_radius", get_int(inputs, "sharpen_radius", 1))
+    dict_set(opts, "smart_sharpen", get_float(inputs, "smart_sharpen", 0.5))
+    dict_set(opts, "smart_sharpen_radius", get_int(inputs, "smart_sharpen_radius", 2))
+    dict_set(opts, "edge_sharpen", get_float(inputs, "edge_sharpen", 1.5))
+    dict_set(opts, "edge_sharpen_radius", get_int(inputs, "edge_sharpen_radius", 2))
+    dict_set(opts, "edge_sharpen_threshold", get_float(inputs, "edge_sharpen_threshold", 0.3))
 
-    hires_steps = get_int(inputs, "hires_steps", 45)
-    hires_strength = get_float(inputs, "hires_strength", 0.35)
-
-    freeu = get_int(inputs, "freeu", 1)
-    freeu_b1 = get_float(inputs, "freeu_b1", 1.3)
-    freeu_b2 = get_float(inputs, "freeu_b2", 1.4)
-
-    sag = get_int(inputs, "sag", 0)
-    sag_scale = get_float(inputs, "sag_scale", 1.0)
-
-    clarity = get_float(inputs, "clarity", 0.2)
-    sharpen = get_float(inputs, "sharpen", 0.3)
-    sharpen_radius = get_int(inputs, "sharpen_radius", 1)
-    smart_sharpen = get_float(inputs, "smart_sharpen", 0.5)
-    smart_sharpen_radius = get_int(inputs, "smart_sharpen_radius", 2)
-    edge_sharpen = get_float(inputs, "edge_sharpen", 1.5)
-    edge_sharpen_radius = get_int(inputs, "edge_sharpen_radius", 2)
-    edge_sharpen_threshold = get_float(inputs, "edge_sharpen_threshold", 0.3)
-
-    output_dir = get_str(inputs, "output_dir", "/tmp/comfy_output")
-    filename_prefix = get_str(inputs, "filename_prefix", "comfy")
-    output_path = output_dir + "/" + filename_prefix + ".png"
-
-    rc = sd_ensure_directory(output_dir)
-    if rc != 0:
-        print("Failed to create output dir: " + output_dir)
-        return (None,)
-
-    rc = sd_generate_hires(pipeline, prompt, negative_prompt,
-                           width, height, steps, cfg,
-                           sampler_name, scheduler, seed,
-                           vae_tiling, vae_tile_size, vae_tile_overlap,
-                           hires_steps, hires_strength,
-                           freeu, freeu_b1, freeu_b2,
-                           sag, sag_scale,
-                           clarity, sharpen, sharpen_radius,
-                           smart_sharpen, smart_sharpen_radius,
-                           edge_sharpen, edge_sharpen_radius,
-                           edge_sharpen_threshold,
-                           output_path)
+    out = sampler_output(inputs)
+    rc = run_sampler(model, prompt, negative_prompt, 0, 0, opts, out[0], out[1])
     if rc != 0:
         print("HiResFix generate failed, rc=" + string_of_int(rc))
         return (None,)
 
-    print("HiResFix: saved " + output_path)
-    return (output_path,)
+    print("HiResFix: saved " + out[1])
+    return (out[1],)
 
 
 register_node("HiResFix", "HiRes Fix",
@@ -380,59 +392,25 @@ def adetailer(inputs):
     if model is None:
         print("ADetailer: model is missing")
         return (None,)
-    pipeline = model.pipeline
 
-    positive: Conditioning = dict_get(inputs, "positive")
-    if positive is None:
-        prompt = get_str(inputs, "prompt", "")
-    else:
-        prompt = positive.text
-
-    negative: Conditioning = dict_get(inputs, "negative")
-    if negative is None:
-        negative_prompt = get_str(inputs, "negative_prompt", "")
-    else:
-        negative_prompt = negative.text
+    prompt = resolve_prompt_text(inputs, "positive", "prompt")
+    negative_prompt = resolve_prompt_text(inputs, "negative", "negative_prompt")
 
     width = get_int(inputs, "width", 1024)
     height = get_int(inputs, "height", 1024)
-    steps = get_int(inputs, "steps", 20)
-    cfg = get_float(inputs, "cfg", 7.0)
-    sampler_name = get_str(inputs, "sampler_name", "euler")
-    scheduler = get_str(inputs, "scheduler", "normal")
-    seed = get_int(inputs, "seed", 42)
 
-    vae_tiling = get_int(inputs, "vae_tiling", 0)
-    vae_tile_size = get_int(inputs, "vae_tile_size", 0)
-    vae_tile_overlap = get_float(inputs, "vae_tile_overlap", 0.5)
+    opts = parse_sampler_opts(inputs)
+    dict_set(opts, "ad_model_path", get_str(inputs, "ad_model_path", ""))
+    dict_set(opts, "ad_prompt", get_str(inputs, "ad_prompt", prompt))
+    dict_set(opts, "ad_negative_prompt", get_str(inputs, "ad_negative_prompt", negative_prompt))
 
-    ad_model_path = get_str(inputs, "ad_model_path", "")
-    ad_prompt = get_str(inputs, "ad_prompt", prompt)
-    ad_negative_prompt = get_str(inputs, "ad_negative_prompt", negative_prompt)
-
-    output_dir = get_str(inputs, "output_dir", "/tmp/comfy_output")
-    filename_prefix = get_str(inputs, "filename_prefix", "comfy")
-    output_path = output_dir + "/" + filename_prefix + ".png"
-
-    rc = sd_ensure_directory(output_dir)
-    if rc != 0:
-        print("Failed to create output dir: " + output_dir)
-        return (None,)
-
-    rc = sd_generate_adetailer(pipeline, prompt, negative_prompt,
-                                width, height, steps, cfg,
-                                sampler_name, scheduler, seed,
-                                vae_tiling, vae_tile_size, vae_tile_overlap,
-                                0, 0, 0, 0, 0.0,
-                                0, 0.0, 0.0,
-                                0, 0.0,
-                                ad_model_path, ad_prompt, ad_negative_prompt,
-                                output_path)
+    out = sampler_output(inputs)
+    rc = run_sampler(model, prompt, negative_prompt, width, height, opts, out[0], out[1])
     if rc != 0:
         print("ADetailer generate failed, rc=" + string_of_int(rc))
         return (None,)
 
-    return (output_path,)
+    return (out[1],)
 
 
 register_node("ADetailer", "ADetailer",
@@ -543,21 +521,10 @@ register_node("CLIPSetLastLayer", "CLIP Set Last Layer",
 
 
 def conditioning_combine(inputs):
-    c1: Conditioning = dict_get(inputs, "conditioning_1")
-    c2: Conditioning = dict_get(inputs, "conditioning_2")
-    t1 = ""
-    t2 = ""
-    if c1 is not None:
-        t1 = c1.text
-    if c2 is not None:
-        t2 = c2.text
-    if t1 == "" and t2 == "":
-        return (Conditioning(""),)
-    if t1 == "":
-        return (Conditioning(t2),)
-    if t2 == "":
-        return (Conditioning(t1),)
-    return (Conditioning(t1 + ", " + t2),)
+    text = merge_conditioning_text(
+        conditioning_text(dict_get(inputs, "conditioning_1")),
+        conditioning_text(dict_get(inputs, "conditioning_2")))
+    return (Conditioning(text),)
 
 
 register_node("ConditioningCombine", "Conditioning Combine",
@@ -565,21 +532,10 @@ register_node("ConditioningCombine", "Conditioning Combine",
 
 
 def conditioning_concat(inputs):
-    c_to: Conditioning = dict_get(inputs, "conditioning_to")
-    c_from: Conditioning = dict_get(inputs, "conditioning_from")
-    t1 = ""
-    t2 = ""
-    if c_to is not None:
-        t1 = c_to.text
-    if c_from is not None:
-        t2 = c_from.text
-    if t1 == "" and t2 == "":
-        return (Conditioning(""),)
-    if t1 == "":
-        return (Conditioning(t2),)
-    if t2 == "":
-        return (Conditioning(t1),)
-    return (Conditioning(t1 + ", " + t2),)
+    text = merge_conditioning_text(
+        conditioning_text(dict_get(inputs, "conditioning_to")),
+        conditioning_text(dict_get(inputs, "conditioning_from")))
+    return (Conditioning(text),)
 
 
 register_node("ConditioningConcat", "Conditioning Concat",
@@ -587,26 +543,13 @@ register_node("ConditioningConcat", "Conditioning Concat",
 
 
 def conditioning_average(inputs):
-    c_to: Conditioning = dict_get(inputs, "conditioning_to")
-    c_from: Conditioning = dict_get(inputs, "conditioning_from")
+    c_to = conditioning_text(dict_get(inputs, "conditioning_to"))
+    c_from = conditioning_text(dict_get(inputs, "conditioning_from"))
     strength = get_float(inputs, "conditioning_to_strength", 0.5)
-    t1 = ""
-    t2 = ""
-    if c_to is not None:
-        t1 = c_to.text
-    if c_from is not None:
-        t2 = c_from.text
-    if t1 == "" and t2 == "":
-        return (Conditioning(""),)
-    if t1 == "":
-        return (Conditioning(t2),)
-    if t2 == "":
-        return (Conditioning(t1),)
     # Simple strength-aware combination: stronger text goes first.
     if strength >= 0.5:
-        return (Conditioning(t1 + ", " + t2),)
-    else:
-        return (Conditioning(t2 + ", " + t1),)
+        return (Conditioning(merge_conditioning_text(c_to, c_from)),)
+    return (Conditioning(merge_conditioning_text(c_from, c_to)),)
 
 
 register_node("ConditioningAverage", "Conditioning Average",
@@ -658,19 +601,9 @@ def ksampler_advanced(inputs):
     if model is None:
         print("KSamplerAdvanced: model is missing")
         return (None,)
-    pipeline = model.pipeline
 
-    positive: Conditioning = dict_get(inputs, "positive")
-    if positive is None:
-        prompt = get_str(inputs, "prompt", "")
-    else:
-        prompt = positive.text
-
-    negative: Conditioning = dict_get(inputs, "negative")
-    if negative is None:
-        negative_prompt = get_str(inputs, "negative_prompt", "")
-    else:
-        negative_prompt = negative.text
+    prompt = resolve_prompt_text(inputs, "positive", "prompt")
+    negative_prompt = resolve_prompt_text(inputs, "negative", "negative_prompt")
 
     latent: LatentImage = dict_get(inputs, "latent_image")
     if latent is None:
@@ -680,45 +613,14 @@ def ksampler_advanced(inputs):
         width = latent.width
         height = latent.height
 
-    steps = get_int(inputs, "steps", 20)
-    cfg = get_float(inputs, "cfg", 7.0)
-    sampler_name = get_str(inputs, "sampler_name", "euler")
-    scheduler = get_str(inputs, "scheduler", "normal")
-    seed = get_int(inputs, "seed", 42)
-    denoise = get_float(inputs, "denoise", 1.0)
-    add_noise = get_str(inputs, "add_noise", "default")
-    start_at_step = get_int(inputs, "start_at_step", 0)
-    end_at_step = get_int(inputs, "end_at_step", steps)
-    return_noise = get_str(inputs, "return_noise", "false")
-
-    vae_tiling = get_int(inputs, "vae_tiling", 0)
-    vae_tile_size = get_int(inputs, "vae_tile_size", 0)
-    vae_tile_overlap = get_float(inputs, "vae_tile_overlap", 0.5)
-
-    output_dir = get_str(inputs, "output_dir", "/tmp/comfy_output")
-    filename_prefix = get_str(inputs, "filename_prefix", "comfy")
-    output_path = output_dir + "/" + filename_prefix + ".png"
-
-    rc = sd_ensure_directory(output_dir)
-    if rc != 0:
-        print("Failed to create output dir: " + output_dir)
-        return (None,)
-
-    # For the simplified backend, start_at_step/end_at_step are passed as
-    # additional parameters if the C API supports them; otherwise they are ignored.
-    rc = sd_generate_with_options(pipeline, prompt, negative_prompt,
-                                  width, height, steps, cfg,
-                                  sampler_name, scheduler, seed,
-                                  vae_tiling, vae_tile_size, vae_tile_overlap,
-                                  0, 0, 0, 0, 0.0,
-                                  0, 0.0, 0.0,
-                                  0, 0.0,
-                                  output_path)
+    opts = parse_sampler_opts(inputs)
+    out = sampler_output(inputs)
+    rc = run_sampler(model, prompt, negative_prompt, width, height, opts, out[0], out[1])
     if rc != 0:
         print("KSamplerAdvanced generate failed, rc=" + string_of_int(rc))
         return (None,)
 
-    return (output_path,)
+    return (out[1],)
 
 
 register_node("KSamplerAdvanced", "KSampler Advanced",

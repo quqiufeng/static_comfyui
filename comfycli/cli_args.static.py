@@ -1,24 +1,3 @@
-@dataclass
-class CliArgs:
-    checkpoint: str
-    prompt: str
-    output: str
-    output_dir: str
-    workflow: str
-    show_help: bool
-    cpu: bool
-    cuda_device: str
-    highvram: bool
-    lowvram: bool
-    width: int
-    height: int
-    steps: int
-    cfg: float
-    seed: int
-    sampler: str
-    scheduler: str
-
-
 def parse_cli_args() -> dict:
     args_list: list[str] = argv()
     argc: int = py_list_length(args_list)
@@ -156,7 +135,4 @@ def print_help():
 
 
 def main():
-    args: CliArgs = parse_args()
-    if args.show_help:
-        print_help()
-        exit_program(0)
+    pass

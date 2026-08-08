@@ -17,7 +17,6 @@ FILES = [
     "model_base.static.py",
     "model_management.static.py",
     "sd.static.py",
-    "lora.static.py",
     "clip_model.static.py",
     "k_diffusion/sampling.static.py",
     "controlnet.static.py",

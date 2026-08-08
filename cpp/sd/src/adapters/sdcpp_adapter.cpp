@@ -502,91 +502,43 @@ int sd_pipeline_load_ex(sd_pipeline_t pipeline,
 }
 
 int sd_pipeline_generate(sd_pipeline_t pipeline,
-                         const char* prompt,
-                         const char* negative_prompt,
-                         int width,
-                         int height,
-                         int steps,
-                         float cfg,
-                         const char* sample_method,
-                         const char* scheduler,
-                         int64_t seed,
-                         int vae_tiling,
-                         int vae_tile_size,
-                         float vae_tile_overlap,
-                         int hires,
-                         int hires_width,
-                         int hires_height,
-                         int hires_steps,
-                         float hires_strength,
-                         int freeu,
-                         float freeu_b1,
-                         float freeu_b2,
-                         int sag,
-                         float sag_scale,
-                         const char* output_path) {
-    if (!pipeline || !prompt || !output_path) return -1;
-
-    sd::SDPipeline* p = static_cast<sd::SDPipeline*>(pipeline);
-    if (!p->is_loaded()) return -3;
-
-    sd::ImageGenerationParams params;
-    params.prompt          = prompt;
-    params.negative_prompt = negative_prompt ? negative_prompt : "";
-    params.width           = width  > 0 ? width  : 1024;
-    params.height          = height > 0 ? height : 1024;
-    params.steps           = steps  > 0 ? steps  : 20;
-    params.cfg_scale       = cfg > 0.0f ? cfg : 7.0f;
-    params.sample_method   = sample_method ? sample_method : "euler_a";
-    params.scheduler       = scheduler ? scheduler : "discrete";
-    params.seed            = seed;
-
-    if (vae_tiling != 0) {
-        params.vae_tiling       = true;
-        params.vae_tile_size_x  = vae_tile_size > 0 ? vae_tile_size : 64;
-        params.vae_tile_size_y  = params.vae_tile_size_x;
-        params.vae_tile_overlap = vae_tile_overlap >= 0.0f && vae_tile_overlap <= 1.0f
-                                  ? vae_tile_overlap : 0.5f;
-    } else if (width > 512 || height > 512) {
-        // Auto-enable VAE tiling for large images to avoid OOM during decode.
-        params.vae_tiling       = true;
-        params.vae_tile_size_x  = 64;
-        params.vae_tile_size_y  = 64;
-        params.vae_tile_overlap = 0.5f;
-    }
-
-    if (hires != 0 && hires_width > 0 && hires_height > 0) {
-        params.hires_enabled  = true;
-        params.hires_width    = hires_width;
-        params.hires_height   = hires_height;
-        params.hires_steps    = hires_steps > 0 ? hires_steps : 20;
-        params.hires_strength = hires_strength >= 0.0f && hires_strength <= 1.0f
-                                ? hires_strength : 0.35f;
-    }
-
-    if (freeu != 0) {
-        params.freeu_enabled = true;
-        params.freeu_b1      = freeu_b1 > 0.0f ? freeu_b1 : 1.3f;
-        params.freeu_b2      = freeu_b2 > 0.0f ? freeu_b2 : 1.4f;
-    }
-
-    if (sag != 0) {
-        params.sag_enabled = true;
-        params.sag_scale   = sag_scale >= 0.0f ? sag_scale : 1.0f;
-    }
-
-    sd::Image image = p->generate(params);
-    std::fprintf(stderr, "[C API] generate returned empty=%d w=%d h=%d c=%d\n",
-                 image.empty(), image.width, image.height, image.channels);
-    if (image.empty()) return -4;
-
-    if (!save_png(output_path, image.data.data(), image.width, image.height, image.channels)) {
-        std::fprintf(stderr, "[C API] save_png failed for %s\n", output_path);
-        return -5;
-    }
-    std::fprintf(stderr, "[C API] saved %s (%dx%d, %d ch)\n", output_path, image.width, image.height, image.channels);
-
-    return 0;
+                          const char* prompt,
+                          const char* negative_prompt,
+                          int width,
+                          int height,
+                          int steps,
+                          float cfg,
+                          const char* sample_method,
+                          const char* scheduler,
+                          int64_t seed,
+                          int vae_tiling,
+                          int vae_tile_size,
+                          float vae_tile_overlap,
+                          int hires,
+                          int hires_width,
+                          int hires_height,
+                          int hires_steps,
+                          float hires_strength,
+                          int freeu,
+                          float freeu_b1,
+                          float freeu_b2,
+                          int sag,
+                          float sag_scale,
+                          const char* output_path) {
+    return sd_pipeline_generate_full(pipeline, prompt, negative_prompt,
+                                     width, height,
+                                     hires != 0 ? hires_width : 0,
+                                     hires != 0 ? hires_height : 0,
+                                     steps, cfg, sample_method, scheduler, seed,
+                                     vae_tiling, vae_tile_size, vae_tile_overlap,
+                                     hires_steps, hires_strength,
+                                     freeu, freeu_b1, freeu_b2,
+                                     sag, sag_scale,
+                                     0.0f, 0.0f, 0,
+                                     0.0f, 0,
+                                     0.0f, 0, 0.0f,
+                                     nullptr, nullptr, nullptr,
+                                     output_path);
 }
 
 int64_t sd_compute_hires_resolution(int target_w, int target_h) {
@@ -625,75 +577,86 @@ int64_t sd_compute_hires_resolution(int target_w, int target_h) {
     return (static_cast<int64_t>(low_w) << 32) | static_cast<int64_t>(low_h);
 }
 
-int sd_pipeline_generate_hires(sd_pipeline_t pipeline,
-                                const char* prompt,
-                                const char* negative_prompt,
-                                int target_width,
-                                int target_height,
-                                int steps,
-                                float cfg,
-                                const char* sample_method,
-                                const char* scheduler,
-                                int64_t seed,
-                                int vae_tiling,
-                                int vae_tile_size,
-                                float vae_tile_overlap,
-                                int hires_steps,
-                                float hires_strength,
-                                int freeu,
-                                float freeu_b1,
-                                float freeu_b2,
-                                int sag,
-                                float sag_scale,
-                                float clarity,
-                                float sharpen_amount,
-                                int sharpen_radius,
-                                float smart_sharpen_strength,
-                                int smart_sharpen_radius,
-                                float edge_sharpen_amount,
-                                int edge_sharpen_radius,
-                                float edge_sharpen_threshold,
-                                const char* output_path) {
+int sd_pipeline_generate_full(sd_pipeline_t pipeline,
+                              const char* prompt,
+                              const char* negative_prompt,
+                              int width,
+                              int height,
+                              int hires_width,
+                              int hires_height,
+                              int steps,
+                              float cfg,
+                              const char* sample_method,
+                              const char* scheduler,
+                              int64_t seed,
+                              int vae_tiling,
+                              int vae_tile_size,
+                              float vae_tile_overlap,
+                              int hires_steps,
+                              float hires_strength,
+                              int freeu,
+                              float freeu_b1,
+                              float freeu_b2,
+                              int sag,
+                              float sag_scale,
+                              float clarity,
+                              float sharpen_amount,
+                              int sharpen_radius,
+                              float smart_sharpen_strength,
+                              int smart_sharpen_radius,
+                              float edge_sharpen_amount,
+                              int edge_sharpen_radius,
+                              float edge_sharpen_threshold,
+                              const char* ad_model_path,
+                              const char* ad_prompt,
+                              const char* ad_negative_prompt,
+                              const char* output_path) {
     if (!pipeline || !prompt || !output_path) return -1;
 
     sd::SDPipeline* p = static_cast<sd::SDPipeline*>(pipeline);
     if (!p->is_loaded()) return -3;
 
-    int64_t packed = sd_compute_hires_resolution(target_width, target_height);
-    int low_w = static_cast<int>(packed >> 32);
-    int low_h = static_cast<int>(packed & 0xFFFFFFFF);
-
-    std::fprintf(stderr, "[C API] sd_pipeline_generate_hires: target=%dx%d base=%dx%d\n",
-                 target_width, target_height, low_w, low_h);
+    const bool hires_on = hires_width > 0 && hires_height > 0;
+    int base_w = width;
+    int base_h = height;
+    if (hires_on && (base_w <= 0 || base_h <= 0)) {
+        int64_t packed = sd_compute_hires_resolution(hires_width, hires_height);
+        base_w = static_cast<int>(packed >> 32);
+        base_h = static_cast<int>(packed & 0xFFFFFFFF);
+        std::fprintf(stderr, "[C API] hires: target=%dx%d base=%dx%d\n",
+                     hires_width, hires_height, base_w, base_h);
+    }
+    if (base_w <= 0) base_w = 1024;
+    if (base_h <= 0) base_h = 1024;
 
     sd::ImageGenerationParams params;
     params.prompt          = prompt;
     params.negative_prompt = negative_prompt ? negative_prompt : "";
-    params.width           = low_w;
-    params.height          = low_h;
+    params.width           = base_w;
+    params.height          = base_h;
     params.steps           = steps > 0 ? steps : 20;
     params.cfg_scale       = cfg > 0.0f ? cfg : 7.0f;
-    params.sample_method   = sample_method ? sample_method : "euler";
+    params.sample_method   = sample_method ? sample_method : "euler_a";
     params.scheduler       = scheduler ? scheduler : "discrete";
     params.seed            = seed;
 
-    params.hires_enabled  = true;
-    params.hires_width    = target_width;
-    params.hires_height   = target_height;
-    params.hires_steps    = hires_steps > 0 ? hires_steps : 20;
-    params.hires_strength = hires_strength >= 0.0f && hires_strength <= 1.0f ? hires_strength : 0.35f;
+    if (hires_on) {
+        params.hires_enabled  = true;
+        params.hires_width    = hires_width;
+        params.hires_height   = hires_height;
+        params.hires_steps    = hires_steps > 0 ? hires_steps : 20;
+        params.hires_strength = hires_strength >= 0.0f && hires_strength <= 1.0f
+                                ? hires_strength : 0.35f;
+    }
 
+    // Explicit tiling only; auto-tiling for large images is handled
+    // inside SDPipeline::generate (single place).
     if (vae_tiling != 0) {
         params.vae_tiling       = true;
-        params.vae_tile_size_x  = vae_tile_size > 0 ? vae_tile_size : 128;
+        params.vae_tile_size_x  = vae_tile_size > 0 ? vae_tile_size : 64;
         params.vae_tile_size_y  = params.vae_tile_size_x;
         params.vae_tile_overlap = vae_tile_overlap >= 0.0f && vae_tile_overlap <= 1.0f
                                   ? vae_tile_overlap : 0.5f;
-    } else if (target_width > 512 || target_height > 512) {
-        params.vae_tiling       = true;
-        params.vae_tile_size_x  = 64;
-        params.vae_tile_size_y  = 64;
-        params.vae_tile_overlap = 0.5f;
     }
 
     if (freeu != 0) {
@@ -707,8 +670,15 @@ int sd_pipeline_generate_hires(sd_pipeline_t pipeline,
         params.sag_scale   = sag_scale >= 0.0f ? sag_scale : 1.0f;
     }
 
+    if (ad_model_path && ad_model_path[0] != '\0') {
+        params.adetailer_enabled  = true;
+        params.ad_model_path      = ad_model_path;
+        params.ad_prompt          = ad_prompt ? ad_prompt : "";
+        params.ad_negative_prompt = ad_negative_prompt ? ad_negative_prompt : "";
+    }
+
     sd::Image image = p->generate(params);
-    std::fprintf(stderr, "[C API] generate_hires returned empty=%d w=%d h=%d c=%d\n",
+    std::fprintf(stderr, "[C API] generate_full returned empty=%d w=%d h=%d c=%d\n",
                  image.empty(), image.width, image.height, image.channels);
     if (image.empty()) return -4;
 
@@ -742,6 +712,51 @@ int sd_pipeline_generate_hires(sd_pipeline_t pipeline,
     std::fprintf(stderr, "[C API] saved %s (%dx%d, %d ch)\n", output_path, image.width, image.height, image.channels);
 
     return 0;
+}
+
+int sd_pipeline_generate_hires(sd_pipeline_t pipeline,
+                                const char* prompt,
+                                const char* negative_prompt,
+                                int target_width,
+                                int target_height,
+                                int steps,
+                                float cfg,
+                                const char* sample_method,
+                                const char* scheduler,
+                                int64_t seed,
+                                int vae_tiling,
+                                int vae_tile_size,
+                                float vae_tile_overlap,
+                                int hires_steps,
+                                float hires_strength,
+                                int freeu,
+                                float freeu_b1,
+                                float freeu_b2,
+                                int sag,
+                                float sag_scale,
+                                float clarity,
+                                float sharpen_amount,
+                                int sharpen_radius,
+                                float smart_sharpen_strength,
+                                int smart_sharpen_radius,
+                                float edge_sharpen_amount,
+                                int edge_sharpen_radius,
+                                float edge_sharpen_threshold,
+                                const char* output_path) {
+    return sd_pipeline_generate_full(pipeline, prompt, negative_prompt,
+                                     0, 0,
+                                     target_width, target_height,
+                                     steps, cfg, sample_method, scheduler, seed,
+                                     vae_tiling, vae_tile_size, vae_tile_overlap,
+                                     hires_steps, hires_strength,
+                                     freeu, freeu_b1, freeu_b2,
+                                     sag, sag_scale,
+                                     clarity, sharpen_amount, sharpen_radius,
+                                     smart_sharpen_strength, smart_sharpen_radius,
+                                     edge_sharpen_amount, edge_sharpen_radius,
+                                     edge_sharpen_threshold,
+                                     nullptr, nullptr, nullptr,
+                                     output_path);
 }
 
 int sd_pipeline_load_lora(sd_pipeline_t pipeline,
@@ -814,79 +829,24 @@ int sd_pipeline_generate_adetailer(sd_pipeline_t pipeline,
                                     float freeu_b2,
                                     int sag,
                                     float sag_scale,
-                                    const char* ad_model_path,
-                                    const char* ad_prompt,
-                                    const char* ad_negative_prompt,
-                                    const char* output_path) {
-    if (!pipeline || !prompt || !output_path) return -1;
-
-    sd::SDPipeline* p = static_cast<sd::SDPipeline*>(pipeline);
-    if (!p->is_loaded()) return -3;
-
-    sd::ImageGenerationParams params;
-    params.prompt          = prompt;
-    params.negative_prompt = negative_prompt ? negative_prompt : "";
-    params.width           = width  > 0 ? width  : 1024;
-    params.height          = height > 0 ? height : 1024;
-    params.steps           = steps  > 0 ? steps  : 20;
-    params.cfg_scale       = cfg > 0.0f ? cfg : 7.0f;
-    params.sample_method   = sample_method ? sample_method : "euler_a";
-    params.scheduler       = scheduler ? scheduler : "discrete";
-    params.seed            = seed;
-
-    if (vae_tiling != 0) {
-        params.vae_tiling       = true;
-        params.vae_tile_size_x  = vae_tile_size > 0 ? vae_tile_size : 64;
-        params.vae_tile_size_y  = params.vae_tile_size_x;
-        params.vae_tile_overlap = vae_tile_overlap >= 0.0f && vae_tile_overlap <= 1.0f
-                                  ? vae_tile_overlap : 0.5f;
-    } else if (width > 512 || height > 512) {
-        params.vae_tiling       = true;
-        params.vae_tile_size_x  = 64;
-        params.vae_tile_size_y  = 64;
-        params.vae_tile_overlap = 0.5f;
-    }
-
-    if (hires != 0 && hires_width > 0 && hires_height > 0) {
-        params.hires_enabled  = true;
-        params.hires_width    = hires_width;
-        params.hires_height   = hires_height;
-        params.hires_steps    = hires_steps > 0 ? hires_steps : 20;
-        params.hires_strength = hires_strength >= 0.0f && hires_strength <= 1.0f
-                                ? hires_strength : 0.35f;
-    }
-
-    if (freeu != 0) {
-        params.freeu_enabled = true;
-        params.freeu_b1      = freeu_b1 > 0.0f ? freeu_b1 : 1.3f;
-        params.freeu_b2      = freeu_b2 > 0.0f ? freeu_b2 : 1.4f;
-    }
-
-    if (sag != 0) {
-        params.sag_enabled = true;
-        params.sag_scale   = sag_scale >= 0.0f ? sag_scale : 1.0f;
-    }
-
-    // ADetailer
-    if (ad_model_path && ad_model_path[0] != '\0') {
-        params.adetailer_enabled  = true;
-        params.ad_model_path      = ad_model_path;
-        params.ad_prompt          = ad_prompt ? ad_prompt : "";
-        params.ad_negative_prompt = ad_negative_prompt ? ad_negative_prompt : "";
-    }
-
-    sd::Image image = p->generate(params);
-    std::fprintf(stderr, "[C API] generate_adetailer returned empty=%d w=%d h=%d c=%d\n",
-                 image.empty(), image.width, image.height, image.channels);
-    if (image.empty()) return -4;
-
-    if (!save_png(output_path, image.data.data(), image.width, image.height, image.channels)) {
-        std::fprintf(stderr, "[C API] save_png failed for %s\n", output_path);
-        return -5;
-    }
-    std::fprintf(stderr, "[C API] saved %s (%dx%d, %d ch)\n", output_path, image.width, image.height, image.channels);
-
-    return 0;
+                                     const char* ad_model_path,
+                                     const char* ad_prompt,
+                                     const char* ad_negative_prompt,
+                                     const char* output_path) {
+    return sd_pipeline_generate_full(pipeline, prompt, negative_prompt,
+                                     width, height,
+                                     hires != 0 ? hires_width : 0,
+                                     hires != 0 ? hires_height : 0,
+                                     steps, cfg, sample_method, scheduler, seed,
+                                     vae_tiling, vae_tile_size, vae_tile_overlap,
+                                     hires_steps, hires_strength,
+                                     freeu, freeu_b1, freeu_b2,
+                                     sag, sag_scale,
+                                     0.0f, 0.0f, 0,
+                                     0.0f, 0,
+                                     0.0f, 0, 0.0f,
+                                     ad_model_path, ad_prompt, ad_negative_prompt,
+                                     output_path);
 }
 
 int sd_ensure_dir(const char* path) {

@@ -36,8 +36,22 @@ GLIBC_SYSROOT="$GLIBC_SYSROOT" bash "$CPP_DIR/sd/scripts/build.sh"
 echo "  OK"
 
 # ── Step 2: 编译 ELF 二进制 ──
+# bundle 由 concat_src.py 生成；若 comfycli/*.static.py 有更新则自动重新生成
 echo ""
 echo ">>> Step 2: 编译 comfycli-bin"
+BUNDLE="$PROJECT_DIR/comfycli/_bundle.static.py"
+BUNDLE_STALE=0
+if [ ! -f "$BUNDLE" ]; then
+  BUNDLE_STALE=1
+elif find "$PROJECT_DIR/comfycli" -name '*.static.py' ! -name '_bundle.static.py' -newer "$BUNDLE" -print -quit | grep -q .; then
+  BUNDLE_STALE=1
+elif [ "$PROJECT_DIR/concat_src.py" -nt "$BUNDLE" ]; then
+  BUNDLE_STALE=1
+fi
+if [ "$BUNDLE_STALE" = "1" ]; then
+  echo "  重新生成 bundle..."
+  python3 "$PROJECT_DIR/concat_src.py"
+fi
 GLIBC_SYSROOT="$GLIBC_SYSROOT" bash "$STATICPY_DIR/static_build.sh" \
   "$PROJECT_DIR/comfycli/_bundle.static.py" comfycli-bin
 echo "  OK"

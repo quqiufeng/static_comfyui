@@ -226,12 +226,54 @@ int sd_pipeline_generate(sd_pipeline_t pipeline,
                          float sag_scale,
                          const char* output_path);
 
-/**
- * Compute HiRes Fix base resolution from target dimensions.
- * Follows the same algorithm as img_hires.cpp compute_hires_resolution().
- * Returns (low_w << 32) | low_h as int64_t.
- */
 int64_t sd_compute_hires_resolution(int target_w, int target_h);
+
+/**
+ * Unified generation entry point. Superset of sd_pipeline_generate /
+ * sd_pipeline_generate_hires / sd_pipeline_generate_adetailer.
+ *
+ *   - hires_width/hires_height > 0  enables HiRes Fix; if width/height <= 0
+ *     the base resolution is computed via sd_compute_hires_resolution().
+ *   - vae_tiling != 0 forces explicit tiling params; otherwise auto-tiling
+ *     is decided inside SDPipeline::generate for large images.
+ *   - clarity/sharpen_* > 0 enables post-processing.
+ *   - ad_model_path non-empty enables ADetailer.
+ * Returns 0 on success, non-zero on error.
+ */
+int sd_pipeline_generate_full(sd_pipeline_t pipeline,
+                              const char* prompt,
+                              const char* negative_prompt,
+                              int width,
+                              int height,
+                              int hires_width,
+                              int hires_height,
+                              int steps,
+                              float cfg,
+                              const char* sample_method,
+                              const char* scheduler,
+                              int64_t seed,
+                              int vae_tiling,
+                              int vae_tile_size,
+                              float vae_tile_overlap,
+                              int hires_steps,
+                              float hires_strength,
+                              int freeu,
+                              float freeu_b1,
+                              float freeu_b2,
+                              int sag,
+                              float sag_scale,
+                              float clarity,
+                              float sharpen_amount,
+                              int sharpen_radius,
+                              float smart_sharpen_strength,
+                              int smart_sharpen_radius,
+                              float edge_sharpen_amount,
+                              int edge_sharpen_radius,
+                              float edge_sharpen_threshold,
+                              const char* ad_model_path,
+                              const char* ad_prompt,
+                              const char* ad_negative_prompt,
+                              const char* output_path);
 
 /**
  * All-in-one HiRes Fix generation:
