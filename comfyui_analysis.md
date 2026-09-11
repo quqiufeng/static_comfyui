@@ -1,27 +1,34 @@
 # ComfyUI 源码级分析报告
 
-> 分析日期：2026-07-05
+> 分析日期：2026-09-11
 > 分析目标：`/opt/static_comfyui/ComfyUI`
-> 当前 Commit：`985fb9d6adc974df9783d3d355cf86b992956212`
-> 分支：master
+> 当前 Commit：`1d48d9cf`（`v0.35.0-11-g1d48d9cf`）
+> 版本：`0.35.0`
+> 命名空间：`/code/comfyui` · 分析目录：`/opt/code_caches/comfyui_cache` · KV Cache：`/memory`
 > 分析工具：my_db code search system（code_indexer + batch_embedder + call_graph + dataflow + cache_import）
 
 ---
 
 ## 一、项目概览
 
-| 指标 | 数值 |
-|------|------|
-| 源码文件 | 656 |
-| 索引 Chunks | 20,141 |
-| 唯一函数 | 2,633 |
-| 调用边 | 864 |
-| 唯一变量 | 2,000 |
-| 语言 | Python 100% |
-| 向量维度 | 768 (Jina v2) |
-| 索引总大小 | 23871 keys |
+| 指标 | 本次（2026-09-11） | 上次（2026-07-05） | 变化 |
+|------|------|------|------|
+| 源码文件 | 797 | 656 | +21% |
+| 索引 Chunks | 25,586 | 20,141 | +27% |
+| 唯一函数（调用图） | 4,017 | 2,633 | +53% |
+| 函数体 | 5,378 | — | — |
+| 调用边 | 1,357 | 864 | +57% |
+| 唯一变量 / 跟踪字段 | 2,000 / 1,213 | 2,000 / — | — |
+| 向量条数 / 维度 | 25,586 / 768 | 20,141 / 768 | — |
+| 注册节点（nodes.py） | 65 | — | — |
+| 节点文件（comfy_extras） | 136 | — | — |
+| 合作伙伴节点文件 | 41 | — | — |
+| 模型架构类（supported_models） | 102 | — | — |
+| LatentFormat 类 | ~50 | — | — |
 
-ComfyUI 是一个基于节点流程图的 Stable Diffusion 图形用户界面，用户通过连接不同功能的"节点"（Node）来构建图像/视频生成的 pipeline。核心设计理念是**将复杂 AI 生成流程拆解为可组合的可视化节点**。
+**Chunk 类型分布**：class 8,516 / function 5,378 / module 5,287 / unknown 5,247 / file 797 / namespace 361，语言 100% Python。
+
+ComfyUI 是节点流程图驱动的扩散模型工作流引擎：用户连线构建 DAG，后端按拓扑序执行节点，推理计算交给 PyTorch。核心设计是把生成流程拆解为可组合节点，并以「模型补丁（ModelPatcher）+ 钩子（Hook）」实现 LoRA/ControlNet/风格注入等非侵入式改造。
 
 ---
 
@@ -29,377 +36,340 @@ ComfyUI 是一个基于节点流程图的 Stable Diffusion 图形用户界面，
 
 ```
 ComfyUI/
-├── main.py                  # 入口：CLI 解析 + 服务器启动 + prompt_worker 循环
-├── execution.py             # 核心：PromptExecutor 执行引擎 + 节点图调度
-├── server.py                # 服务层：PromptServer (WebSocket + HTTP aiohttp)
-├── nodes.py                 # 内置节点：~200+ 个节点类定义
-├── node_helpers.py          # 节点辅助函数
-├── folder_paths.py          # 模型/输出/输入目录管理
-├── protocol.py              # 客户端-服务器通信协议
-├── latent_preview.py        # 潜空间预览
-├── cuda_malloc.py           # CUDA 内存分配钩子
-├── hook_breaker_ac10a0.py   # Hook 修复工具
-├── comfyui_version.py       # 版本
-│
-├── comfy/                   # 核心库：模型定义 + 推理 + 工具
-│   ├── sd.py                # 模型加载（diffusion/CLIP/VAE/LoRA）
-│   ├── model_management.py  # GPU 显存管理（模型 offload/VRAM 调度）
-│   ├── model_patcher.py     # 模型补丁（LoRA/ControlNet 注入）
-│   ├── model_base.py        # 基础模型基类
-│   ├── model_detection.py   # 模型架构自动检测
-│   ├── supported_models.py         # 支持的模型注册表
-│   ├── supported_models_base.py    # 模型配置基类
-│   ├── clip_vision.py       # CLIP Vision 模型
-│   ├── controlnet.py        # ControlNet 加载与推理
-│   ├── diffusers_load.py    # Diffusers 格式模型加载
-│   ├── vae.py               # VAE 编解码
-│   ├── latent_formats.py    # 潜空间格式
-│   ├── sampler.py           # 采样器（Karras/DPM/DDIM 等）
-│   ├── sample.py            # 采样函数
-│   ├── k_diffusion.py       # k-diffusion 采样封装
-│   ├── t2i_adapter.py       # T2I-Adapter
-│   ├── gligen.py            # GLIGEN 支持
-│   ├── lora.py              # LoRA 模型处理
-│   ├── lora_convert.py      # LoRA 格式转换
-│   ├── taesd.py             # Tiny AutoEncoder
-│   ├── checkpoint.py        | 检查点存取
-│   ├── clip.py              # CLIP Text 模型
-│   ├── clip_model.py        # CLIP 模型实现
-│   ├── sdxl_clip.py         # SDXL CLIP
-│   ├── text_encoders.py     # 文本编码器
-│   ├── model_base.py        # 基础模型
-│   ├── model_sampling.py    # 模型时间步采样
-│   ├── conditioning.py      # 条件控制
-│   ├── ops.py               # 自定义算子
-│   ├── attn.py              # 注意力机制
-│   ├── utils.py             # 通用工具
+├── main.py / execution.py / server.py / nodes.py / node_helpers.py
+├── folder_paths.py / protocol.py / latent_preview.py / cuda_malloc.py
+├── comfy/                    # 核心库：模型定义 + 推理（44 顶层 .py + 子目录）
+│   ├── sd.py                 # 模型加载（diffusion/CLIP/VAE/LoRA）
+│   ├── model_management.py   # 显存/设备调度
+│   ├── memory_management.py  # 内存管理（新增）
+│   ├── system_memory.py      # 系统内存探测（新增）
+│   ├── model_patcher.py      # 模型补丁（LoRA/ControlNet/动态加载）
+│   ├── patcher_extension.py  # 补丁扩展（新增）
+│   ├── hooks.py              # 钩子系统（新增，786 行）
+│   ├── model_base.py / model_detection.py / supported_models*.py
+│   ├── clip_model.py / clip_vision.py / sd1_clip.py / sdxl_clip.py
+│   ├── controlnet.py / lora.py / lora_convert.py / taesd.py
+│   ├── latent_formats.py / model_sampling.py
+│   ├── samplers.py / sample.py / sampler_helpers.py / k_diffusion/
+│   ├── ops.py / quant_ops.py / rmsnorm.py / nested_tensor.py
+│   ├── pinned_memory.py / model_prefetch.py / multigpu.py
+│   ├── context_windows.py / pixel_space_convert.py
+│   ├── ldm/                  # 各模型族网络定义（sdxl/flux/wan/…）
+│   ├── text_encoders/ clip_vision/ image_encoders/ audio_encoders/
+│   ├── cldm/ t2i_adapter/ extra_samplers/ weight_adapter/ taesd/
 │   └── ...
-│
-├── comfy_execution/         # 执行引擎扩展
-│   ├── cache_provider.py    # 节点输出缓存
-│   ├── graph_utils.py       # 执行图工具
-│   ├── progress.py          # 执行进度报告
-│   └── ...
-│
-├── comfy_extras/            # 额外节点（社区贡献/实验性）
-│   ├── nodes_depth_anything_3.py
-│   ├── nodes_differential_diffusion.py
-│   ├── nodes_rtdetr.py
-│   └── ...
-│
-├── comfy_api/               # ComfyAPI 合作伙伴 API
-│   └── latest/
-│       └── __init__.py      # NodeReplacement 注册系统
-│
-├── comfy_api_nodes/         # 合作伙伴节点定义
-│   ├── nodes_luma.py        # Luma Video API
-│   ├── nodes_vidu.py        # Vidu Video API
-│   └── ...
-│
-├── comfy_config/            # 配置系统
-│   ├── config_parser.py     # pyproject.toml 配置解析
-│   └── types.py             # Pydantic 配置模型
-│
-├── api_server/              # API 服务层
-├── app/                     # 应用服务
-│   ├── node_replace_manager.py  # 节点替换管理器
-│   └── subgraph_manager.py      # 子图管理
-├── middleware/               # 中间件
-├── blueprints/               # 蓝图（输出/队列等）
-│
-├── script_examples/         # 示例脚本
-├── tests/                   # 集成测试
-├── tests-unit/              # 单元测试
-│
-├── models/                  # 模型存放目录
-├── input/                   # 输入文件目录
-├── output/                  # 输出文件目录
-├── custom_nodes/            # 自定义节点目录
-│
-├── alembic_db/              # 数据库迁移
-└── utils/                   # 工具函数
+├── comfy_execution/          # 执行引擎扩展
+│   ├── graph.py              # DynamicPrompt + TopologicalSort + ExecutionList
+│   ├── caching.py            # CacheKeySet / BasicCache / 输入签名缓存
+│   ├── cache_provider.py     # 缓存提供者（Hierarchical/LRU/RAM/Null）
+│   ├── jobs.py               # 任务模型（新增，550 行）
+│   ├── validation.py / asset_enrichment.py / progress.py / utils.py
+├── comfy_extras/             # 额外节点（136 个 nodes_*.py）
+├── comfy_api/                # ComfyAPI（latest/ NodeReplace 注册）
+├── comfy_api_nodes/          # 合作伙伴节点（41 个）
+├── comfy_config/ app/ api_server/ middleware/ blueprints/
+├── alembic_db/ tests/ tests-unit/ script_examples/
+└── models/ input/ output/ custom_nodes/ utils/
 ```
 
 ---
 
-## 三、代码分层架构
-
-ComfyUI 采用清晰的**六层架构**（从顶到底）：
+## 三、分层架构
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  第1层: 入口层 (main.py)                                 │
-│  CLI 解析 → prompt_worker 循环 → 服务器启动             │
-├─────────────────────────────────────────────────────────┤
-│  第2层: 服务层 (server.py, api_server/, comfy_api/)      │
-│  PromptServer (WebSocket + HTTP aiohttp)                │
-│  post_prompt / queue / history / WebSocket 推送         │
-├─────────────────────────────────────────────────────────┤
-│  第3层: 执行引擎 (execution.py, comfy_execution/)        │
-│  PromptExecutor → ExecutionList → 节点图拓扑排序 → 执行 │
-│  validate_prompt / is_changed_cache / 子图管理          │
-├─────────────────────────────────────────────────────────┤
-│  第4层: 节点系统 (nodes.py, node_helpers.py,             │
-│                   comfy_extras/, comfy_api_nodes/)       │
-│  CheckpointLoader / CLIPTextEncode / VAEDecode / KSampler│
-│  NodeReplaceManager / 自定义节点加载                     │
-├─────────────────────────────────────────────────────────┤
-│  第5层: 模型推理 (comfy/)                                │
-│  sd.py (加载) → model_management.py (显存调度)          │
-│  model_patcher.py (补丁) → model_base (推理)            │
-│  controlnet / clip_vision / vae / sampler               │
-├─────────────────────────────────────────────────────────┤
-│  第6层: 基础设施 (comfy_config/, utils/,                 │
-│                   folder_paths.py, alembic_db/)          │
-│  配置解析 / 文件路径 / 数据库 / 工具函数                │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│ 1 入口层   main.py: prompt_worker(351) → startup_server(568) │
+├─────────────────────────────────────────────────────────────┤
+│ 2 服务层   server.py: PromptServer(215) + comfy_api/         │
+│            WebSocket 推送 / HTTP /prompt /queue /history     │
+├─────────────────────────────────────────────────────────────┤
+│ 3 执行引擎 execution.py + comfy_execution/                   │
+│            PromptExecutor(664) → ExecutionList(193) 拓扑执行 │
+│            get_input_data(159) / validate_inputs(846)        │
+│            缓存 caching.py + IsChangedCache(60)              │
+├─────────────────────────────────────────────────────────────┤
+│ 4 节点系统 nodes.py(65) + comfy_extras/(136) + api_nodes(41) │
+│            NODE_CLASS_MAPPINGS + NodeReplaceManager          │
+├─────────────────────────────────────────────────────────────┤
+│ 5 模型推理 comfy/                                            │
+│   sd.py 加载 → model_patcher 补丁 → model_base.apply_model   │
+│   samplers/sample 采样 · clip 文本 · vae 编解码 · hooks 钩子 │
+│   model_management 显存/设备调度                             │
+├─────────────────────────────────────────────────────────────┤
+│ 6 基础设施 comfy_config/ folder_paths.py utils/ alembic_db/  │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### 3.1 入口层（第1层）
+---
 
-**文件**: `main.py`
+## 四、核心执行引擎（`execution.py` + `comfy_execution/`）
 
-- **`comfy.cli_args.args`** — 解析命令行参数（端口、GPU、量化选项等）
-- **`prompt_worker(q, server_instance)`** — 核心工作循环：
-  1. 从队列 `q` 获取 prompt
-  2. 调用 `validate_prompt()` 验证
-  3. 实例化 `PromptExecutor` 执行
-  4. 发送执行结果
-  5. 定期 GC + `soft_empty_cache()`
-- **`run(server_instance, ...)`** — 服务器启动：
-  1. 设置 aiohttp 日志
-  2. 启动 PromptServer
-  3. 启动 prompt_worker 后台任务
-- **`startup_server(scheme, address, port)`** — HTTPS/HTTP 服务器引导
+### 4.1 关键函数（精确行号）
 
-**执行流**：
+| 符号 | 位置 | 职责 |
+|------|------|------|
+| `IsChangedCache` | `execution.py:60` | `IS_CHANGED` 判定，决定节点是否重算 |
+| `get_input_data` | `execution.py:159` | 解析节点输入：链接 `[node_id, idx]`、hidden inputs（`unique_id/prompt/extra_pnginfo`） |
+| `_async_map_node_over_list` | `execution.py:243` | **list 输入广播**：把 list 输入逐元素映射到节点函数 |
+| `get_output_data` | `execution.py:343` | 调用节点 `FUNCTION` 并收集输出 |
+| `execute` | `execution.py:438` | 单节点执行（含 subgraph/async/ExecutionBlocker 处理） |
+| `PromptExecutor` | `execution.py:664` | 执行器主体（`execute_async`） |
+| `validate_inputs` | `execution.py:846` | 递归校验节点与链接，去重 |
+| `PromptQueue` | `execution.py:1251` | 任务队列（入队/出队/中断/历史） |
+
+### 4.2 图与调度（`comfy_execution/graph.py`）
+
+| 符号 | 位置 | 职责 |
+|------|------|------|
+| `DynamicPrompt` | `graph.py:21` | 动态 prompt 解析（含 subgraph 展开） |
+| `get_input_info` | `graph.py:64` | 取节点输入信息 |
+| `TopologicalSort` | `graph.py:106` | DAG 拓扑排序（`DependencyCycleError` 检测环） |
+| `ExecutionList` | `graph.py:193` | 可执行节点列表 + 阻塞/就绪判定 |
+
+### 4.3 缓存（`comfy_execution/caching.py`）
+
+- `CacheKeySet`（`:26`）→ `CacheKeySetID`（`:67`）/ `CacheKeySetInputSignature`（`:82`，按输入签名做 key）
+- `BasicCache`（`:150`）管理 local/subcache，`clean_unused()` 回收
+- `cache_provider.py` 提供 Hierarchical / LRU / RAMPressure / Null 四种缓存
+
+### 4.4 执行流程（函数级）
+
 ```
-main()
-  → comfy.cli_args.args             # CLI 解析
-  → PromptServer(loop)              # 创建服务器实例
-  → server.add_routes()             # 注册路由
-  → prompt_worker(queue, server)    # 启动后台工作协程（background=True）
-  → run(server, ...)                # 启动 web server
-      → web.run_app()               # aiohttp 应用启动
+PromptExecutor.execute_async
+  ├─ validate_inputs(846)              递归校验
+  ├─ IsChangedCache(60) 判缓存
+  ├─ ExecutionList(193) 拓扑排序
+  └─ while 未空:
+       ├─ execution_list.stage_node_execution()
+       ├─ execute(438)
+       │    ├─ get_input_data(159)      解析输入/链接
+       │    ├─ _async_map_node_over_list(243)   list 广播
+       │    ├─ get_output_data(343)     调用节点 FUNCTION
+       │    └─ 写缓存
+       └─ WebSocket 推送进度
+  └─ cleanup_models_gc(1041)
 ```
 
-### 3.2 服务层（第2层）
+---
 
-**文件**: `server.py`, `api_server/`, `comfy_api/`
+## 五、节点系统
 
-`PromptServer` 类（`server.py:213`）是整个系统的网络中枢：
+### 5.1 节点契约（以 `KSampler` 为例，`nodes.py:1597`）
 
-| 职责 | 实现 |
+```python
+class KSampler:
+    @classmethod
+    def INPUT_TYPES(s):   # required/optional/hidden，含类型 + 默认值 + tooltip
+    RETURN_TYPES = ("LATENT",)
+    FUNCTION = "sample"    # 实际调用的方法名
+    CATEGORY = "model/sampling"
+    DESCRIPTION = "..."
+    SEARCH_ALIASES = [...]  # 前端搜索别名（v0.35）
+    def sample(self, ...): return common_ksampler(...)
+```
+
+关键数据类型：`MODEL`=ModelPatcher，`CONDITIONING`=`[[tensor, {pooled_output, control, area, ...}]]`，`LATENT`=`{"samples": tensor, ...}`，`IMAGE`=torch tensor `[B,H,W,C]`。
+
+### 5.2 代表节点（`nodes.py`）
+
+| 节点 | 行号 | 节点 | 行号 |
+|------|------|------|------|
+| `CLIPTextEncode` | 56 | `common_ksampler` | 1572 |
+| `VAEDecode` | 316 | `KSampler` | 1597 |
+| `VAEDecodeTiled` | 343 | `KSamplerAdvanced` | 1626 |
+| `CheckpointLoaderSimple` | 616 | `SaveImage` | 1660 |
+| `EmptyLatentImage` | 1246 | `LoadImage` | 1738 |
+
+### 5.3 自定义节点加载链（`nodes.py`）
+
+```
+init_extra_nodes(2571)
+  ├─ init_builtin_extra_nodes(2394)      # comfy_extras/
+  ├─ init_builtin_api_nodes(2552)        # comfy_api_nodes/
+  └─ init_external_custom_nodes(2344)    # custom_nodes/ 目录发现
+        └─ load_custom_node(2246)        # 动态 import 模块
+```
+
+---
+
+## 六、模型层（`comfy/`）
+
+### 6.1 加载与检测（`comfy/sd.py`）
+
+| 符号 | 行号 | 说明 |
+|------|------|------|
+| `load_checkpoint_guess_config` | 2092 | 从 checkpoint 猜 UNet/CLIP/VAE 配置 |
+| `load_checkpoint_guess_config_model_only` | 2143 | 仅模型 |
+| `load_diffusion_model_state_dict` | 2262 | state_dict → 模型 |
+| `load_diffusion_model` | 2359 | 按路径加载 diffusion |
+| `load_vae_patcher` | 2369 | VAE 加载 |
+| `load_clip` | 1562 | CLIP 加载 |
+| `class CLIP` / `class VAE` | 237 / 487 | 文本编码器 / 变分自编码器 |
+
+- 架构注册表 `supported_models.py`：**102 个模型类**（SD15/SDXL/SD3/Flux/Wan/Hunyuan/…）
+- `model_detection.py`：`detect_unet_config` 按 state_dict key 模式识别架构
+- `latent_formats.py`：**~50 个 LatentFormat**（SD15/SDXL/Flux/Flux2/Wan/LTXV/MiniMax/Trellis2/…），定义潜空间缩放与 sigma
+
+### 6.2 模型补丁（`comfy/model_patcher.py`）
+
+| 符号 | 行号 | 说明 |
+|------|------|------|
+| `ModelPatcher` | 340 | 包装 torch 模型，管理 patches/lowvram/设备 |
+| `clone` | 430 | 克隆（共享权重，独立补丁） |
+| `set_model_unet_function_wrapper` | 655 | 注入 UNet forward 包装（FreeU/自定义） |
+| `load` | 982 | 按显存策略加载权重 |
+| `patch_model` | 1113 | 应用补丁到权重 |
+| `ModelPatcherDynamic` | 1749 | 动态权重加载变体 |
+
+`model_base.py`：`ModelType`(97)、`BaseModel`(166)、`apply_model`(207) —— 所有架构的推理入口。
+
+### 6.3 钩子系统（`comfy/hooks.py`，v0.35 新增，786 行）
+
+`Hook`(82) 为基类，派生 `WeightHook`(131)、`ObjectPatchHook`(191)、`AdditionalModelsHook`(206)、`TransformerOptionsHook`(229)、`InjectionsHook`(270)；`HookGroup`(287) 管理分组，`HookKeyframe`(420)/`HookKeyframeGroup`(446) 支持关键帧插值。LoRA 也可通过 `create_hook_lora`(602) 以 Hook 形式注入。
+
+---
+
+## 七、采样栈（`comfy/samplers.py` + `sample.py` + `k_diffusion/`）
+
+```
+nodes.py: common_ksampler(1572)
+  └─ comfy/samplers.py: sample(1349)
+       ├─ sampler_object(1388)            选采样器
+       ├─ KSampler(1399) 采样循环
+       │    ├─ CFGGuider(1188)            CFG 引导
+       │    │    └─ calc_cond_batch(208)  正/负条件批量推理
+       │    │         └─ get_area_and_mult(33)  区域/强度条件
+       │    └─ comfy/k_diffusion/sampling.py  各采样算法（如 DDPMSampler_step:1052）
+       └─ model_sampling.py: ModelSamplingDiscrete(141)   sigma/时间步调度
+```
+
+| 符号 | 位置 |
 |------|------|
-| WebSocket 通信 | `websocket_handler()` — 实时推送执行状态、进度 |
-| HTTP API | `post_prompt` — 接收 prompt JSON，入队执行 |
-| 路由注册 | `add_routes()` — 注册 `/prompt`, `/queue`, `/history`, `/view` 等 |
-| 客户端管理 | `sockets` dict + `sockets_metadata` — 多客户端支持 |
-| 节点替换 | `node_replace_manager` — 注入自定义节点替换映射 |
-
-**数据流**：
-```
-用户请求 → post_prompt()
-  → validate_prompt() (验证节点图)
-  → queue_prompt() (入队)
-  → prompt_worker() 取出
-    → PromptExecutor.execute()
-      → WebSocket 推送进度
-      → 完成后推送结果
-```
-
-### 3.3 执行引擎（第3层）
-
-**文件**: `execution.py`, `comfy_execution/`
-
-**`PromptExecutor`** (`execution.py:661`) — 核心执行类：
-
-```
-PromptExecutor.execute():
-  1. cache.set_prompt()              # 缓存 prompt
-  2. 构建 dynamic_prompt              # 动态节点解析
-  3. 检查缓存节点 (cache_results)      # 跳过已缓存节点
-  4. ExecutionList 构建               # 拓扑排序
-  5. While 循环：
-     a. execution_list.stage_node_execution()  # 取下一个节点
-     b. _async_map_node_over_list()            # 异步节点执行
-     c. 处理输出 → 存入 cache
-     d. WebSocket 推送进度
-  6. cleanup_models_gc()             # 清理 GPU 显存
-```
-
-**`validate_prompt()`** (`execution.py:1116`) — prompt 校验：
-1. 检查所有节点输入是否连接正确
-2. 检查节点类是否存在
-3. 检查输出是否连接
-4. 返回 validation errors
-
-**节点缓存系统**：
-- `set_prompt()` → 存储当前 prompt 的状态
-- `outputs.get(node_id)` → 检查节点输出是否已缓存
-- `clean_unused()` → 清理无效缓存
-
-### 3.4 节点系统（第4层）
-
-**文件**: `nodes.py`, `node_helpers.py`, `comfy_extras/`, `comfy_api_nodes/`
-
-| 类别 | 代表节点 |
-|------|---------|
-| **模型加载器** | CheckpointLoaderSimple, UNETLoader, VAELoader, CLIPLoader, DiffusersLoader, ControlNetLoader |
-| **条件** | CLIPTextEncode, ConditioningSetArea, ConditioningSetMask |
-| **潜空间** | VAEDecode, VAEEncode, EmptyLatentImage |
-| **采样** | KSampler, KSamplerAdvanced, SamplerCustom |
-| **图像** | LoadImage, SaveImage, PreviewImage, ImageScale |
-| **Latent 操作** | LatentUpscale, LatentRotate, LatentCrop |
-| **LoRA** | LoraLoader, LoraLoaderModelOnly |
-| **控制** | ControlNetApply, ControlNetLoader |
-| **遮罩** | LoadImageMask, MaskToImage, ImageToMask |
-
-**自定义节点系统**：
-- `custom_nodes/` 目录 — 用户放置自定义节点
-- `NodeReplaceManager` — 节点替换注册和映射
-- `init_builtin_extra_nodes()` → `init_builtin_api_nodes()` → `init_external_custom_nodes()` — 三层节点初始化链
-
-### 3.5 模型推理层（第5层）
-
-**模型加载流程**:
-```
-UNETLoader → comfy.sd.load_diffusion_model(unet_path, model_options)
-  → load_torch_file() 加载 .safetensors/.ckpt
-  → model_config_from_unet() 自动检测模型架构
-  → 创建 ModelPatcher 实例
-  → 量化/精度转换（fp8/fp16/bf16）
-```
-
-**模型架构检测**：`detect_unet_config` + `model_config_from_unet_config` 自动识别 SD1.5/SDXL/Flux/Hunyuan 等 30+ 架构
-
-**显存管理**关键函数：
-| 函数 | 作用 |
-|------|------|
-| `load_models_gpu()` | 批量加载模型到 GPU（带 offload 调度） |
-| `free_memory()` | 按需求量释放显存 |
-| `soft_empty_cache()` | CUDA cache 软清空 |
-| `cleanup_models_gc()` | GC + 清理 |
-| `should_use_fp16()` | 检测是否可用 fp16 |
-| `unload_model_and_clones()` | 卸载模型及其克隆 |
+| `get_area_and_mult` | `samplers.py:33` |
+| `calc_cond_batch` | `samplers.py:208` |
+| `CFGGuider` | `samplers.py:1188` |
+| `sample` | `samplers.py:1349` |
+| `KSampler`（采样器基类） | `samplers.py:1399` |
+| `DDPMSampler_step` | `k_diffusion/sampling.py:1052` |
+| `ModelSamplingDiscrete` | `model_sampling.py:141` |
+| `_calc_cond_batch_multigpu` | `samplers.py:358`（v0.35 多卡） |
 
 ---
 
-## 四、完整执行流程
+## 八、文本 / VAE / LoRA
 
-### 4.1 从用户提交到图像输出
-
-```
-用户操作                    ComfyUI 内部
-─────────                  ────────────
-[Web UI]                   [WebSocket 连接建立]
-   │                           ↑ PromptServer.websocket_handler()
-   │
-   ├─ 拖拽节点连接 Workflow ──→ 构建 JSON prompt
-   │
-   ├─ 点击"Queue Prompt" ────→ POST /prompt
-   │                              │
-   │                              ▼
-   │                         post_prompt(request)
-   │                              │
-   │                              ▼
-   │                         validate_prompt(prompt_id, prompt)
-   │                              │
-   │                              ├─ 检查节点 INPUT_TYPES
-   │                              ├─ 检查节点类是否存在
-   │                              ├─ 检查输出类型匹配
-   │                              └─ 返回 (valid, error, ...)
-   │                              │
-   │                         ← 如果 invalid → 400 错误
-   │                              │
-   │                              ▼
-   │                         queue.push((prompt, ...))
-   │                              │
-   │                         ← 200 OK + prompt_id
-   │
-   ├─ WebSocket 接收进度 ────→ prompt_worker(q, server)
-   │                              │
-   │                              ▼
-   │                         PromptExecutor.execute()
-   │                              │
-   │                              ├─ cache.set_prompt()
-   │                              ├─ 构建 ExecutionList (DAG 拓扑排序)
-   │                              ├─ while 循环:
-   │                              │    ├─ stage_node_execution()
-   │                              │    ├─ execute(node_id)
-   │                              │    │    ├─ 处理输入连接
-   │                              │    │    ├─ 调用节点 FUNCTION
-   │                              │    │    │    ├─ load_model
-   │                              │    │    │    ├─ 模型推理
-   │                              │    │    │    └─ 返回输出
-   │                              │    │    ├─ 缓存输出
-   │                              │    │    └─ WebSocket 推送进度
-   │                              │    └─ 检查中断标志
-   │                              │
-   │                              ├─ cleanup_models_gc()
-   │                              └─ 发送完成消息
-   │
-   └─ 显示生成的图像 ─────────→ Web UI 渲染
-```
-
-### 4.2 典型节点执行顺序（Text-to-Image SDXL）
-
-```
-Step 1: CheckpointLoaderSimple   → 加载 UNet + CLIP + VAE
-Step 2: CLIPTextEncode (正向)    → 文本 → conditioning embedding
-Step 3: CLIPTextEncode (负向)    → 文本 → conditioning embedding
-Step 4: EmptyLatentImage          → 创建空潜空间张量
-Step 5: KSampler                  → 循环 denoising
-           ├─ 每次 step: ModelSampling → CFG → Scheduler
-           └─ 返回 denoised latent
-Step 6: VAEDecode                → latent → pixel image
-Step 7: SaveImage                → 保存 + 通知前端
-```
+- **CLIP**：`comfy/clip_model.py:148` `CLIPTextModel_`；分词 `text_encoders/bpe_tokenizer.py:117` `BPETokenizer`；SDXL 双编码器 `sdxl_clip.py`
+- **VAE**：`comfy/sd.py:1190` `VAE.encode_tiled_1d::encode_fn`（tiling 编码）、`:1172` `encode_tiled_`；节点 `nodes.py:343` `VAEDecodeTiled`
+- **LoRA**：`comfy/lora.py:451` `calculate_weight`、`:516` `prefetch_prepared_value`；`comfy/sd.py:103` `load_lora_for_models`、`:138` `load_bypass_lora_for_models`
 
 ---
 
-## 五、关键设计模式
+## 九、显存 / 内存管理（`comfy/model_management.py`）
 
-| 模式 | 应用位置 | 说明 |
-|------|---------|------|
-| 工厂模式 | `comfy/sd.py:load_diffusion_model()` | 根据模型文件自动推断架构并创建对应模型 |
-| 策略模式 | `supported_models_base.py:BASE` | 不同模型架构（SDXL/Flux 等）实现统一接口 |
-| 观察者模式 | `server.py:WebSocket` | 执行进度通过 WebSocket 推送到前端 |
-| 装饰器/补丁 | `comfy/model_patcher.py` | LoRA/ControlNet 通过补丁注入模型 |
-| 命令队列 | `execution.py:queue` | Prompt 作为命令入队，顺序执行 |
-| 缓存系统 | `cache_provider.py` | 节点输出哈希缓存，避免重复计算 |
-| DAG 调度 | `execution.py:ExecutionList` | 节点图拓扑排序 + 并发执行 |
-| 插件系统 | `custom_nodes/` + `NodeReplaceManager` | 自定义节点通过目录发现和注册 |
+| 函数 | 行号 | 作用 |
+|------|------|------|
+| `get_torch_device` | 195 | 选择设备 |
+| `free_memory` | 879 | 按需求量释放 |
+| `load_models_gpu` | 925 | 批量加载模型到 GPU（带 offload 调度） |
+| `cleanup_models_gc` | 1041 | GC + 清理 |
+| `pin_memory` | 1624 | 锁页内存 |
+| `get_free_memory` | 1765 | 查询可用显存 |
+| `soft_empty_cache` | 2080 | CUDA cache 软清空 |
+| `unload_all_models` | 2098 | 卸载全部模型 |
+
+**调用关系**（code search）：`load_models_gpu ← calc_lora_model / load_model_gpu / _prepare_sampling`。
+
+v0.35 进一步拆出 `memory_management.py`（187 行）、`system_memory.py`（128 行）、`pinned_memory.py`（127 行）、`multigpu.py`（254 行）、`model_prefetch.py`（267 行）。
 
 ---
 
-## 六、与主流项目对比
+## 十、v0.35 新增子系统（本次索引才可见）
+
+| 文件 | 行数 | 说明 |
+|------|------|------|
+| `comfy/hooks.py` | 786 | 统一钩子/关键帧系统 |
+| `comfy_execution/jobs.py` | 550 | 任务模型 |
+| `comfy/quant_ops.py` | 276 | 量化算子（fp8 等） |
+| `comfy/model_prefetch.py` | 267 | 权重预取 |
+| `comfy/multigpu.py` | 254 | 多 GPU |
+| `comfy/memory_management.py` | 187 | 内存管理 |
+| `comfy/patcher_extension.py` | 159 | 补丁扩展 |
+| `comfy/system_memory.py` | 128 | 系统内存探测 |
+| `comfy/pinned_memory.py` | 127 | 锁页内存 |
+| `comfy/rmsnorm.py` | 11 | RMSNorm |
+| `comfy_execution/validation.py` | — | 校验拆分 |
+
+模型族新增：`ldm/sam3d_body/`、`ldm/seedvr/`、`ldm/sensenova/`、`ldm/minimax/`、`ldm/minimax_music/`、`ldm/mage_flow/`、`ldm/joyimage/`、`ldm/anima/`、`ldm/trellis2/`、`ldm/lightricks/` 等。
+
+---
+
+## 十一、完整执行流程
+
+```
+[Web UI] ── POST /prompt ──→ PromptServer(215).post_prompt
+                                 ├─ validate_inputs(846)
+                                 └─ queue.push → 200 OK + prompt_id
+                                        │
+                        prompt_worker(351) 取出任务
+                                 └─ PromptExecutor(664).execute_async
+                                      ├─ 判缓存 IsChangedCache(60)
+                                      ├─ ExecutionList(193) 拓扑排序
+                                      └─ 逐节点:
+                                           execute(438)
+                                             ├─ get_input_data(159)
+                                             ├─ _async_map_node_over_list(243)
+                                             ├─ get_output_data(343) → 节点 FUNCTION
+                                             └─ 缓存 + WebSocket 推送
+                                      └─ cleanup_models_gc(1041)
+[Web UI] ←── WebSocket 进度/结果 ──┘
+```
+
+典型 txt2img 节点链：`CheckpointLoaderSimple(616)` → `CLIPTextEncode(56)` ×2 → `EmptyLatentImage(1246)` → `KSampler(1597)` → `VAEDecode(316)` → `SaveImage(1660)`。
+
+---
+
+## 十二、关键设计模式
+
+| 模式 | 位置 | 说明 |
+|------|------|------|
+| 工厂 | `sd.py:2092 load_checkpoint_guess_config` | 按文件推断架构并建模型 |
+| 策略 | `supported_models.py`（102 类） | 各架构统一接口 |
+| 观察者 | `server.py` WebSocket | 执行进度推送前端 |
+| 装饰器/补丁 | `model_patcher.py` + `hooks.py` | LoRA/ControlNet 非侵入注入 |
+| 命令队列 | `execution.py:1251 PromptQueue` | Prompt 入队顺序执行 |
+| 缓存 | `comfy_execution/caching.py` | 输入签名缓存 + `IS_CHANGED` |
+| DAG 调度 | `comfy_execution/graph.py:193` | 拓扑排序 + 就绪/阻塞 |
+| 插件 | `nodes.py:2571 init_extra_nodes` | 三层节点初始化 |
+
+---
+
+## 十三、与主流项目对比
 
 | 维度 | ComfyUI | A1111 | Diffusers |
 |------|---------|-------|-----------|
 | 架构 | 节点图 DAG | 单页表单 | Python API |
 | 执行模型 | 懒加载 + 拓扑排序 | 顺序执行 | 程序控制 |
-| 显存管理 | 动态 offload | 手动切换 | 手动管理 |
-| 扩展性 | 自定义节点 | 脚本扩展 | Python 直接 |
+| 显存管理 | 动态 offload + 多卡 | 手动切换 | 手动管理 |
+| 扩展性 | 自定义节点 + Hook | 脚本扩展 | Python 直接 |
 | 并发 | asyncio + 多客户端 | 单用户 | N/A |
 
 ---
 
-## 七、核心语义查询入口
+## 十四、code search 查询入口
 
 ```bash
-# 入口与服务器
-./tools/vector_search /opt/code_caches/comfyui_cache "main entry point server" 5
-# 节点执行管线
-./tools/vector_search /opt/code_caches/comfyui_cache "node execution prompt pipeline" 5
-# 模型加载
-./tools/vector_search /opt/code_caches/comfyui_cache "model load diffusion" 5
-# 自定义节点
-./tools/vector_search /opt/code_caches/comfyui_cache "custom node register" 5
-# 显存管理
-./tools/vector_search /opt/code_caches/comfyui_cache "memory management GPU" 5
-# VAE
-./tools/vector_search /opt/code_caches/comfyui_cache "VAE encode decode" 5
-# CLIP
-./tools/vector_search /opt/code_caches/comfyui_cache "CLIP text encode" 5
+# 语义搜索（必须带 --analysis-dir）
+/opt/my_db/tools/cache_query "sampling denoise scheduler sigma" \
+  --repo /code/comfyui --type search \
+  --analysis-dir /opt/code_caches/comfyui_cache --max-results 5
+
+# 调用关系（caller/callee/调用链/数据流）
+/opt/my_db/tools/cache_query load_models_gpu \
+  --repo /code/comfyui --type context --depth 2
+
+/opt/my_db/tools/cache_query get_input_data \
+  --repo /code/comfyui --type context --depth 1
 ```
+
+> KV Cache 默认目录 `/memory`（coding.md 约定），无需显式 `--cache-dir`。
+> 注意：调用图由文本匹配构建，方法级调用（`model.apply_model` 等）覆盖有限，关键流程建议结合源码行号确认。
