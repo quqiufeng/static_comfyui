@@ -205,6 +205,51 @@ register_node("CheckpointLoaderSimple", "Load Checkpoint",
               "checkpoint_loader_simple", ("MODEL", "CLIP", "VAE"), False)
 
 
+def unet_loader(inputs):
+    # 兼容 ComfyUI 的 UNETLoader：加载单个 diffusion/unet 文件为 pipeline。
+    # 对一体化 checkpoint（含 CLIP/VAE）有效；分离组件请配合 DiffusionModelLoader。
+    unet_name = dict_get(inputs, "unet_name")
+    if unet_name is None:
+        print("UNETLoader: unet_name is required")
+        return (None,)
+    path = resolve_model_path(unet_name)
+    pipeline = sd_create()
+    rc = sd_load(pipeline, path, "", "", "", SD_WTYPE_AUTO, 8, 0)
+    if rc != 0:
+        print("UNETLoader: load failed, rc=" + string_of_int(rc))
+        return (None,)
+    handle = make_sd_pipeline_handle(pipeline)
+    return (handle,)
+
+
+register_node("UNETLoader", "Load UNET",
+              "unet_loader", ("MODEL",), False)
+
+
+def vae_loader(inputs):
+    name = get_str(inputs, "vae_name", "")
+    if name == "":
+        print("VAELoader: no vae_name provided")
+        return (None,)
+    return (resolve_model_path(name),)
+
+
+register_node("VAELoader", "Load VAE",
+              "vae_loader", ("VAE",), False)
+
+
+def clip_loader(inputs):
+    name = get_str(inputs, "clip_name", "")
+    if name == "":
+        print("CLIPLoader: no clip_name provided")
+        return (None,)
+    return (resolve_model_path(name),)
+
+
+register_node("CLIPLoader", "Load CLIP",
+              "clip_loader", ("CLIP",), False)
+
+
 def dual_clip_loader(inputs):
     clip_name1 = get_str(inputs, "clip_name1", "")
     clip_name2 = get_str(inputs, "clip_name2", "")
@@ -786,6 +831,12 @@ def call_node(class_type: str, inputs):
         return save_image(inputs)
     elif class_type == "CheckpointLoader":
         return checkpoint_loader_simple(inputs)
+    elif class_type == "UNETLoader":
+        return unet_loader(inputs)
+    elif class_type == "VAELoader":
+        return vae_loader(inputs)
+    elif class_type == "CLIPLoader":
+        return clip_loader(inputs)
     elif class_type == "LoraLoader" or class_type == "LoraLoaderModelOnly":
         return lora_loader(inputs)
     elif class_type == "VAEDecodeTiled":
