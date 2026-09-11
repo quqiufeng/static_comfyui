@@ -17,7 +17,7 @@ FILES = [
 
 # 上游 prelude 无 dict_keys，由 comfycli_ffi.scm 提供 Scheme 实现；
 # 这里用一条 import 让类型检查器认识该名字（import 本身不生成代码）。
-HEADER = "from comfycli_builtins import dict_keys, is_none, is_some, is_link, path_dirname, path_split\n\n"
+HEADER = "from comfycli_builtins import dict_keys, is_link, path_dirname, path_split\n\n"
 
 KEEP_MAIN = {"main.static.py"}
 

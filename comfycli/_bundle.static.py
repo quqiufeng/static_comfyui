@@ -1,4 +1,4 @@
-from comfycli_builtins import dict_keys, is_none, is_some, is_link, path_dirname, path_split
+from comfycli_builtins import dict_keys, is_link, path_dirname, path_split
 
 # === cli_args.static.py ===
 def parse_cli_args() -> dict:
@@ -28,6 +28,8 @@ def parse_cli_args() -> dict:
         arg: str = py_list_ref(args_list, i)
         if arg == "--help" or arg == "-h":
             show_help = True
+            i = i + 1
+            continue
         elif arg == "--checkpoint" or arg == "--ckpt":
             i = i + 1
             if i < argc:
@@ -150,8 +152,13 @@ extern fn sd_pipeline_set_ipadapter(pipeline: ptr, model_path: str, clip_vision_
 extern fn sd_pipeline_set_ipadapter_enabled(pipeline: ptr, enabled: int, weight: float) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_generate_adetailer(pipeline: ptr, prompt: str, negative_prompt: str, width: int, height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires: int, hires_width: int, hires_height: int, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, ad_model_path: str, ad_prompt: str, ad_negative_prompt: str, output_path: str) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_generate_full(pipeline: ptr, prompt: str, negative_prompt: str, width: int, height: int, hires_width: int, hires_height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, clarity: float, sharpen_amount: float, sharpen_radius: int, smart_sharpen_strength: float, smart_sharpen_radius: int, edge_sharpen_amount: float, edge_sharpen_radius: int, edge_sharpen_threshold: float, ad_model_path: str, ad_prompt: str, ad_negative_prompt: str, output_path: str) -> int from "sdcpp_adapter"
-
 extern fn sd_ensure_dir(path: str) -> int from "sdcpp_adapter"
+
+# SD weight type constants (matching stable-diffusion.h sd_type_t)
+SD_WTYPE_F32: int = 0
+SD_WTYPE_F16: int = 1
+SD_WTYPE_AUTO: int = 42  # SD_TYPE_COUNT
+
 
 def sd_create() -> ptr:
     return sd_pipeline_create()
@@ -297,6 +304,10 @@ def sd_generate_full(pipeline: ptr, prompt: str, negative_prompt: str,
         output_path)
 # === nodes.static.py ===
 
+NODE_CLASS_MAPPINGS: dict = make_dict()
+NODE_DISPLAY_NAMES: dict = make_dict()
+
+
 @dataclass
 class SDPipelineHandle:
     pipeline: ptr
@@ -343,13 +354,13 @@ def resolve_model_path(name: str) -> str:
 
 def resolve_prompt_text(inputs, key: str, fallback_key: str) -> str:
     c: Conditioning = dict_get(inputs, key)
-    if is_some(c):
+    if c is not None:
         return c.text
     return get_str(inputs, fallback_key, "")
 
 
 def conditioning_text(c: Conditioning) -> str:
-    if is_none(c):
+    if c is None:
         return ""
     return c.text
 
@@ -415,26 +426,32 @@ def run_sampler(model: SDPipelineHandle, prompt: str, negative_prompt: str,
 
 def register_node(class_type: str, display: str, func_name: str, ret_types: list,
                   is_output: bool):
-    pass
+    meta = make_dict()
+    dict_set(meta, "display", display)
+    dict_set(meta, "function", func_name)
+    dict_set(meta, "return_types", ret_types)
+    dict_set(meta, "output_node", is_output)
+    dict_set(NODE_CLASS_MAPPINGS, class_type, meta)
+    dict_set(NODE_DISPLAY_NAMES, class_type, display)
 
 
 def get_int(inputs, key: str, default: int) -> int:
     v = dict_get(inputs, key)
-    if is_none(v):
+    if v is None:
         return default
     return v
 
 
 def get_float(inputs, key: str, default: float) -> float:
     v = dict_get(inputs, key)
-    if is_none(v):
+    if v is None:
         return default
     return v
 
 
 def get_str(inputs, key: str, default: str) -> str:
     v = dict_get(inputs, key)
-    if is_none(v):
+    if v is None:
         return default
     return v
 
@@ -445,17 +462,17 @@ def checkpoint_loader_simple(inputs):
     clip_g_name = dict_get(inputs, "clip_g_name")
 
     ckpt_path = resolve_model_path(ckpt_name)
-    if is_none(clip_l_name):
+    if clip_l_name is None:
         clip_l_path = ""
     else:
         clip_l_path = resolve_model_path(clip_l_name)
-    if is_none(clip_g_name):
+    if clip_g_name is None:
         clip_g_path = ""
     else:
         clip_g_path = resolve_model_path(clip_g_name)
 
     pipeline = sd_create()
-    rc = sd_load(pipeline, ckpt_path, clip_l_path, clip_g_path, "", 42, 8, 0)
+    rc = sd_load(pipeline, ckpt_path, clip_l_path, clip_g_path, "", SD_WTYPE_AUTO, 8, 0)
     if rc != 0:
         print("SD checkpoint load failed, rc=" + string_of_int(rc))
         return (None, None, None)
@@ -505,7 +522,7 @@ register_node("EmptyLatentImage", "Empty Latent Image",
 
 def ksampler(inputs):
     model: SDPipelineHandle = dict_get(inputs, "model")
-    if is_none(model):
+    if model is None:
         print("KSampler: model is missing")
         return (None,)
 
@@ -513,7 +530,7 @@ def ksampler(inputs):
     negative_prompt = resolve_prompt_text(inputs, "negative", "negative_prompt")
 
     latent: LatentImage = dict_get(inputs, "latent_image")
-    if is_none(latent):
+    if latent is None:
         width = get_int(inputs, "width", 1024)
         height = get_int(inputs, "height", 1024)
     else:
@@ -539,7 +556,7 @@ def vae_decode(inputs):
     vae = dict_get(inputs, "vae")
     # In this backend VAE decode is already performed inside KSampler, so
     # this node just passes the already-decoded image path through.
-    if is_none(samples):
+    if samples is None:
         print("VAEDecode: no samples received")
         return (None,)
     return (samples,)
@@ -554,21 +571,21 @@ def diffusion_model_loader(inputs):
     llm_name = dict_get(inputs, "llm_name")
     vae_name = dict_get(inputs, "vae_name")
 
-    if is_none(diffusion_model_name):
+    if diffusion_model_name is None:
         print("DiffusionModelLoader: diffusion_model_name is required")
         return (None,)
-    if is_none(llm_name):
+    if llm_name is None:
         print("DiffusionModelLoader: llm_name is required")
         return (None,)
 
     diffusion_model_path = resolve_model_path(diffusion_model_name)
     llm_path = resolve_model_path(llm_name)
     vae_path = ""
-    if is_some(vae_name):
+    if vae_name is not None:
         vae_path = resolve_model_path(vae_name)
 
     pipeline = sd_create()
-    rc = sd_load_ex(pipeline, "", "", "", vae_path, 42, 8, 1,
+    rc = sd_load_ex(pipeline, "", "", "", vae_path, SD_WTYPE_AUTO, 8, 1,
                     diffusion_model_path, llm_path)
     if rc != 0:
         print("DiffusionModelLoader: load failed, rc=" + string_of_int(rc))
@@ -584,7 +601,7 @@ register_node("DiffusionModelLoader", "Load Diffusion Model (GGUF)",
 
 def lora_loader(inputs):
     model: SDPipelineHandle = dict_get(inputs, "model")
-    if is_none(model):
+    if model is None:
         print("LORALoader: model is missing")
         return (None,)
     lora_name = get_str(inputs, "lora_name", "")
@@ -608,7 +625,7 @@ register_node("LORALoader", "Load LoRA",
 
 def hires_fix(inputs):
     model: SDPipelineHandle = dict_get(inputs, "model")
-    if is_none(model):
+    if model is None:
         print("HiResFix: model is missing")
         return (None,)
 
@@ -662,7 +679,7 @@ register_node("HiResFix", "HiRes Fix",
 
 def save_image(inputs):
     image_path = dict_get(inputs, "images")
-    if is_none(image_path):
+    if image_path is None:
         print("SaveImage: no image path received")
         return (None,)
     print("Image saved to: " + image_path)
@@ -675,7 +692,7 @@ register_node("SaveImage", "Save Image",
 
 def adetailer(inputs):
     model: SDPipelineHandle = dict_get(inputs, "model")
-    if is_none(model):
+    if model is None:
         print("ADetailer: model is missing")
         return (None,)
 
@@ -705,18 +722,18 @@ register_node("ADetailer", "ADetailer",
 
 def ipadapter_apply(inputs):
     model: SDPipelineHandle = dict_get(inputs, "model")
-    if is_none(model):
+    if model is None:
         print("IPAdapterApply: model is missing")
         return (None,)
     pipeline = model.pipeline
 
     ipadapter_obj: IPAdapterModel = dict_get(inputs, "ipadapter")
     clip_vision_obj: CLIPVisionModel = dict_get(inputs, "clip_vision")
-    if is_some(ipadapter_obj):
+    if ipadapter_obj is not None:
         ipadapter_model = ipadapter_obj.name
     else:
         ipadapter_model = get_str(inputs, "ipadapter_model", "")
-    if is_some(clip_vision_obj):
+    if clip_vision_obj is not None:
         clip_vision_model = clip_vision_obj.name
     else:
         clip_vision_model = get_str(inputs, "clip_vision_model", "")
@@ -782,7 +799,7 @@ register_node("LoadImage", "Load Image",
 
 def preview_image(inputs):
     image_path = dict_get(inputs, "images")
-    if is_none(image_path):
+    if image_path is None:
         print("PreviewImage: no image received")
         return (None,)
     return (image_path,)
@@ -797,7 +814,7 @@ def clip_set_last_layer(inputs):
     layer = get_int(inputs, "stop_at_clip_layer", -1)
     # The backend currently always uses the default CLIP layer;
     # this node is provided for workflow compatibility.
-    if is_none(clip):
+    if clip is None:
         return (None,)
     return (clip,)
 
@@ -844,7 +861,7 @@ register_node("ConditioningAverage", "Conditioning Average",
 
 def latent_upscale(inputs):
     latent = dict_get(inputs, "samples")
-    if is_none(latent):
+    if latent is None:
         print("LatentUpscale: no samples received")
         return (None,)
     # In this simplified backend, width/height directly replace latent dimensions.
@@ -860,7 +877,7 @@ register_node("LatentUpscale", "Latent Upscale",
 
 def latent_crop(inputs):
     latent = dict_get(inputs, "samples")
-    if is_none(latent):
+    if latent is None:
         print("LatentCrop: no samples received")
         return (None,)
     width = get_int(inputs, "width", latent.width)
@@ -884,7 +901,7 @@ register_node("Reroute", "Reroute",
 
 def ksampler_advanced(inputs):
     model: SDPipelineHandle = dict_get(inputs, "model")
-    if is_none(model):
+    if model is None:
         print("KSamplerAdvanced: model is missing")
         return (None,)
 
@@ -892,7 +909,7 @@ def ksampler_advanced(inputs):
     negative_prompt = resolve_prompt_text(inputs, "negative", "negative_prompt")
 
     latent: LatentImage = dict_get(inputs, "latent_image")
-    if is_none(latent):
+    if latent is None:
         width = get_int(inputs, "width", 1024)
         height = get_int(inputs, "height", 1024)
     else:
@@ -1031,14 +1048,14 @@ def execute_prompt(prompt_json: str, output_dir: str):
         i = 0
         while i < n:
             nid = node_ids[i]
-            if is_none(dict_get(executed, nid)):
+            if dict_get(executed, nid) is None:
                 ready = 1
                 dep_list = dict_get(deps, nid)
                 m = len(dep_list)
                 j = 0
                 while j < m:
                     dep_id = dep_list[j]
-                    if is_none(dict_get(executed, dep_id)):
+                    if dict_get(executed, dep_id) is None:
                         ready = 0
                     j = j + 1
                 if ready == 1:
@@ -1053,7 +1070,7 @@ def execute_prompt(prompt_json: str, output_dir: str):
                     progress = 1
             i = i + 1
         if progress == 0:
-            remaining = 0
+            break
     return node_outputs
 # === main.static.py ===
 
@@ -1073,7 +1090,7 @@ def build_prompt_workflow(checkpoint: str, prompt: str, output_path: str, output
                           width: int, height: int, steps: int, cfg: float,
                           seed: int, sampler: str, scheduler: str) -> str:
     # Determine output directory and filename prefix.
-    if is_some(output_path) and str_length(output_path) > 0:
+    if output_path is not None and str_length(output_path) > 0:
         out_dir = path_dirname(output_path)
         if str_length(out_dir) == 0:
             out_dir = "."
@@ -1128,10 +1145,10 @@ def main():
         print_help()
         exit_program(0)
     output_dir = dict_get(args, "output_dir")
-    if is_none(output_dir):
+    if output_dir is None:
         output_dir = "./output"
     workflow_path = dict_get(args, "workflow")
-    if is_some(workflow_path) and str_length(workflow_path) > 0:
+    if workflow_path is not None and str_length(workflow_path) > 0:
         content = file_read_all(workflow_path)
         result = execute_prompt(content, output_dir)
     else:
@@ -1145,7 +1162,7 @@ def main():
         seed = get_int(args, "seed", 42)
         sampler = get_str(args, "sampler", "euler_a")
         scheduler = get_str(args, "scheduler", "discrete")
-        if is_some(checkpoint) and is_some(prompt):
+        if checkpoint is not None and prompt is not None:
             content = build_prompt_workflow(checkpoint, prompt, output_path, output_dir,
                                               width, height, steps, cfg, seed,
                                               sampler, scheduler)

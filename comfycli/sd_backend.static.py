@@ -14,8 +14,13 @@ extern fn sd_pipeline_set_ipadapter(pipeline: ptr, model_path: str, clip_vision_
 extern fn sd_pipeline_set_ipadapter_enabled(pipeline: ptr, enabled: int, weight: float) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_generate_adetailer(pipeline: ptr, prompt: str, negative_prompt: str, width: int, height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires: int, hires_width: int, hires_height: int, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, ad_model_path: str, ad_prompt: str, ad_negative_prompt: str, output_path: str) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_generate_full(pipeline: ptr, prompt: str, negative_prompt: str, width: int, height: int, hires_width: int, hires_height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, clarity: float, sharpen_amount: float, sharpen_radius: int, smart_sharpen_strength: float, smart_sharpen_radius: int, edge_sharpen_amount: float, edge_sharpen_radius: int, edge_sharpen_threshold: float, ad_model_path: str, ad_prompt: str, ad_negative_prompt: str, output_path: str) -> int from "sdcpp_adapter"
-
 extern fn sd_ensure_dir(path: str) -> int from "sdcpp_adapter"
+
+# SD weight type constants (matching stable-diffusion.h sd_type_t)
+SD_WTYPE_F32: int = 0
+SD_WTYPE_F16: int = 1
+SD_WTYPE_AUTO: int = 42  # SD_TYPE_COUNT
+
 
 def sd_create() -> ptr:
     return sd_pipeline_create()

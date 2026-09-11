@@ -13,11 +13,6 @@
 (define (dict_keys d)
   (hashtable-keys d))
 
-;; 判空谓词。上游翻译器不支持 `is None`/`is not None`（会生成非法代码），
-;; 且 dict_get 缺失时返回 #f，故用 eq? #f 表示 None。
-(define (is_none x) (eq? x #f))
-(define (is_some x) (not (eq? x #f)))
-
 ;; workflow 链接 [node_id, output_index] 判定
 (define (is_link x)
   (and (vector? x) (= (vector-length x) 2)

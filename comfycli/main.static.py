@@ -17,7 +17,7 @@ def build_prompt_workflow(checkpoint: str, prompt: str, output_path: str, output
                           width: int, height: int, steps: int, cfg: float,
                           seed: int, sampler: str, scheduler: str) -> str:
     # Determine output directory and filename prefix.
-    if is_some(output_path) and str_length(output_path) > 0:
+    if output_path is not None and str_length(output_path) > 0:
         out_dir = path_dirname(output_path)
         if str_length(out_dir) == 0:
             out_dir = "."
@@ -72,10 +72,10 @@ def main():
         print_help()
         exit_program(0)
     output_dir = dict_get(args, "output_dir")
-    if is_none(output_dir):
+    if output_dir is None:
         output_dir = "./output"
     workflow_path = dict_get(args, "workflow")
-    if is_some(workflow_path) and str_length(workflow_path) > 0:
+    if workflow_path is not None and str_length(workflow_path) > 0:
         content = file_read_all(workflow_path)
         result = execute_prompt(content, output_dir)
     else:
@@ -89,7 +89,7 @@ def main():
         seed = get_int(args, "seed", 42)
         sampler = get_str(args, "sampler", "euler_a")
         scheduler = get_str(args, "scheduler", "discrete")
-        if is_some(checkpoint) and is_some(prompt):
+        if checkpoint is not None and prompt is not None:
             content = build_prompt_workflow(checkpoint, prompt, output_path, output_dir,
                                               width, height, steps, cfg, seed,
                                               sampler, scheduler)

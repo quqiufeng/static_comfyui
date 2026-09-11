@@ -25,6 +25,8 @@ def parse_cli_args() -> dict:
         arg: str = py_list_ref(args_list, i)
         if arg == "--help" or arg == "-h":
             show_help = True
+            i = i + 1
+            continue
         elif arg == "--checkpoint" or arg == "--ckpt":
             i = i + 1
             if i < argc:

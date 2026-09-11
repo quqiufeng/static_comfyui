@@ -1192,6 +1192,16 @@ def translate_binop(op_name, left_node, right_node):
 
 def translate_compare(op, left_node, right_node):
     """根据操作数类型生成特化比较运算符"""
+    # `is` / `is not`：None 判定。None 以 #f 表示（与 dict_get 缺失一致）。
+    if isinstance(op, (ast.Is, ast.IsNot)):
+        negate = isinstance(op, ast.IsNot)
+        if isinstance(right_node, ast.Constant) and right_node.value is None:
+            expr = f"(eq? {translate_expr(left_node)} #f)"
+        elif isinstance(left_node, ast.Constant) and left_node.value is None:
+            expr = f"(eq? {translate_expr(right_node)} #f)"
+        else:
+            expr = f"(eq? {translate_expr(left_node)} {translate_expr(right_node)})"
+        return f"(not {expr})" if negate else expr
     left = translate_expr(left_node)
     right = translate_expr(right_node)
     lt = infer_expr_type(left_node)
@@ -1364,6 +1374,27 @@ def has_return(stmts):
     return False
 
 
+def has_direct_control(stmts, kinds):
+    """检查语句块中是否有 break/continue（不进入嵌套循环）"""
+    for st in stmts:
+        if isinstance(st, kinds):
+            return True
+        if isinstance(st, (ast.While, ast.For)):
+            continue  # 嵌套循环的控制语句不属于当前层
+        if isinstance(st, ast.If):
+            if has_direct_control(st.body, kinds) or (st.orelse and has_direct_control(st.orelse, kinds)):
+                return True
+    return False
+
+
+def has_direct_break(stmts):
+    return has_direct_control(stmts, (ast.Break,))
+
+
+def has_direct_continue(stmts):
+    return has_direct_control(stmts, (ast.Continue,))
+
+
 def translate_block(stmts):
     """翻译一个语句块（if/while 体），正确处理 set! 赋值"""
     exprs = []
@@ -1426,8 +1457,14 @@ def translate_block(stmts):
                 exprs.append(f"(if {test}\n        (begin {' '.join(inner_then)}))")
         elif isinstance(s, ast.While):
             test = translate_expr(s.test)
-            body = translate_block(s.body)
-            exprs.append(f"(let loop () (if {test} (begin {' '.join(body)} (loop))))")
+            body_str = " ".join(translate_block(s.body))
+            if has_direct_break(s.body) or has_direct_continue(s.body):
+                inner = body_str
+                if has_direct_continue(s.body):
+                    inner = f"(call/cc (lambda (__continue__) {inner}))"
+                exprs.append(f"(let loop () (call/cc (lambda (__break__) (if {test} (begin {inner} (loop))))))")
+            else:
+                exprs.append(f"(let loop () (if {test} (begin {body_str} (loop))))")
         elif isinstance(s, ast.With):
             # with 在 block 内简化为直接执行 body
             exprs.extend(translate_block(s.body))
@@ -1460,6 +1497,10 @@ def translate_block(stmts):
             exprs.append("(void)")
         elif isinstance(s, ast.Delete):
             exprs.append(f";; del: {ast.dump(s)}")
+        elif isinstance(s, ast.Continue):
+            exprs.append("(__continue__ #f)")
+        elif isinstance(s, ast.Break):
+            exprs.append("(__break__ #f)")
         elif isinstance(s, ast.Call):
             exprs.append(translate_expr(s))
         else:
@@ -1976,13 +2017,20 @@ def typecheck_module(tree):
     # 先收集函数签名，让函数之间可以互相检查
     collect_function_signatures(tree)
     arities = collect_function_arities(tree)
-    # 顶层变量类型环境（目前只有 enum 常量等）
+    # 顶层变量类型环境（enum 常量 + 模块级变量/常量）
     module_env = {}
     for node in tree.body:
         if isinstance(node, ast.ClassDef) and is_enum_class(node):
             for item in node.body:
                 if isinstance(item, ast.Assign) and len(item.targets) == 1 and isinstance(item.targets[0], ast.Name):
                     module_env[f"{node.name}_{item.targets[0].id}"] = Type("int")
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            declared = parse_type(node)
+            module_env[node.target.id] = declared if declared else Type("Any")
+        elif isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name):
+                    module_env[t.id] = Type("Any")
     for node in tree.body:
         if isinstance(node, ast.FunctionDef):
             typecheck_function(node, arities, module_env)
@@ -2903,9 +2951,14 @@ def translate_function(node, source_file=""):
                 body_exprs.append(f";; for loop (untranslated)")
         elif isinstance(stmt, ast.While):
             test = translate_expr(stmt.test)
-            body_parts = translate_block(stmt.body)
-            body_str = " ".join(body_parts)
-            body_exprs.append(f"(let loop () (if {test} (begin {body_str} (loop))))")
+            body_str = " ".join(translate_block(stmt.body))
+            if has_direct_break(stmt.body) or has_direct_continue(stmt.body):
+                inner = body_str
+                if has_direct_continue(stmt.body):
+                    inner = f"(call/cc (lambda (__continue__) {inner}))"
+                body_exprs.append(f"(let loop () (call/cc (lambda (__break__) (if {test} (begin {inner} (loop))))))")
+            else:
+                body_exprs.append(f"(let loop () (if {test} (begin {body_str} (loop))))")
         elif isinstance(stmt, ast.Expr):
             body_exprs.append(translate_expr(stmt.value))
         elif isinstance(stmt, ast.With):
@@ -3115,6 +3168,12 @@ def _run_pipeline(input_files):
             output_parts.append(translate_class(node))
         elif isinstance(node, ast.FunctionDef):
             output_parts.append(translate_function(node, source_filename))
+        elif isinstance(node, ast.AnnAssign):
+            if isinstance(node.target, ast.Name) and node.value is not None:
+                output_parts.append(f"(define {mangle_name(node.target.id)} {translate_expr(node.value)})")
+        elif isinstance(node, ast.Assign):
+            if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                output_parts.append(f"(define {mangle_name(node.targets[0].id)} {translate_expr(node.value)})")
     
     # 顶层表达式（调用 main）
     output_parts.append("")
