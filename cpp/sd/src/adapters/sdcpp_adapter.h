@@ -447,6 +447,15 @@ int sd_blur_image(const char* input_path, const char* output_path, float sigma);
 /** Stack two images vertically (second resized to first's width) and save as PNG. */
 int sd_batch_images(const char* path1, const char* path2, const char* output_path);
 
+/** Composite src onto dest at (x,y) using an optional grayscale mask. Saves PNG. */
+int sd_composite_masked(const char* dest_path, const char* src_path,
+                        const char* mask_path, const char* output_path,
+                        int x, int y);
+
+/** Crop an image to (x,y,width,height) and save as PNG. Returns 0 on success. */
+int sd_crop_image(const char* input_path, const char* output_path,
+                  int x, int y, int width, int height);
+
 #ifdef __cplusplus
 }
 #endif

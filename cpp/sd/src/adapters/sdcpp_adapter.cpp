@@ -1133,6 +1133,57 @@ int sd_batch_images(const char* path1, const char* path2, const char* output_pat
     return 0;
 }
 
+int sd_composite_masked(const char* dest_path, const char* src_path,
+                        const char* mask_path, const char* output_path,
+                        int x, int y) {
+    if (!dest_path || !src_path || !output_path || x < 0 || y < 0) return -1;
+    cv::Mat dst = cv::imread(dest_path, cv::IMREAD_COLOR);
+    cv::Mat src = cv::imread(src_path, cv::IMREAD_COLOR);
+    if (dst.empty() || src.empty()) {
+        std::fprintf(stderr, "[C API] sd_composite_masked: failed to read inputs\n");
+        return -2;
+    }
+    if (x + src.cols > dst.cols || y + src.rows > dst.rows) {
+        std::fprintf(stderr, "[C API] sd_composite_masked: source out of bounds\n");
+        return -4;
+    }
+    cv::Rect roi(x, y, src.cols, src.rows);
+    if (mask_path && mask_path[0] != '\0') {
+        cv::Mat m = cv::imread(mask_path, cv::IMREAD_GRAYSCALE);
+        if (m.empty()) {
+            std::fprintf(stderr, "[C API] sd_composite_masked: failed to read mask\n");
+            return -3;
+        }
+        cv::resize(m, m, src.size());
+        src.copyTo(dst(roi), m);
+    } else {
+        src.copyTo(dst(roi));
+    }
+    cv::Mat rgb;
+    cv::cvtColor(dst, rgb, cv::COLOR_BGR2RGB);
+    if (!save_png(output_path, rgb.data, rgb.cols, rgb.rows, rgb.channels())) return -5;
+    return 0;
+}
+
+int sd_crop_image(const char* input_path, const char* output_path,
+                  int x, int y, int width, int height) {
+    if (!input_path || !output_path || x < 0 || y < 0 || width <= 0 || height <= 0) return -1;
+    cv::Mat img = cv::imread(input_path, cv::IMREAD_COLOR);
+    if (img.empty()) {
+        std::fprintf(stderr, "[C API] sd_crop_image: failed to read %s\n", input_path);
+        return -2;
+    }
+    if (x + width > img.cols || y + height > img.rows) {
+        std::fprintf(stderr, "[C API] sd_crop_image: crop out of bounds\n");
+        return -4;
+    }
+    cv::Mat out = img(cv::Rect(x, y, width, height)).clone();
+    cv::Mat rgb;
+    cv::cvtColor(out, rgb, cv::COLOR_BGR2RGB);
+    if (!save_png(output_path, rgb.data, rgb.cols, rgb.rows, rgb.channels())) return -3;
+    return 0;
+}
+
 int sd_invert_image(const char* input_path, const char* output_path) {
     if (!input_path || !output_path) return -1;
     cv::Mat img = cv::imread(input_path, cv::IMREAD_COLOR);

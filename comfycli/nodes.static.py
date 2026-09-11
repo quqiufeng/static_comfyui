@@ -765,6 +765,50 @@ register_node("ImageBatch", "Batch Images",
               "image_batch", ("IMAGE",), False)
 
 
+def image_composite_masked(inputs):
+    dest = dict_get(inputs, "destination")
+    src = dict_get(inputs, "source")
+    if dest is None or src is None:
+        print("ImageCompositeMasked: need destination and source")
+        return (None,)
+    mask = dict_get(inputs, "mask")
+    if mask is None:
+        mask = ""
+    x = get_int(inputs, "x", 0)
+    y = get_int(inputs, "y", 0)
+    out = "/tmp/comfycli_composite.png"
+    rc = sd_composite_masked(dest, src, mask, out, x, y)
+    if rc != 0:
+        print("ImageCompositeMasked: failed, rc=" + string_of_int(rc))
+        return (None,)
+    return (out,)
+
+
+register_node("ImageCompositeMasked", "Image Composite Masked",
+              "image_composite_masked", ("IMAGE",), False)
+
+
+def image_crop(inputs):
+    image = dict_get(inputs, "image")
+    if image is None:
+        print("ImageCrop: no image received")
+        return (None,)
+    x = get_int(inputs, "x", 0)
+    y = get_int(inputs, "y", 0)
+    width = get_int(inputs, "width", 512)
+    height = get_int(inputs, "height", 512)
+    out = "/tmp/comfycli_crop.png"
+    rc = sd_crop_image(image, out, x, y, width, height)
+    if rc != 0:
+        print("ImageCrop: failed, rc=" + string_of_int(rc))
+        return (None,)
+    return (out,)
+
+
+register_node("ImageCrop", "Crop Image",
+              "image_crop", ("IMAGE",), False)
+
+
 def image_to_mask(inputs):
     image = dict_get(inputs, "image")
     if image is None:
@@ -1095,6 +1139,10 @@ def call_node(class_type: str, inputs):
         return image_blur(inputs)
     elif class_type == "ImageBatch":
         return image_batch(inputs)
+    elif class_type == "ImageCompositeMasked":
+        return image_composite_masked(inputs)
+    elif class_type == "ImageCrop":
+        return image_crop(inputs)
     elif class_type == "ImageToMask":
         return image_to_mask(inputs)
     elif class_type == "MaskToImage":
