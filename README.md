@@ -128,7 +128,7 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 
 ## 已实现节点
 
-以下 ComfyUI 节点已在 `comfycli/nodes.static.py` 中实现（共 **64 个**），可直接在工作流 JSON 中使用。节点数量持续按需求扩展。
+以下 ComfyUI 节点已在 `comfycli/nodes.static.py` 中实现（共 **70 个**），可直接在工作流 JSON 中使用。节点数量持续按需求扩展。
 
 ### 模型加载
 
@@ -377,7 +377,7 @@ ComfyUI 是 Python ML 生态中最复杂的纯推理项目之一：
 ```
 [x] cli_args.static.py        CLI 参数解析
 [x] sd_backend.static.py      stable-diffusion.cpp C API FFI 封装（extern fn）
-[x] nodes.static.py           64 个节点定义
+[x] nodes.static.py           70 个节点定义
 [x] execution.static.py       DAG 拓扑排序 + 输入链接解析
 [x] main.static.py            CLI 入口（workflow JSON / --checkpoint --prompt）
 [x] comfycli_ffi.scm          共享库加载 + 上游缺失内置
@@ -411,7 +411,7 @@ ComfyUI 是 Python ML 生态中最复杂的纯推理项目之一：
 - 无自定义节点动态加载——自定义节点需编译期注册
 - CLI 先行，无 WebSocket/HTTP UI
 - 同步执行，无 asyncio
-- 已实现 64 个核心节点，完整 ComfyUI 节点集仍在按需扩展中
+- 已实现 70 个核心节点，完整 ComfyUI 节点集仍在按需扩展中
 
 ## 项目文件
 

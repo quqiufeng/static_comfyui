@@ -967,6 +967,8 @@ def load_image(inputs):
 
 register_node("LoadImage", "Load Image",
               "load_image", ("IMAGE", "MASK"), False)
+register_node("LoadImageOutput", "Load Image (from Outputs)",
+              "load_image", ("IMAGE", "MASK"), False)
 
 
 def image_scale(inputs):
@@ -1412,6 +1414,58 @@ register_node("SetLatentNoiseMask", "SetLatentNoiseMask",
               "latent_passthrough", ("LATENT",), False)
 
 
+def style_model_loader(inputs):
+    name = get_str(inputs, "style_model_name", "")
+    return (name,)
+
+
+register_node("StyleModelLoader", "Load Style Model",
+              "style_model_loader", ("STYLE_MODEL",), False)
+
+
+def style_model_apply(inputs):
+    # 风格模型在 sd.cpp 后端无对应能力，透传条件
+    c: Conditioning = dict_get(inputs, "conditioning")
+    if c is None:
+        return (None,)
+    return (c,)
+
+
+register_node("StyleModelApply", "Apply Style Model",
+              "style_model_apply", ("CONDITIONING",), False)
+
+
+def unclip_conditioning(inputs):
+    c: Conditioning = dict_get(inputs, "conditioning")
+    if c is None:
+        return (None,)
+    return (c,)
+
+
+register_node("unCLIPConditioning", "Apply unCLIP Conditioning",
+              "unclip_conditioning", ("CONDITIONING",), False)
+
+
+def gligen_loader(inputs):
+    name = get_str(inputs, "gligen_name", "")
+    return (name,)
+
+
+register_node("GLIGENLoader", "Load GLIGEN",
+              "gligen_loader", ("GLIGEN",), False)
+
+
+def gligen_textbox_apply(inputs):
+    c: Conditioning = dict_get(inputs, "conditioning_to")
+    if c is None:
+        return (None,)
+    return (c,)
+
+
+register_node("GLIGENTextBoxApply", "GLIGEN Textbox Apply",
+              "gligen_textbox_apply", ("CONDITIONING",), False)
+
+
 def call_node(class_type: str, inputs):
     if class_type == "CheckpointLoaderSimple":
         return checkpoint_loader_simple(inputs)
@@ -1485,6 +1539,18 @@ def call_node(class_type: str, inputs):
         return mask_to_image(inputs)
     elif class_type == "CLIPVisionEncode":
         return clip_vision_encode(inputs)
+    elif class_type == "LoadImageOutput":
+        return load_image(inputs)
+    elif class_type == "StyleModelLoader":
+        return style_model_loader(inputs)
+    elif class_type == "StyleModelApply":
+        return style_model_apply(inputs)
+    elif class_type == "unCLIPConditioning":
+        return unclip_conditioning(inputs)
+    elif class_type == "GLIGENLoader":
+        return gligen_loader(inputs)
+    elif class_type == "GLIGENTextBoxApply":
+        return gligen_textbox_apply(inputs)
     elif class_type == "PreviewImage":
         return preview_image(inputs)
     elif class_type == "Reroute":
