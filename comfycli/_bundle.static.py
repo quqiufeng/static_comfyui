@@ -85,7 +85,7 @@ def parse_cli_args() -> dict:
         elif arg == "--lowvram":
             lowvram = True
         else:
-            if arg[0] != "-":
+            if not str_starts_with(arg, "-"):
                 workflow = arg
         i = i + 1
 
@@ -433,6 +433,20 @@ def register_node(class_type: str, display: str, func_name: str, ret_types: list
     dict_set(meta, "output_node", is_output)
     dict_set(NODE_CLASS_MAPPINGS, class_type, meta)
     dict_set(NODE_DISPLAY_NAMES, class_type, display)
+
+
+def node_exists(class_type: str) -> bool:
+    return dict_get(NODE_CLASS_MAPPINGS, class_type) is not None
+
+
+def node_return_count(class_type: str) -> int:
+    meta = dict_get(NODE_CLASS_MAPPINGS, class_type)
+    if meta is None:
+        return 0
+    rt = dict_get(meta, "return_types")
+    if rt is None:
+        return 0
+    return len(rt)
 
 
 def get_int(inputs, key: str, default: int) -> int:
@@ -1060,8 +1074,48 @@ def resolve_all(inputs, node_outputs):
     return resolved
 
 
+def validate_prompt(prompt) -> int:
+    # 对照 ComfyUI validate_inputs：节点类型存在 + 链接指向合法节点/输出
+    node_ids = dict_keys(prompt)
+    i = 0
+    ni = len(node_ids)
+    while i < ni:
+        nid = node_ids[i]
+        node = dict_get(prompt, nid)
+        class_type = dict_get(node, "class_type")
+        if not node_exists(class_type):
+            print("validate: unknown node type '" + class_type + "' at node " + nid)
+            return 1
+        raw_inputs = dict_get(node, "inputs")
+        input_keys = dict_keys(raw_inputs)
+        k = 0
+        nk = len(input_keys)
+        while k < nk:
+            key = input_keys[k]
+            val = dict_get(raw_inputs, key)
+            if is_link(val):
+                src_id = val[0]
+                src_idx = val[1]
+                src_node = dict_get(prompt, src_id)
+                if src_node is None:
+                    print("validate: node " + nid + " input '" + key + "' links to missing node " + src_id)
+                    return 2
+                src_class = dict_get(src_node, "class_type")
+                rc = node_return_count(src_class)
+                if src_idx < 0 or src_idx >= rc:
+                    print("validate: node " + nid + " input '" + key + "' links to invalid output " + string_of_int(src_idx) + " of " + src_class)
+                    return 3
+            k = k + 1
+        i = i + 1
+    return 0
+
+
 def execute_prompt(prompt_json: str, output_dir: str):
     prompt = parse_json(prompt_json)
+    vrc = validate_prompt(prompt)
+    if vrc != 0:
+        print("Prompt validation failed, rc=" + string_of_int(vrc))
+        return make_dict()
     node_ids = dict_keys(prompt)
     deps, inputs_cache = build_deps(prompt)
     node_outputs = make_dict()
@@ -1096,6 +1150,8 @@ def execute_prompt(prompt_json: str, output_dir: str):
             i = i + 1
         if progress == 0:
             break
+    if remaining > 0:
+        print("Prompt has a cycle or missing dependency: " + string_of_int(remaining) + " node(s) not executed")
     return node_outputs
 # === main.static.py ===
 
@@ -1174,7 +1230,9 @@ def main():
         output_dir = "./output"
     workflow_path = dict_get(args, "workflow")
     if workflow_path is not None and str_length(workflow_path) > 0:
-        content = file_read_all(workflow_path)
+        fp = file_open(workflow_path, "r")
+        content = file_read_all(fp)
+        file_close(fp)
         result = execute_prompt(content, output_dir)
     else:
         prompt = dict_get(args, "prompt")

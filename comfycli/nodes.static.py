@@ -132,6 +132,20 @@ def register_node(class_type: str, display: str, func_name: str, ret_types: list
     dict_set(NODE_DISPLAY_NAMES, class_type, display)
 
 
+def node_exists(class_type: str) -> bool:
+    return dict_get(NODE_CLASS_MAPPINGS, class_type) is not None
+
+
+def node_return_count(class_type: str) -> int:
+    meta = dict_get(NODE_CLASS_MAPPINGS, class_type)
+    if meta is None:
+        return 0
+    rt = dict_get(meta, "return_types")
+    if rt is None:
+        return 0
+    return len(rt)
+
+
 def get_int(inputs, key: str, default: int) -> int:
     v = dict_get(inputs, key)
     if v is None:

@@ -76,7 +76,9 @@ def main():
         output_dir = "./output"
     workflow_path = dict_get(args, "workflow")
     if workflow_path is not None and str_length(workflow_path) > 0:
-        content = file_read_all(workflow_path)
+        fp = file_open(workflow_path, "r")
+        content = file_read_all(fp)
+        file_close(fp)
         result = execute_prompt(content, output_dir)
     else:
         prompt = dict_get(args, "prompt")

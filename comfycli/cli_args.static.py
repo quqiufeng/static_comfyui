@@ -82,7 +82,7 @@ def parse_cli_args() -> dict:
         elif arg == "--lowvram":
             lowvram = True
         else:
-            if arg[0] != "-":
+            if not str_starts_with(arg, "-"):
                 workflow = arg
         i = i + 1
 

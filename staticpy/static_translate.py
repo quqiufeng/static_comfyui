@@ -3174,6 +3174,9 @@ def _run_pipeline(input_files):
         elif isinstance(node, ast.Assign):
             if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
                 output_parts.append(f"(define {mangle_name(node.targets[0].id)} {translate_expr(node.value)})")
+        elif isinstance(node, ast.Expr):
+            # 顶层表达式语句（如 register_node(...) 调用）
+            output_parts.append(translate_expr(node.value))
     
     # 顶层表达式（调用 main）
     output_parts.append("")
