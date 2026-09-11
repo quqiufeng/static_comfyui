@@ -134,13 +134,52 @@ LoRA、ControlNet、HiRes Fix、**VAE tiling（含 tile cap）**、sampler/sched
 
 升级目标是升级 `/opt/sd` 到新的 commit，保持本项目能编译并通过验证。
 
+> **为什么不能全自动化**：fetch/编译/回归/更新 lock 是机械步骤，但 **patch rebase、C API 映射、枚举/行为语义判断** 需要理解上游改动意图后人工（AI）介入。本节是给执行者的 playbook。
+
+### 5.0 依赖面（升级前必看）
+
+适配层对 sd.cpp 的依赖集中在 `sdcpp_adapter.cpp`，升级时按以下清单逐一核对。
+
+**用到的函数 / 类型**
+
+| 类别 | 符号 |
+|------|------|
+| 生命周期 | `new_sd_ctx` / `free_sd_ctx` / `generate_image` / `free_sd_images` |
+| 初始化 | `sd_ctx_params_init` / `sd_img_gen_params_init` |
+| 字符串→枚举 | `str_to_sample_method` / `str_to_scheduler` / `str_to_sd_hires_upscaler` |
+| ControlNet 热插拔 | `sd_ctx_load_control_net` / `sd_ctx_unload_control_net` |
+| ADetailer | `new_adetailer_ctx` / `adetail_image` / `free_adetailer_ctx` |
+| 日志 | `sd_set_log_callback` |
+| 结构体 | `sd_ctx_params_t` / `sd_img_gen_params_t` / `sd_image_t` / `sd_lora_t` / `sd_adetailer_params_t` / `sd_log_level_t` / `sd_type_t` |
+
+**写入 `sd_ctx_params_t` 的字段**（`SDPipeline::load`）
+
+`model_path, clip_l_path, clip_g_path, clip_vision_path, vae_path, diffusion_model_path, llm_path, n_threads, wtype, rng_type, sampler_rng_type, prediction, flash_attn, diffusion_flash_attn, enable_mmap, lora_apply_mode, backend, params_backend`
+
+**写入 `sd_img_gen_params_t` 的字段**（`SDPipeline::generate`）
+
+`prompt, negative_prompt, width, height, clip_skip, seed, batch_count, sample_params.{sample_steps, guidance.{txt_cfg, img_cfg, distilled_guidance}, sample_method, scheduler, eta}, loras/lora_count, vae_tiling_params.{enabled, tile_size_x, tile_size_y, target_overlap}, hires.{enabled, upscaler, target_width, target_height, scale, steps, denoising_strength, upscale_tile_size}, freeu.{enabled, b1, b2, s1, s2}, sag.{enabled, scale}, ipadapter.{tokens, num_tokens, token_dim, weight}, init_image, strength, control_image, control_strength, mask_image`
+
+**常见破坏 → 修法**
+
+| 上游变化 | 症状 | 修法 |
+|----------|------|------|
+| `sd_ctx_params_t` 新增必填字段 | 加载失败 / 行为异常 | 在 `ModelConfig` 加字段 → `SDPipeline::load` 映射 |
+| `sd_img_gen_params_t` 新增字段 | 通常无碍（init 后默认值安全） | 需要时才在 `ImageGenerationParams` 暴露 |
+| 结构体字段**改名** | 编译错误（点出字段） | 改适配层对应赋值 |
+| 枚举值新增/删除 | 编译错误或落默认 | 检查 `str_to_*` 映射与 fallback |
+| `new_sd_ctx` / `generate_image` 签名变化 | 编译错误 | 改 `load()` / `generate()` 调用 |
+| FreeU/SAG 被官方合入 | patch 冲突 | 删 patch 对应部分，改用官方字段 |
+
+> **关键抗性**：适配层总是 `sd_*_params_init()` 先零初始化再按字段名赋值，所以"新增字段"通常自动安全；只有"删 / 改名 / 改签名 / 改枚举"才会编译报错，且报错点集中在本文件。
+
 ### 5.1 准备
 
 ```bash
 cd /opt/sd
 git fetch origin
 git log --oneline origin/master -30     # 查看最近的提交
-git diff bb84971..origin/master --stat   # 查看变更概览
+git diff 5e4e03c..origin/master --stat   # 查看变更概览
 ```
 
 ### 5.2 第一步：检查 patch 能否干净应用
@@ -203,7 +242,7 @@ git apply --reject /opt/static_comfyui/cpp/sd/patches/sdcpp-freeu-sag-v2.patch 2
 ### 5.4 第二步：检查 sd.cpp C API 变化
 
 ```bash
-git diff bb84971..<new> -- include/stable-diffusion.h
+git diff 5e4e03c..<new> -- include/stable-diffusion.h
 ```
 
 逐项检查以下内容：
