@@ -52,8 +52,9 @@ if [ "$BUNDLE_STALE" = "1" ]; then
   echo "  重新生成 bundle..."
   python3 "$PROJECT_DIR/concat_src.py"
 fi
-GLIBC_SYSROOT="$GLIBC_SYSROOT" bash "$STATICPY_DIR/static_build.sh" \
-  "$PROJECT_DIR/comfycli/_bundle.static.py" comfycli-bin
+GLIBC_SYSROOT="$GLIBC_SYSROOT" bash "$STATICPY_DIR/static_build_comfycli.sh" \
+  "$PROJECT_DIR/comfycli/_bundle.static.py" comfycli-bin \
+  "$PROJECT_DIR/comfycli/comfycli_ffi.scm"
 echo "  OK"
 
 echo ""

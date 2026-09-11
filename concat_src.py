@@ -5,26 +5,19 @@ import re
 
 BASE = os.path.join(os.path.dirname(__file__), "comfycli")
 
+# 仅保留 sd.cpp 后端实际使用的模块（torch 时代的模型栈已废弃）。
+# 顺序 = 依赖顺序（被依赖者在前）。
 FILES = [
-    "comfy_types.static.py",
-    "folder_paths.static.py",
     "cli_args.static.py",
-    "supported_models_base.static.py",
-    "supported_models.static.py",
-    "model_detection.static.py",
-    "model_sampling.static.py",
-    "latent_formats.static.py",
-    "model_base.static.py",
-    "model_management.static.py",
-    "sd.static.py",
-    "clip_model.static.py",
-    "k_diffusion/sampling.static.py",
-    "controlnet.static.py",
     "sd_backend.static.py",
     "nodes.static.py",
     "execution.static.py",
     "main.static.py",
 ]
+
+# 上游 prelude 无 dict_keys，由 comfycli_ffi.scm 提供 Scheme 实现；
+# 这里用一条 import 让类型检查器认识该名字（import 本身不生成代码）。
+HEADER = "from comfycli_builtins import dict_keys, is_none, is_some, is_link, path_dirname, path_split\n\n"
 
 KEEP_MAIN = {"main.static.py"}
 
@@ -48,7 +41,7 @@ def concat():
         lines.append(f"# === {fname} ===\n")
         lines.append(cleaned)
         lines.append("\n")
-    return "".join(lines)
+    return HEADER + "".join(lines)
 
 if __name__ == "__main__":
     output = concat()

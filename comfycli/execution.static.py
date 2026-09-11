@@ -66,14 +66,14 @@ def execute_prompt(prompt_json: str, output_dir: str):
         i = 0
         while i < n:
             nid = node_ids[i]
-            if dict_get(executed, nid) is None:
+            if is_none(dict_get(executed, nid)):
                 ready = 1
                 dep_list = dict_get(deps, nid)
                 m = len(dep_list)
                 j = 0
                 while j < m:
                     dep_id = dep_list[j]
-                    if dict_get(executed, dep_id) is None:
+                    if is_none(dict_get(executed, dep_id)):
                         ready = 0
                     j = j + 1
                 if ready == 1:
@@ -88,7 +88,7 @@ def execute_prompt(prompt_json: str, output_dir: str):
                     progress = 1
             i = i + 1
         if progress == 0:
-            break
+            remaining = 0
     return node_outputs
 
 

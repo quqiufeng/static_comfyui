@@ -1,402 +1,8 @@
-# === comfy_types.static.py ===
-class ModelType:
-    EPS = 1
-    V_PREDICTION = 2
-    V_PREDICTION_EDM = 3
-    STABLE_CASCADE = 4
-    EDM = 5
-    FLOW = 6
-    V_PREDICTION_CONTINUOUS = 7
-    FLUX = 8
-    IMG_TO_IMG = 9
-    FLOW_COSMOS = 10
-    IMG_TO_IMG_FLOW = 11
-    V_PREDICTION_DDPM = 12
-
-
-class CLIPType:
-    STABLE_DIFFUSION = 1
-    STABLE_CASCADE = 2
-    SD3 = 3
-    STABLE_AUDIO = 4
-    HUNYUAN_DIT = 5
-    FLUX = 6
-    MOCHI = 7
-    LTXV = 8
-    HUNYUAN_VIDEO = 9
-    PIXART = 10
-    COSMOS = 11
-    LUMINA2 = 12
-    WAN = 13
-    HIDREAM = 14
-    CHROMA = 15
-    ACE = 16
-    OMNIGEN2 = 17
-    QWEN_IMAGE = 18
-    HUNYUAN_IMAGE = 19
-    HUNYUAN_VIDEO_15 = 20
-    OVIS = 21
-    KANDINSKY5 = 22
-    KANDINSKY5_IMAGE = 23
-    NEWBIE = 24
-    FLUX2 = 25
-    LONGCAT_IMAGE = 26
-    COGVIDEOX = 27
-    LENS = 28
-    PIXELDIT = 29
-    IDEOGRAM4 = 30
-    BOOGU = 31
-    KREA2 = 32
-
-
-class TEModel:
-    CLIP_L = 1
-    CLIP_H = 2
-    CLIP_G = 3
-    T5_XXL = 4
-    T5_XL = 5
-    T5_BASE = 6
-    LLAMA3_8 = 7
-    T5_XXL_OLD = 8
-    GEMMA_2_2B = 9
-    QWEN25_3B = 10
-    QWEN25_7B = 11
-    BYT5_SMALL_GLYPH = 12
-    GEMMA_3_4B = 13
-    MISTRAL3_24B = 14
-    MISTRAL3_24B_PRUNED_FLUX2 = 15
-    QWEN3_4B = 16
-    QWEN3_2B = 17
-    GEMMA_3_12B = 18
-    JINA_CLIP_2 = 19
-    QWEN3_8B = 20
-    QWEN3_06B = 21
-    GEMMA_3_4B_VISION = 22
-    QWEN35_08B = 23
-    QWEN35_2B = 24
-    QWEN35_4B = 25
-    QWEN35_9B = 26
-    QWEN35_27B = 27
-# === folder_paths.static.py ===
-supported_pt_extensions: list[str] = [".ckpt", ".pt", ".pt2", ".bin", ".pth", ".safetensors", ".pkl", ".sft"]
-
-folder_names_and_paths: dict = make_dict()
-filename_list_cache: dict = make_dict()
-extension_mimetypes_cache: dict = make_dict()
-
-base_path: str = ""
-
-# Output/temp/input directories
-output_directory: str = ""
-temp_directory: str = ""
-input_directory: str = ""
-user_directory: str = ""
-
-
-# Legacy folder name mapping
-def map_legacy(folder_name: str) -> str:
-    if folder_name == "unet":
-        return "diffusion_models"
-    if folder_name == "clip":
-        return "text_encoders"
-    return folder_name
-
-
-# Path utility functions (replacements for os.path.*)
-def path_join2(a: str, b: str) -> str:
-    if str_ends_with(a, "/"):
-        return a + b
-    return a + "/" + b
-
-
-def path_join3(a: str, b: str, c: str) -> str:
-    return path_join2(path_join2(a, b), c)
-
-
-def path_dirname(p: str) -> str:
-    # Find last /, return everything before it
-    pos: int = 0
-    i: int = 0
-    while i < str_length(p):
-        if str_slice(p, i, i + 1) == "/":
-            pos = i
-        i = i + 1
-    if pos == 0:
-        return ""
-    return str_slice(p, 0, pos)
-
-
-def path_split(p: str) -> list[str]:
-    # Split into (dir, filename)
-    pos: int = 0
-    i: int = 0
-    while i < str_length(p):
-        if str_slice(p, i, i + 1) == "/":
-            pos = i
-        i = i + 1
-    if pos == 0:
-        return ["", p]
-    return [str_slice(p, 0, pos), str_slice(p, pos + 1, str_length(p))]
-
-
-# Folder registration
-def add_model_folder_path(folder_name: str, full_folder_path: str, is_default: int):
-    name: str = map_legacy(folder_name)
-    entry = dict_get(folder_names_and_paths, name)
-    if entry:
-        paths = py_list_ref(entry, 0)
-        exts = py_list_ref(entry, 1)
-    else:
-        paths = py_list()
-        exts = py_list()
-        dict_set(folder_names_and_paths, name, [paths, exts])
-    if is_default:
-        paths = py_list_append(full_folder_path, paths)
-    else:
-        paths = py_list_append(paths, full_folder_path)
-    dict_set(folder_names_and_paths, name, [paths, exts])
-
-
-def get_folder_paths(folder_name: str) -> list[str]:
-    entry = dict_get(folder_names_and_paths, folder_name)
-    if entry:
-        return py_list_ref(entry, 0)
-    return py_list()
-
-
-# File search
-def get_full_path(folder_name: str, filename: str) -> str:
-    paths: list[str] = get_folder_paths(folder_name)
-    i: int = 0
-    while i < py_list_length(paths):
-        dir_path: str = py_list_ref(paths, i)
-        full: str = path_join2(dir_path, filename)
-        if os_file_exists(full):
-            return full
-        i = i + 1
-    return ""
-
-
-def filter_files_extensions(files: list[str], extensions: list[str]) -> list[str]:
-    if py_list_length(extensions) == 0:
-        return files
-    result: list[str] = py_list()
-    i: int = 0
-    while i < py_list_length(files):
-        f: str = py_list_ref(files, i)
-        j: int = 0
-        found: bool = False
-        while j < py_list_length(extensions):
-            ext: str = py_list_ref(extensions, j)
-            if str_ends_with(f, ext):
-                found = True
-            j = j + 1
-        if found:
-            result = py_list_append(result, f)
-        i = i + 1
-    return result
-
-
-def get_filename_list(folder_name: str) -> list[str]:
-    name: str = map_legacy(folder_name)
-    entry = dict_get(folder_names_and_paths, name)
-    if entry is False:
-        return py_list()
-    paths: list[str] = py_list_ref(entry, 0)
-    exts: list[str] = py_list_ref(entry, 1)
-
-    all_files: list[str] = py_list()
-    i: int = 0
-    while i < py_list_length(paths):
-        dir_path: str = py_list_ref(paths, i)
-        if os_file_exists(dir_path):
-            files: list[str] = os_list_dir(dir_path)
-            j: int = 0
-            while j < py_list_length(files):
-                f: str = py_list_ref(files, j)
-                full: str = path_join2(dir_path, f)
-                if os_file_exists(full):
-                    all_files = py_list_append(all_files, f)
-                j = j + 1
-        i = i + 1
-    return filter_files_extensions(all_files, exts)
-
-
-# Output path generation
-def get_save_image_path(filename_prefix: str, output_dir: str, image_width: int, image_height: int):
-    # Compute variables for filename
-    prefix: str = filename_prefix
-    prefix = str_replace(prefix, "%width%", string_of_int(image_width))
-    prefix = str_replace(prefix, "%height%", string_of_int(image_height))
-    prefix = str_replace(prefix, "%year%", "0000")
-    prefix = str_replace(prefix, "%month%", "00")
-    prefix = str_replace(prefix, "%day%", "00")
-
-    # Ensure output directory exists
-    if os_file_exists(output_dir) is False:
-        os_mkdir(output_dir)
-
-    # Find next counter
-    existing: list[str] = os_list_dir(output_dir)
-    max_counter: int = 0
-    i: int = 0
-    while i < py_list_length(existing):
-        f: str = py_list_ref(existing, i)
-        if str_starts_with(f, prefix):
-            rest: str = str_slice(f, str_length(prefix), str_length(f))
-            num: int = string_to_int(rest)
-            if num > max_counter:
-                max_counter = num
-        i = i + 1
-    counter: int = max_counter + 1
-
-    # Return tuple
-    return [output_dir, prefix, counter, "", prefix]
-
-
-# Directory management
-def get_output_directory() -> str:
-    return output_directory
-
-
-def set_output_directory(dir: str):
-    global output_directory
-    output_directory = dir
-
-
-def get_temp_directory() -> str:
-    return temp_directory
-
-
-def set_temp_directory(dir: str):
-    global temp_directory
-    temp_directory = dir
-
-
-def get_input_directory() -> str:
-    return input_directory
-
-
-def set_input_directory(dir: str):
-    global input_directory
-    input_directory = dir
-
-
-def get_user_directory() -> str:
-    return user_directory
-
-
-def set_user_directory(dir: str):
-    global user_directory
-    user_directory = dir
-
-
-def get_directory_by_type(type_name: str) -> str:
-    if type_name == "output":
-        return output_directory
-    if type_name == "temp":
-        return temp_directory
-    if type_name == "input":
-        return input_directory
-    return ""
-
-
-# Annotated filepath
-def annotated_filepath(name: str):
-    n: int = str_length(name)
-    if n > 8:
-        suffix: str = str_slice(name, n - 8, n)
-        if suffix == "[output]":
-            base_dir: str = output_directory
-            return [str_slice(name, 0, n - 8), base_dir]
-        if suffix == "[input]":
-            base_dir: str = input_directory
-            return [str_slice(name, 0, n - 8), base_dir]
-        if suffix == "[temp]":
-            base_dir: str = temp_directory
-            return [str_slice(name, 0, n - 8), base_dir]
-    return [name, ""]
-
-
-def get_annotated_filepath(name: str) -> str:
-    parts = annotated_filepath(name)
-    file: str = py_list_ref(parts, 0)
-    base_dir: str = py_list_ref(parts, 1)
-    if base_dir != "":
-        return path_join2(base_dir, file)
-    return file
-
-
-def exists_annotated_filepath(name: str) -> bool:
-    full: str = get_annotated_filepath(name)
-    return os_file_exists(full)
-
-
-def init(base: str):
-    global base_path
-    global output_directory
-    global temp_directory
-    global input_directory
-    global user_directory
-
-    base_path = base
-
-    output_directory = path_join2(base_path, "output")
-    temp_directory = path_join2(base_path, "temp")
-    input_directory = path_join2(base_path, "input")
-    user_directory = path_join2(base_path, "user")
-
-    # Register model folders
-    add_model_folder_path("checkpoints", path_join2(base_path, "models/checkpoints"), 0)
-    add_model_folder_path("configs", path_join2(base_path, "models/configs"), 0)
-    add_model_folder_path("loras", path_join2(base_path, "models/loras"), 0)
-    add_model_folder_path("vae", path_join2(base_path, "models/vae"), 0)
-    add_model_folder_path("text_encoders", path_join2(base_path, "models/text_encoders"), 0)
-    add_model_folder_path("diffusion_models", path_join2(base_path, "models/unet"), 0)
-    add_model_folder_path("clip_vision", path_join2(base_path, "models/clip_vision"), 0)
-    add_model_folder_path("style_models", path_join2(base_path, "models/style_models"), 0)
-    add_model_folder_path("embeddings", path_join2(base_path, "models/embeddings"), 0)
-    add_model_folder_path("diffusers", path_join2(base_path, "models/diffusers"), 0)
-    add_model_folder_path("vae_approx", path_join2(base_path, "models/vae_approx"), 0)
-    add_model_folder_path("controlnet", path_join2(base_path, "models/controlnet"), 0)
-    add_model_folder_path("gligen", path_join2(base_path, "models/gligen"), 0)
-    add_model_folder_path("upscale_models", path_join2(base_path, "models/upscale_models"), 0)
-    add_model_folder_path("hypernetworks", path_join2(base_path, "models/hypernetworks"), 0)
-    add_model_folder_path("classifiers", path_join2(base_path, "models/classifiers"), 0)
-    add_model_folder_path("embeddings", path_join2(base_path, "models/embeddings"), 0)
-
-    # Create input dir
-    if os_file_exists(input_directory) is False:
-        os_mkdir(input_directory)
-
-
-def main():
-    init(os_getcwd())
+from comfycli_builtins import dict_keys, is_none, is_some, is_link, path_dirname, path_split
 
 # === cli_args.static.py ===
-@dataclass
-class CliArgs:
-    checkpoint: str
-    prompt: str
-    output: str
-    output_dir: str
-    workflow: str
-    show_help: bool
-    cpu: bool
-    cuda_device: str
-    highvram: bool
-    lowvram: bool
-    width: int
-    height: int
-    steps: int
-    cfg: float
-    seed: int
-    sampler: str
-    scheduler: str
-
-
 def parse_cli_args() -> dict:
-    args_list: list[str] = argv()
+    args_list: list[str] = list_to_py_list(argv())
     argc: int = py_list_length(args_list)
 
     checkpoint: str = ""
@@ -422,8 +28,6 @@ def parse_cli_args() -> dict:
         arg: str = py_list_ref(args_list, i)
         if arg == "--help" or arg == "-h":
             show_help = True
-            i = i + 1
-            continue
         elif arg == "--checkpoint" or arg == "--ckpt":
             i = i + 1
             if i < argc:
@@ -529,532 +133,6 @@ def print_help():
     print("  --highvram, --gpu-only          Keep all models on GPU")
     print("  --lowvram                       Offload models to CPU")
     print("  --help, -h                      Show this help")
-
-
-def main():
-    args: CliArgs = parse_args()
-    if args.show_help:
-        print_help()
-        exit_program(0)
-
-# === supported_models_base.static.py ===
-# BAC = model config base
-# Stored as list: [unet_cfg_keys, unet_cfg_vals, required_keys, latent_name, model_type_val]
-
-def make_bac(unet_cfg_keys: list[str], unet_cfg_vals: list, required_keys: list[str], latent_name: str, model_type_val: int) -> list:
-    return py_list(unet_cfg_keys, unet_cfg_vals, required_keys, latent_name, model_type_val)
-
-def bac_unet_cfg_keys(bac: list) -> list[str]:
-    return py_list_ref(bac, 0)
-
-def bac_unet_cfg_vals(bac: list) -> list:
-    return py_list_ref(bac, 1)
-
-def bac_required_keys(bac: list) -> list[str]:
-    return py_list_ref(bac, 2)
-
-def bac_latent_format_name(bac: list) -> str:
-    return py_list_ref(bac, 3)
-
-def bac_model_type_value(bac: list) -> int:
-    return py_list_ref(bac, 4)
-
-
-def bac_matches(bac: list, unet_config: dict, state_dict: dict) -> bool:
-    cfg_keys: list[str] = bac_unet_cfg_keys(bac)
-    cfg_vals: list = bac_unet_cfg_vals(bac)
-    i: int = 0
-    while i < py_list_length(cfg_keys):
-        k: str = py_list_ref(cfg_keys, i)
-        if not dict_contains(unet_config, k):
-            return False
-        v = py_list_ref(cfg_vals, i)
-        if dict_get(unet_config, k) != v:
-            return False
-        i = i + 1
-    req: list[str] = bac_required_keys(bac)
-    j: int = 0
-    while j < py_list_length(req):
-        rk: str = py_list_ref(req, j)
-        if not dict_contains(state_dict, rk):
-            return False
-        j = j + 1
-    return True
-# === supported_models.static.py ===
-
-# SDXL
-SDXL = make_bac(
-    make_dict_from("model_channels", 320, "use_linear_in_transformer", True, "transformer_depth", py_list(0, 0, 2, 2, 10, 10), "context_dim", 2048, "adm_in_channels", 2816, "use_temporal_attention", False),
-    py_list(),
-    py_list(),
-    "SDXL",
-    1
-)
-
-# SDXL Refiner
-SDXL_REFINER = make_bac(
-    make_dict_from("model_channels", 384, "use_linear_in_transformer", True, "transformer_depth", py_list(0, 0, 4, 4), "context_dim", 2560, "adm_in_channels", 2560, "use_temporal_attention", False),
-    py_list(),
-    py_list(),
-    "SDXL",
-    1
-)
-
-# SD1.5
-SD15 = make_bac(
-    make_dict_from("context_dim", 768, "model_channels", 320, "use_linear_in_transformer", False, "adm_in_channels", 0, "use_temporal_attention", False),
-    py_list(),
-    py_list(),
-    "SD15",
-    1
-)
-
-# SD2.0
-SD20 = make_bac(
-    make_dict_from("context_dim", 1024, "model_channels", 320, "use_linear_in_transformer", False, "adm_in_channels", 0, "use_temporal_attention", False),
-    py_list(),
-    py_list(),
-    "SD15",
-    1
-)
-
-# SD3
-SD3 = make_bac(
-    make_dict_from("in_channels", 16, "pos_embed_scaling_factor", 0),
-    py_list(),
-    py_list(),
-    "SD3",
-    6
-)
-
-# Flux
-FLUX = make_bac(
-    make_dict_from("image_model", "flux", "guidance_embed", True),
-    py_list(),
-    py_list(),
-    "Flux",
-    8
-)
-
-# Flux Schnell (no guidance)
-FLUX_SCHNELL = make_bac(
-    make_dict_from("image_model", "flux", "guidance_embed", False),
-    py_list(),
-    py_list(),
-    "Flux",
-    8
-)
-
-# All registered models
-ALL_MODELS: list = py_list(SDXL, SDXL_REFINER, SD15, SD20, SD3, FLUX, FLUX_SCHNELL)
-
-
-def find_model(unet_config: dict, state_dict: dict) -> list:
-    i: int = 0
-    while i < py_list_length(ALL_MODELS):
-        m: list = py_list_ref(ALL_MODELS, i)
-        if bac_matches(m, unet_config, state_dict):
-            return m
-        i = i + 1
-    return py_list()
-# === model_detection.static.py ===
-# model_detection: state_dict → model architecture identification
-# Uses key-PRESENCE patterns (no tensor shape inspection needed for basic detection)
-
-
-def detect_unet_config(state_dict: dict, prefix: str) -> dict:
-    result: dict = make_dict()
-
-    has_double_blocks: bool = dict_contains(state_dict, prefix + "double_blocks.0.img_attn.norm.key_norm.weight")
-    has_joint_blocks: bool = dict_contains(state_dict, prefix + "joint_blocks.0.context_block.attn.qkv.weight")
-    has_input_blocks: bool = dict_contains(state_dict, prefix + "input_blocks.0.0.weight")
-
-    if has_double_blocks:
-        dict_set(result, "image_model", "flux")
-        has_guidance: bool = dict_contains(state_dict, prefix + "guidance_in.lin.weight")
-        dict_set(result, "guidance_embed", has_guidance)
-    elif has_joint_blocks:
-        has_pos_embed: bool = dict_contains(state_dict, prefix + "pos_embed")
-        dict_set(result, "in_channels", 16)
-        if has_pos_embed:
-            dict_set(result, "pos_embed_scaling_factor", 0)
-    elif has_input_blocks:
-        has_label_emb: bool = dict_contains(state_dict, prefix + "label_emb.0.0.weight")
-        if has_label_emb:
-            dict_set(result, "model_channels", 320)
-            dict_set(result, "use_linear_in_transformer", True)
-            dict_set(result, "context_dim", 2048)
-            dict_set(result, "adm_in_channels", 2816)
-            dict_set(result, "use_temporal_attention", False)
-        else:
-            has_context_768: bool = dict_contains(state_dict, prefix + "input_blocks.0.1.transformer_blocks.0.attn2.to_k.weight")
-            if has_context_768:
-                dict_set(result, "context_dim", 768)
-            else:
-                dict_set(result, "context_dim", 1024)
-            dict_set(result, "model_channels", 320)
-            dict_set(result, "use_linear_in_transformer", False)
-            dict_set(result, "adm_in_channels", 0)
-            dict_set(result, "use_temporal_attention", False)
-
-    return result
-
-
-def model_config_from_unet(state_dict: dict, unet_config: dict, models_list: list) -> list:
-    i: int = 0
-    while i < py_list_length(models_list):
-        m: list = py_list_ref(models_list, i)
-        if bac_matches(m, unet_config, state_dict):
-            return m
-        i = i + 1
-    return py_list()
-# === model_sampling.static.py ===
-# Model sampling/prediction types
-# Sigma schedules handled by C++ backend (libtorch_std_helper)
-
-class ModelSamplingType:
-    EPS = 1
-    V_PREDICTION = 2
-    V_PREDICTION_EDM = 3
-    EDM = 5
-    CONST = 6
-    V_PREDICTION_CONTINUOUS = 7
-    FLOW = 8
-    X0 = 9
-
-
-def sampling_type_from_model_type(model_type: int) -> int:
-    if model_type == 1:
-        return ModelSamplingType.EPS
-    elif model_type == 2 or model_type == 3:
-        return ModelSamplingType.V_PREDICTION
-    elif model_type == 5:
-        return ModelSamplingType.EDM
-    elif model_type == 6 or model_type == 8:
-        return ModelSamplingType.CONST
-    elif model_type == 7:
-        return ModelSamplingType.V_PREDICTION_CONTINUOUS
-    elif model_type == 9 or model_type == 11:
-        return ModelSamplingType.X0
-    return ModelSamplingType.EPS
-# === latent_formats.static.py ===
-# Latent format: [scale_factor, latent_channels, name]
-
-def make_latent_format(scale: float, channels: int, name: str) -> list:
-    return py_list(scale, channels, name)
-
-LF_SD15 = make_latent_format(0.18215, 4, "SD15")
-LF_SDXL = make_latent_format(0.13025, 4, "SDXL")
-LF_SD3 = make_latent_format(1.0, 16, "SD3")
-LF_FLUX = make_latent_format(0.3611, 16, "Flux")
-LF_FLUX2 = make_latent_format(0.3611, 16, "Flux2")
-LF_SC_C = make_latent_format(1.0, 16, "StableCascade")
-LF_SVD = make_latent_format(1.0, 4, "SVD")
-LF_HUNYUAN_VIDEO = make_latent_format(1.0, 16, "HunyuanVideo")
-
-def latent_format_scale(lf: list) -> float:
-    return py_list_ref(lf, 0)
-
-def latent_format_channels(lf: list) -> int:
-    return py_list_ref(lf, 1)
-
-def latent_format_name(lf: list) -> str:
-    return py_list_ref(lf, 2)
-
-def latent_process_in(latent: float, lf: list) -> float:
-    return latent * latent_format_scale(lf)
-
-def latent_process_out(latent: float, lf: list) -> float:
-    return latent / latent_format_scale(lf)
-# === model_base.static.py ===
-# Model type constants (match comfy_types ModelType)
-MODEL_TYPE_EPS: int = 1
-MODEL_TYPE_V_PREDICTION: int = 2
-MODEL_TYPE_FLOW: int = 6
-MODEL_TYPE_FLUX: int = 8
-
-
-@dataclass
-class BaseModel:
-    model_type: int
-    latent_format_name: str
-    sampling_type: int
-    unet_prefix: str
-
-
-def make_base_model(model_type: int, latent_format_name: str, sampling_type: int, unet_prefix: str) -> BaseModel:
-    return BaseModel(model_type, latent_format_name, sampling_type, unet_prefix)
-
-
-def base_model_model_type(m: BaseModel) -> int:
-    return m.model_type
-
-
-def base_model_latent_format_name(m: BaseModel) -> str:
-    return m.latent_format_name
-
-
-def base_model_sampling_type(m: BaseModel) -> int:
-    return m.sampling_type
-
-
-def base_model_unet_prefix(m: BaseModel) -> str:
-    return m.unet_prefix
-# === model_management.static.py ===
-DEVICE_CPU: int = -1
-DEVICE_CUDA_0: int = 0
-
-
-def get_torch_device() -> int:
-    return DEVICE_CUDA_0
-
-
-def get_free_memory() -> int:
-    return torch.cuda_get_free_memory()
-
-
-def soft_empty_cache():
-    torch.cuda_soft_empty_cache()
-
-
-def load_model_to_device(sd_handle: ptr, device: int):
-    return torch.cuda_load_model(device, sd_handle)
-
-
-def unload_model_from_device(t):
-    torch.cuda_unload_model(t)
-
-
-def unet_offload_device() -> int:
-    return DEVICE_CPU
-# === sd.static.py ===
-@dataclass
-class ModelPatcher:
-    sd_handle: ptr
-    model_type: int
-    load_device: int
-    offload_device: int
-
-
-def make_model_patcher(sd_handle: ptr, model_type: int, load_device: int, offload_device: int) -> ModelPatcher:
-    return ModelPatcher(sd_handle, model_type, load_device, offload_device)
-
-
-@dataclass
-class CLIP:
-    clip_ptr: ptr
-    tokenizer_ptr: ptr
-
-
-def make_clip(clip_ptr: ptr, tokenizer_ptr: ptr) -> CLIP:
-    return CLIP(clip_ptr, tokenizer_ptr)
-
-
-@dataclass
-class VAE:
-    vae_ptr: ptr
-
-
-def make_vae(vae_ptr: ptr) -> VAE:
-    return VAE(vae_ptr)
-
-
-@dataclass
-class LoadResult:
-    model: ModelPatcher
-    clip: CLIP
-    vae: VAE
-
-
-def make_load_result(model: ModelPatcher, clip: CLIP, vae: VAE) -> LoadResult:
-    return LoadResult(model, clip, vae)
-
-
-def build_key_dict(sd_ptr: ptr) -> dict:
-    n: int = torch.safetensors_count(sd_ptr)
-    d: dict = make_dict()
-    i: int = 0
-    while i < n:
-        name = torch.safetensors_name(sd_ptr, i)
-        dict_set(d, name, 1)
-        i = i + 1
-    return d
-
-
-def load_checkpoint(ckpt_path: str) -> LoadResult:
-    sd_ptr: ptr = torch.safetensors_load(ckpt_path)
-    state_dict: dict = build_key_dict(sd_ptr)
-
-    unet_prefix: str = "model.diffusion_model."
-    has_unet: bool = dict_contains(state_dict, unet_prefix + "input_blocks.0.0.weight")
-    if not has_unet:
-        has_unet = dict_contains(state_dict, unet_prefix + "double_blocks.0.img_attn.norm.key_norm.weight")
-    if not has_unet:
-        has_unet = dict_contains(state_dict, unet_prefix + "joint_blocks.0.context_block.attn.qkv.weight")
-
-    has_clip_l: bool = dict_contains(state_dict, "text_model.encoder.layers.0.layer_norm.weight")
-    has_clip_g: bool = dict_contains(state_dict, "text_model.encoder.layers.30.mlp.fc1.weight")
-    if not has_clip_l:
-        has_clip_l = dict_contains(state_dict, "conditioner.embedders.0.transformer.text_model.encoder.layers.0.layer_norm1.weight")
-    if not has_clip_g:
-        has_clip_g = dict_contains(state_dict, "conditioner.embedders.1.transformer.text_model.encoder.layers.30.mlp.fc1.weight")
-    has_vae: bool = dict_contains(state_dict, "first_stage_model.decoder.conv_in.weight")
-    if not has_vae:
-        has_vae = dict_contains(state_dict, "decoder.conv_in.weight")
-    if not has_vae:
-        has_vae = dict_contains(state_dict, "conditioner.embedders.3.decoder.conv_in.weight")
-
-    model_type_val: int = 0
-    if has_unet:
-        model_type_val = 1
-
-    model_mp: ModelPatcher = make_model_patcher(sd_ptr, model_type_val, 0, -1)
-    clip_obj = None
-    vae_obj = None
-
-    if has_clip_l or has_clip_g:
-        clip_obj = make_clip(sd_ptr, sd_ptr)
-    if has_vae:
-        vae_obj = make_vae(sd_ptr)
-
-    return make_load_result(model_mp, clip_obj, vae_obj)
-# === lora.static.py ===
-def load_lora(lora_path: str):
-    return torch.safetensors_load(lora_path)
-
-
-def apply_lora(unet_handle, lora_handle, strength: float):
-    return torch.lora_apply(unet_handle, lora_handle, strength)
-
-
-def merge_lora_into(model_handle, lora_handle) -> int:
-    return torch.lora_merge_into(model_handle, lora_handle)
-# === clip_model.static.py ===
-
-CLIP_MAX_TOKEN_LENGTH = 77
-
-CLIP_VOCAB_SIZE = 49408
-CLIP_EOS_TOKEN = 49407
-CLIP_SOS_TOKEN = 49406
-CLIP_PAD_TOKEN_L = 49407
-CLIP_PAD_TOKEN_G = 0
-
-CLIP_L_EMBED_DIM = 768
-CLIP_G_EMBED_DIM = 1280
-CLIP_L_NUM_LAYERS = 12
-CLIP_G_NUM_LAYERS = 32
-
-T5_MAX_TOKEN_LENGTH = 512
-
-
-def clip_tokenizer_create(vocab_path: str, merges_path: str):
-    return torch.clip_tokenizer_create(vocab_path, merges_path)
-
-
-def clip_tokenizer_encode(tokenizer, text: str):
-    return torch.clip_tokenizer_encode(tokenizer, text)
-
-
-def clip_tokenizer_free(tokenizer):
-    torch.clip_tokenizer_free(tokenizer)
-
-
-def clip_text_forward(clip_module, token_ids, cast_to_float16: bool):
-    return torch.clip_text_forward(clip_module, token_ids, cast_to_float16)
-
-
-def sdxl_dual_clip(clip_l, clip_g, token_ids):
-    return torch.sdxl_dual_clip(clip_l, clip_g, token_ids)
-
-
-def sdxl_get_pooled():
-    return torch.sdxl_get_pooled()
-
-
-def sdxl_get_pooled_l():
-    return torch.sdxl_get_pooled_l()
-
-
-def t5_tokenizer_create(model_path: str):
-    return torch.t5_tokenizer_create(model_path)
-
-
-def t5_tokenizer_encode(tokenizer, text: str, max_len: int):
-    return torch.t5_tokenizer_encode(tokenizer, text, max_len)
-
-
-def t5_tokenizer_free(tokenizer):
-    torch.t5_tokenizer_free(tokenizer)
-
-
-def encode_sd15(clip_module, tokenizer, text: str, cast_fp16: bool):
-    token_ids = clip_tokenizer_encode(tokenizer, text)
-    return clip_text_forward(clip_module, token_ids, cast_fp16)
-
-
-def encode_sdxl(clip_l_dict, clip_g_dict, tokenizer_l, tokenizer_g, text: str):
-    tokens_l = clip_tokenizer_encode(tokenizer_l, text)
-    # CLIP-L: dim=768, layers=12, heads=12, ffn=3072
-    emb_l = torch.clip_text_forward_from_dict(clip_l_dict, tokens_l, 768, 12, 12, 3072)
-    # CLIP-G: dim=1280, layers=32, heads=20, ffn=5120
-    emb_g = torch.clip_text_forward_from_dict(clip_g_dict, tokens_l, 1280, 32, 20, 5120)
-    result_list = py_list(emb_l, emb_g)
-    text_emb = torch.cat(result_list, 2)
-    # Pooled: approximate EOS is at position 60 (after text, before padding)
-    pooled = torch.narrow(emb_g, 1, 60, 1)
-    pooled = torch.squeeze(pooled, 1)
-    return text_emb, pooled
-
-
-def encode_flux(t5_tokenizer, t5_model, clip_l_module, clip_l_tok, text: str, max_len: int):
-    t5_ids = t5_tokenizer_encode(t5_tokenizer, text, max_len)
-    clip_ids = clip_tokenizer_encode(clip_l_tok, text)
-    t5_emb = torch.jit_forward(t5_model, t5_ids)
-    clip_emb = clip_text_forward(clip_l_module, clip_ids, True)
-    return t5_emb, clip_emb
-
-
-def encode_t5(t5_tokenizer, t5_model, text: str, max_len: int):
-    token_ids = t5_tokenizer_encode(t5_tokenizer, text, max_len)
-    return torch.jit_forward(t5_model, token_ids)
-# === k_diffusion/sampling.static.py ===
-def get_sigmas(sampler_type: int, steps: int, sigma_min: float, sigma_max: float):
-    if sampler_type == 8:
-        return torch.fm_sigmas(steps, sigma_min, sigma_max)
-    else:
-        return torch.sampler_sigmas(steps, sigma_min, sigma_max, "karras")
-
-
-def sample_step(sampler_name: str, noise_pred, x_t, sigma_t, sigma_prev, extra=None):
-    if sampler_name == "euler":
-        return torch.sample_euler(noise_pred, x_t, sigma_t, sigma_prev)
-    elif sampler_name == "euler_ancestral":
-        return torch.sample_euler_ancestral(noise_pred, x_t, sigma_t, sigma_prev)
-    elif sampler_name == "ddim":
-        return torch.sample_ddim(noise_pred, x_t, sigma_t, sigma_prev, 0.0)
-    elif sampler_name == "dpmpp_2m":
-        old_denoised = extra
-        is_first = 1 if old_denoised is None else 0
-        if old_denoised is None:
-            old_denoised = x_t
-        return torch.sample_dpmpp_2m(noise_pred, x_t, sigma_t, sigma_prev, old_denoised, is_first)
-    else:
-        return torch.sample_euler(noise_pred, x_t, sigma_t, sigma_prev)
-
-
-def sample_flow_step(velocity, x_t, dt: float):
-    return torch.fm_step(velocity, x_t, dt)
-# === controlnet.static.py ===
-def load_controlnet(controlnet_path: str):
-    return torch.safetensors_load(controlnet_path)
-
-
-def controlnet_forward(weights, input, timestep, text_emb, hint, hint_channels: int):
-    return torch.controlnet_forward(weights, input, timestep, text_emb, hint, hint_channels)
-
-
-def controlnet_apply(unet_features, control_features, strength: float):
-    return torch.controlnet_apply(unet_features, control_features, strength)
 # === sd_backend.static.py ===
 # SD.cpp (stable-diffusion.cpp) backend FFI wrapper.
 # This replaces the old libtorch_std_helper backend.
@@ -1065,15 +143,15 @@ extern fn sd_pipeline_free(pipeline: ptr) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_load(pipeline: ptr, model_path: str, clip_l_path: str, clip_g_path: str, vae_path: str, wtype: int, n_threads: int, diffusion_fa: int) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_load_ex(pipeline: ptr, model_path: str, clip_l_path: str, clip_g_path: str, vae_path: str, wtype: int, n_threads: int, diffusion_fa: int, diffusion_model_path: str, llm_path: str) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_generate(pipeline: ptr, prompt: str, negative_prompt: str, width: int, height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires: int, hires_width: int, hires_height: int, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, output_path: str) -> int from "sdcpp_adapter"
-extern fn sd_pipeline_generate_hires(pipeline: ptr, prompt: str, negative_prompt: str, target_width: int, target_height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, clarity: float, sharpen_amount: float, sharpen_radius: int, output_path: str) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_generate_hires(pipeline: ptr, prompt: str, negative_prompt: str, target_width: int, target_height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, clarity: float, sharpen_amount: float, sharpen_radius: int, smart_sharpen_strength: float, smart_sharpen_radius: int, edge_sharpen_amount: float, edge_sharpen_radius: int, edge_sharpen_threshold: float, output_path: str) -> int from "sdcpp_adapter"
+
+extern fn sd_pipeline_load_lora(pipeline: ptr, lora_path: str, multiplier: float) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_set_ipadapter(pipeline: ptr, model_path: str, clip_vision_path: str, image_path: str, weight: float) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_set_ipadapter_enabled(pipeline: ptr, enabled: int, weight: float) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_generate_adetailer(pipeline: ptr, prompt: str, negative_prompt: str, width: int, height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires: int, hires_width: int, hires_height: int, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, ad_model_path: str, ad_prompt: str, ad_negative_prompt: str, output_path: str) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_generate_full(pipeline: ptr, prompt: str, negative_prompt: str, width: int, height: int, hires_width: int, hires_height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, clarity: float, sharpen_amount: float, sharpen_radius: int, smart_sharpen_strength: float, smart_sharpen_radius: int, edge_sharpen_amount: float, edge_sharpen_radius: int, edge_sharpen_threshold: float, ad_model_path: str, ad_prompt: str, ad_negative_prompt: str, output_path: str) -> int from "sdcpp_adapter"
 
 extern fn sd_ensure_dir(path: str) -> int from "sdcpp_adapter"
-
-# SD weight type constants (matching stable-diffusion.h sd_type_t)
-SD_WTYPE_F32: int = 0
-SD_WTYPE_F16: int = 1
-SD_WTYPE_AUTO: int = 42  # SD_TYPE_COUNT
-
 
 def sd_create() -> ptr:
     return sd_pipeline_create()
@@ -1122,6 +200,40 @@ def sd_generate_with_options(pipeline: ptr, prompt: str, negative_prompt: str,
                                 output_path)
 
 
+def sd_generate_adetailer(pipeline: ptr, prompt: str, negative_prompt: str,
+                           width: int, height: int, steps: int, cfg: float,
+                           sample_method: str, scheduler: str, seed: int,
+                           vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float,
+                           hires: int, hires_width: int, hires_height: int,
+                           hires_steps: int, hires_strength: float,
+                           freeu: int, freeu_b1: float, freeu_b2: float,
+                           sag: int, sag_scale: float,
+                           ad_model_path: str, ad_prompt: str, ad_negative_prompt: str,
+                           output_path: str) -> int:
+    return sd_pipeline_generate_adetailer(pipeline, prompt, negative_prompt,
+                                           width, height, steps, cfg,
+                                           sample_method, scheduler, seed,
+                                           vae_tiling, vae_tile_size, vae_tile_overlap,
+                                           hires, hires_width, hires_height,
+                                           hires_steps, hires_strength,
+                                           freeu, freeu_b1, freeu_b2,
+                                           sag, sag_scale,
+                                           ad_model_path, ad_prompt, ad_negative_prompt,
+                                           output_path)
+
+
+def sd_load_lora(pipeline: ptr, lora_path: str, multiplier: float) -> int:
+    return sd_pipeline_load_lora(pipeline, lora_path, multiplier)
+
+
+def sd_set_ipadapter(pipeline: ptr, model_path: str, clip_vision_path: str, image_path: str, weight: float) -> int:
+    return sd_pipeline_set_ipadapter(pipeline, model_path, clip_vision_path, image_path, weight)
+
+
+def sd_set_ipadapter_enabled(pipeline: ptr, enabled: int, weight: float) -> int:
+    return sd_pipeline_set_ipadapter_enabled(pipeline, enabled, weight)
+
+
 def sd_ensure_directory(path: str) -> int:
     return sd_ensure_dir(path)
 
@@ -1143,6 +255,9 @@ def sd_generate_hires(pipeline: ptr, prompt: str, negative_prompt: str,
                        freeu: int, freeu_b1: float, freeu_b2: float,
                        sag: int, sag_scale: float,
                        clarity: float, sharpen_amount: float, sharpen_radius: int,
+                       smart_sharpen_strength: float, smart_sharpen_radius: int,
+                       edge_sharpen_amount: float, edge_sharpen_radius: int,
+                       edge_sharpen_threshold: float,
                        output_path: str) -> int:
     return sd_pipeline_generate_hires(pipeline, prompt, negative_prompt,
                                        target_width, target_height,
@@ -1153,12 +268,34 @@ def sd_generate_hires(pipeline: ptr, prompt: str, negative_prompt: str,
                                        freeu, freeu_b1, freeu_b2,
                                        sag, sag_scale,
                                        clarity, sharpen_amount, sharpen_radius,
+                                       smart_sharpen_strength, smart_sharpen_radius,
+                                       edge_sharpen_amount, edge_sharpen_radius,
+                                       edge_sharpen_threshold,
                                        output_path)
+
+
+def sd_generate_full(pipeline: ptr, prompt: str, negative_prompt: str,
+                     width: int, height: int, opts, output_path: str) -> int:
+    return sd_pipeline_generate_full(
+        pipeline, prompt, negative_prompt,
+        width, height,
+        dict_get(opts, "hires_width"), dict_get(opts, "hires_height"),
+        dict_get(opts, "steps"), dict_get(opts, "cfg"),
+        dict_get(opts, "sampler_name"), dict_get(opts, "scheduler"),
+        dict_get(opts, "seed"),
+        dict_get(opts, "vae_tiling"), dict_get(opts, "vae_tile_size"),
+        dict_get(opts, "vae_tile_overlap"),
+        dict_get(opts, "hires_steps"), dict_get(opts, "hires_strength"),
+        dict_get(opts, "freeu"), dict_get(opts, "freeu_b1"), dict_get(opts, "freeu_b2"),
+        dict_get(opts, "sag"), dict_get(opts, "sag_scale"),
+        dict_get(opts, "clarity"), dict_get(opts, "sharpen"), dict_get(opts, "sharpen_radius"),
+        dict_get(opts, "smart_sharpen"), dict_get(opts, "smart_sharpen_radius"),
+        dict_get(opts, "edge_sharpen"), dict_get(opts, "edge_sharpen_radius"),
+        dict_get(opts, "edge_sharpen_threshold"),
+        dict_get(opts, "ad_model_path"), dict_get(opts, "ad_prompt"),
+        dict_get(opts, "ad_negative_prompt"),
+        output_path)
 # === nodes.static.py ===
-
-NODE_CLASS_MAPPINGS: dict = make_dict()
-NODE_DISPLAY_NAMES: dict = make_dict()
-
 
 @dataclass
 class SDPipelineHandle:
@@ -1177,44 +314,127 @@ class LatentImage:
     batch_size: int
 
 
+@dataclass
+class CLIPVisionModel:
+    name: str
+
+
+@dataclass
+class IPAdapterModel:
+    name: str
+
+
 def make_sd_pipeline_handle(pipeline: ptr) -> SDPipelineHandle:
     return SDPipelineHandle(pipeline)
+
+
+def model_root() -> str:
+    root = os_getenv("COMFYCLI_MODEL_DIR")
+    if str_length(root) == 0:
+        return "/data/models/image"
+    return root
 
 
 def resolve_model_path(name: str) -> str:
     if str_starts_with(name, "/"):
         return name
-    return "/data/models/image/" + name
+    return model_root() + "/" + name
+
+
+def resolve_prompt_text(inputs, key: str, fallback_key: str) -> str:
+    c: Conditioning = dict_get(inputs, key)
+    if is_some(c):
+        return c.text
+    return get_str(inputs, fallback_key, "")
+
+
+def conditioning_text(c: Conditioning) -> str:
+    if is_none(c):
+        return ""
+    return c.text
+
+
+def merge_conditioning_text(a: str, b: str) -> str:
+    if a == "" and b == "":
+        return ""
+    if a == "":
+        return b
+    if b == "":
+        return a
+    return a + ", " + b
+
+
+def parse_sampler_opts(inputs) -> dict:
+    opts = make_dict()
+    dict_set(opts, "hires_width", 0)
+    dict_set(opts, "hires_height", 0)
+    dict_set(opts, "steps", get_int(inputs, "steps", 20))
+    dict_set(opts, "cfg", get_float(inputs, "cfg", 7.0))
+    dict_set(opts, "sampler_name", get_str(inputs, "sampler_name", "euler"))
+    dict_set(opts, "scheduler", get_str(inputs, "scheduler", "normal"))
+    dict_set(opts, "seed", get_int(inputs, "seed", 42))
+    dict_set(opts, "vae_tiling", get_int(inputs, "vae_tiling", 0))
+    dict_set(opts, "vae_tile_size", get_int(inputs, "vae_tile_size", 0))
+    dict_set(opts, "vae_tile_overlap", get_float(inputs, "vae_tile_overlap", 0.5))
+    dict_set(opts, "hires_steps", 0)
+    dict_set(opts, "hires_strength", 0.0)
+    dict_set(opts, "freeu", 0)
+    dict_set(opts, "freeu_b1", 0.0)
+    dict_set(opts, "freeu_b2", 0.0)
+    dict_set(opts, "sag", 0)
+    dict_set(opts, "sag_scale", 0.0)
+    dict_set(opts, "clarity", 0.0)
+    dict_set(opts, "sharpen", 0.0)
+    dict_set(opts, "sharpen_radius", 0)
+    dict_set(opts, "smart_sharpen", 0.0)
+    dict_set(opts, "smart_sharpen_radius", 0)
+    dict_set(opts, "edge_sharpen", 0.0)
+    dict_set(opts, "edge_sharpen_radius", 0)
+    dict_set(opts, "edge_sharpen_threshold", 0.0)
+    dict_set(opts, "ad_model_path", "")
+    dict_set(opts, "ad_prompt", "")
+    dict_set(opts, "ad_negative_prompt", "")
+    return opts
+
+
+def sampler_output(inputs):
+    output_dir = get_str(inputs, "output_dir", "/tmp/comfy_output")
+    filename_prefix = get_str(inputs, "filename_prefix", "comfy")
+    return [output_dir, output_dir + "/" + filename_prefix + ".png"]
+
+
+def run_sampler(model: SDPipelineHandle, prompt: str, negative_prompt: str,
+                width: int, height: int, opts, output_dir: str, output_path: str) -> int:
+    rc = sd_ensure_directory(output_dir)
+    if rc != 0:
+        print("Failed to create output dir: " + output_dir)
+        return -1
+    return sd_generate_full(model.pipeline, prompt, negative_prompt,
+                            width, height, opts, output_path)
 
 
 def register_node(class_type: str, display: str, func_name: str, ret_types: list,
                   is_output: bool):
-    meta = make_dict()
-    dict_set(meta, "display", display)
-    dict_set(meta, "function", func_name)
-    dict_set(meta, "return_types", ret_types)
-    dict_set(meta, "output_node", is_output)
-    dict_set(NODE_CLASS_MAPPINGS, class_type, meta)
-    dict_set(NODE_DISPLAY_NAMES, class_type, display)
+    pass
 
 
 def get_int(inputs, key: str, default: int) -> int:
     v = dict_get(inputs, key)
-    if v is None:
+    if is_none(v):
         return default
     return v
 
 
 def get_float(inputs, key: str, default: float) -> float:
     v = dict_get(inputs, key)
-    if v is None:
+    if is_none(v):
         return default
     return v
 
 
 def get_str(inputs, key: str, default: str) -> str:
     v = dict_get(inputs, key)
-    if v is None:
+    if is_none(v):
         return default
     return v
 
@@ -1225,17 +445,17 @@ def checkpoint_loader_simple(inputs):
     clip_g_name = dict_get(inputs, "clip_g_name")
 
     ckpt_path = resolve_model_path(ckpt_name)
-    if clip_l_name is None:
+    if is_none(clip_l_name):
         clip_l_path = ""
     else:
         clip_l_path = resolve_model_path(clip_l_name)
-    if clip_g_name is None:
+    if is_none(clip_g_name):
         clip_g_path = ""
     else:
         clip_g_path = resolve_model_path(clip_g_name)
 
     pipeline = sd_create()
-    rc = sd_load(pipeline, ckpt_path, clip_l_path, clip_g_path, "", SD_WTYPE_AUTO, 8, 0)
+    rc = sd_load(pipeline, ckpt_path, clip_l_path, clip_g_path, "", 42, 8, 0)
     if rc != 0:
         print("SD checkpoint load failed, rc=" + string_of_int(rc))
         return (None, None, None)
@@ -1285,64 +505,29 @@ register_node("EmptyLatentImage", "Empty Latent Image",
 
 def ksampler(inputs):
     model: SDPipelineHandle = dict_get(inputs, "model")
-    if model is None:
+    if is_none(model):
         print("KSampler: model is missing")
         return (None,)
-    pipeline = model.pipeline
 
-    positive: Conditioning = dict_get(inputs, "positive")
-    if positive is None:
-        prompt = get_str(inputs, "prompt", "")
-    else:
-        prompt = positive.text
-
-    negative: Conditioning = dict_get(inputs, "negative")
-    if negative is None:
-        negative_prompt = get_str(inputs, "negative_prompt", "")
-    else:
-        negative_prompt = negative.text
+    prompt = resolve_prompt_text(inputs, "positive", "prompt")
+    negative_prompt = resolve_prompt_text(inputs, "negative", "negative_prompt")
 
     latent: LatentImage = dict_get(inputs, "latent_image")
-    if latent is None:
+    if is_none(latent):
         width = get_int(inputs, "width", 1024)
         height = get_int(inputs, "height", 1024)
     else:
         width = latent.width
         height = latent.height
 
-    steps = get_int(inputs, "steps", 20)
-    cfg = get_float(inputs, "cfg", 7.0)
-    sampler_name = get_str(inputs, "sampler_name", "euler")
-    scheduler = get_str(inputs, "scheduler", "normal")
-    seed = get_int(inputs, "seed", 42)
-    denoise = get_float(inputs, "denoise", 1.0)
-
-    vae_tiling = get_int(inputs, "vae_tiling", 0)
-    vae_tile_size = get_int(inputs, "vae_tile_size", 0)
-    vae_tile_overlap = get_float(inputs, "vae_tile_overlap", 0.5)
-
-    output_dir = get_str(inputs, "output_dir", "/tmp/comfy_output")
-    filename_prefix = get_str(inputs, "filename_prefix", "comfy")
-    output_path = output_dir + "/" + filename_prefix + ".png"
-
-    rc = sd_ensure_directory(output_dir)
-    if rc != 0:
-        print("Failed to create output dir: " + output_dir)
-        return (None,)
-
-    rc = sd_generate_with_options(pipeline, prompt, negative_prompt,
-                                  width, height, steps, cfg,
-                                  sampler_name, scheduler, seed,
-                                  vae_tiling, vae_tile_size, vae_tile_overlap,
-                                  0, 0, 0, 0, 0.0,
-                                  0, 0.0, 0.0,
-                                  0, 0.0,
-                                  output_path)
+    opts = parse_sampler_opts(inputs)
+    out = sampler_output(inputs)
+    rc = run_sampler(model, prompt, negative_prompt, width, height, opts, out[0], out[1])
     if rc != 0:
         print("SD generate failed, rc=" + string_of_int(rc))
         return (None,)
 
-    return (output_path,)
+    return (out[1],)
 
 
 register_node("KSampler", "KSampler",
@@ -1354,7 +539,7 @@ def vae_decode(inputs):
     vae = dict_get(inputs, "vae")
     # In this backend VAE decode is already performed inside KSampler, so
     # this node just passes the already-decoded image path through.
-    if samples is None:
+    if is_none(samples):
         print("VAEDecode: no samples received")
         return (None,)
     return (samples,)
@@ -1369,21 +554,21 @@ def diffusion_model_loader(inputs):
     llm_name = dict_get(inputs, "llm_name")
     vae_name = dict_get(inputs, "vae_name")
 
-    if diffusion_model_name is None:
+    if is_none(diffusion_model_name):
         print("DiffusionModelLoader: diffusion_model_name is required")
         return (None,)
-    if llm_name is None:
+    if is_none(llm_name):
         print("DiffusionModelLoader: llm_name is required")
         return (None,)
 
     diffusion_model_path = resolve_model_path(diffusion_model_name)
     llm_path = resolve_model_path(llm_name)
     vae_path = ""
-    if vae_name is not None:
+    if is_some(vae_name):
         vae_path = resolve_model_path(vae_name)
 
     pipeline = sd_create()
-    rc = sd_load_ex(pipeline, "", "", "", vae_path, SD_WTYPE_AUTO, 8, 1,
+    rc = sd_load_ex(pipeline, "", "", "", vae_path, 42, 8, 1,
                     diffusion_model_path, llm_path)
     if rc != 0:
         print("DiffusionModelLoader: load failed, rc=" + string_of_int(rc))
@@ -1397,78 +582,78 @@ register_node("DiffusionModelLoader", "Load Diffusion Model (GGUF)",
               "diffusion_model_loader", ("MODEL", "CLIP", "VAE"), False)
 
 
+def lora_loader(inputs):
+    model: SDPipelineHandle = dict_get(inputs, "model")
+    if is_none(model):
+        print("LORALoader: model is missing")
+        return (None,)
+    lora_name = get_str(inputs, "lora_name", "")
+    lora_scale = get_float(inputs, "lora_scale", 1.0)
+    if lora_name == "":
+        print("LORALoader: no lora_name provided, skipping")
+        return (model,)
+    lora_path = resolve_model_path(lora_name)
+    pipeline = model.pipeline
+    rc = sd_load_lora(pipeline, lora_path, lora_scale)
+    if rc != 0:
+        print("LORALoader: load failed for " + lora_path + ", rc=" + string_of_int(rc))
+        return (None,)
+    print("LORALoader: loaded " + lora_path + " scale=" + format_float(lora_scale, 2))
+    return (model,)
+
+
+register_node("LORALoader", "Load LoRA",
+              "lora_loader", ("MODEL",), False)
+
+
 def hires_fix(inputs):
     model: SDPipelineHandle = dict_get(inputs, "model")
-    if model is None:
+    if is_none(model):
         print("HiResFix: model is missing")
         return (None,)
-    pipeline = model.pipeline
 
-    positive: Conditioning = dict_get(inputs, "positive")
-    if positive is None:
-        prompt = get_str(inputs, "prompt", "")
-    else:
-        prompt = positive.text
+    prompt = resolve_prompt_text(inputs, "positive", "prompt")
+    negative_prompt = resolve_prompt_text(inputs, "negative", "negative_prompt")
 
-    negative: Conditioning = dict_get(inputs, "negative")
-    if negative is None:
-        negative_prompt = get_str(inputs, "negative_prompt", "")
-    else:
-        negative_prompt = negative.text
+    target_width = get_int(inputs, "width", 1024)
+    target_height = get_int(inputs, "height", 1024)
 
-    width = get_int(inputs, "width", 1024)
-    height = get_int(inputs, "height", 1024)
-
-    steps = get_int(inputs, "steps", 20)
-    cfg = get_float(inputs, "cfg", 2.5)
-    sampler_name = get_str(inputs, "sampler_name", "euler")
-    scheduler = get_str(inputs, "scheduler", "discrete")
     seed = get_int(inputs, "seed", 0)
     if seed == 0:
         seed = -1
 
-    vae_tiling = get_int(inputs, "vae_tiling", 1)
-    vae_tile_size = get_int(inputs, "vae_tile_size", 128)
-    vae_tile_overlap = get_float(inputs, "vae_tile_overlap", 0.5)
+    opts = parse_sampler_opts(inputs)
+    dict_set(opts, "cfg", get_float(inputs, "cfg", 2.5))
+    dict_set(opts, "scheduler", get_str(inputs, "scheduler", "discrete"))
+    dict_set(opts, "seed", seed)
+    dict_set(opts, "vae_tiling", get_int(inputs, "vae_tiling", 1))
+    dict_set(opts, "vae_tile_size", get_int(inputs, "vae_tile_size", 128))
+    dict_set(opts, "hires_width", target_width)
+    dict_set(opts, "hires_height", target_height)
+    dict_set(opts, "hires_steps", get_int(inputs, "hires_steps", 45))
+    dict_set(opts, "hires_strength", get_float(inputs, "hires_strength", 0.35))
+    dict_set(opts, "freeu", get_int(inputs, "freeu", 1))
+    dict_set(opts, "freeu_b1", get_float(inputs, "freeu_b1", 1.3))
+    dict_set(opts, "freeu_b2", get_float(inputs, "freeu_b2", 1.4))
+    dict_set(opts, "sag", get_int(inputs, "sag", 0))
+    dict_set(opts, "sag_scale", get_float(inputs, "sag_scale", 1.0))
+    dict_set(opts, "clarity", get_float(inputs, "clarity", 0.2))
+    dict_set(opts, "sharpen", get_float(inputs, "sharpen", 0.3))
+    dict_set(opts, "sharpen_radius", get_int(inputs, "sharpen_radius", 1))
+    dict_set(opts, "smart_sharpen", get_float(inputs, "smart_sharpen", 0.5))
+    dict_set(opts, "smart_sharpen_radius", get_int(inputs, "smart_sharpen_radius", 2))
+    dict_set(opts, "edge_sharpen", get_float(inputs, "edge_sharpen", 1.5))
+    dict_set(opts, "edge_sharpen_radius", get_int(inputs, "edge_sharpen_radius", 2))
+    dict_set(opts, "edge_sharpen_threshold", get_float(inputs, "edge_sharpen_threshold", 0.3))
 
-    hires_steps = get_int(inputs, "hires_steps", 45)
-    hires_strength = get_float(inputs, "hires_strength", 0.35)
-
-    freeu = get_int(inputs, "freeu", 1)
-    freeu_b1 = get_float(inputs, "freeu_b1", 1.3)
-    freeu_b2 = get_float(inputs, "freeu_b2", 1.4)
-
-    sag = get_int(inputs, "sag", 0)
-    sag_scale = get_float(inputs, "sag_scale", 1.0)
-
-    clarity = get_float(inputs, "clarity", 0.2)
-    sharpen = get_float(inputs, "sharpen", 0.3)
-    sharpen_radius = get_int(inputs, "sharpen_radius", 1)
-
-    output_dir = get_str(inputs, "output_dir", "/tmp/comfy_output")
-    filename_prefix = get_str(inputs, "filename_prefix", "comfy")
-    output_path = output_dir + "/" + filename_prefix + ".png"
-
-    rc = sd_ensure_directory(output_dir)
-    if rc != 0:
-        print("Failed to create output dir: " + output_dir)
-        return (None,)
-
-    rc = sd_generate_hires(pipeline, prompt, negative_prompt,
-                           width, height, steps, cfg,
-                           sampler_name, scheduler, seed,
-                           vae_tiling, vae_tile_size, vae_tile_overlap,
-                           hires_steps, hires_strength,
-                           freeu, freeu_b1, freeu_b2,
-                           sag, sag_scale,
-                           clarity, sharpen, sharpen_radius,
-                           output_path)
+    out = sampler_output(inputs)
+    rc = run_sampler(model, prompt, negative_prompt, 0, 0, opts, out[0], out[1])
     if rc != 0:
         print("HiResFix generate failed, rc=" + string_of_int(rc))
         return (None,)
 
-    print("HiResFix: saved " + output_path)
-    return (output_path,)
+    print("HiResFix: saved " + out[1])
+    return (out[1],)
 
 
 register_node("HiResFix", "HiRes Fix",
@@ -1477,7 +662,7 @@ register_node("HiResFix", "HiRes Fix",
 
 def save_image(inputs):
     image_path = dict_get(inputs, "images")
-    if image_path is None:
+    if is_none(image_path):
         print("SaveImage: no image path received")
         return (None,)
     print("Image saved to: " + image_path)
@@ -1488,6 +673,246 @@ register_node("SaveImage", "Save Image",
               "save_image", ("IMAGE",), True)
 
 
+def adetailer(inputs):
+    model: SDPipelineHandle = dict_get(inputs, "model")
+    if is_none(model):
+        print("ADetailer: model is missing")
+        return (None,)
+
+    prompt = resolve_prompt_text(inputs, "positive", "prompt")
+    negative_prompt = resolve_prompt_text(inputs, "negative", "negative_prompt")
+
+    width = get_int(inputs, "width", 1024)
+    height = get_int(inputs, "height", 1024)
+
+    opts = parse_sampler_opts(inputs)
+    dict_set(opts, "ad_model_path", get_str(inputs, "ad_model_path", ""))
+    dict_set(opts, "ad_prompt", get_str(inputs, "ad_prompt", prompt))
+    dict_set(opts, "ad_negative_prompt", get_str(inputs, "ad_negative_prompt", negative_prompt))
+
+    out = sampler_output(inputs)
+    rc = run_sampler(model, prompt, negative_prompt, width, height, opts, out[0], out[1])
+    if rc != 0:
+        print("ADetailer generate failed, rc=" + string_of_int(rc))
+        return (None,)
+
+    return (out[1],)
+
+
+register_node("ADetailer", "ADetailer",
+              "adetailer", ("IMAGE",), False)
+
+
+def ipadapter_apply(inputs):
+    model: SDPipelineHandle = dict_get(inputs, "model")
+    if is_none(model):
+        print("IPAdapterApply: model is missing")
+        return (None,)
+    pipeline = model.pipeline
+
+    ipadapter_obj: IPAdapterModel = dict_get(inputs, "ipadapter")
+    clip_vision_obj: CLIPVisionModel = dict_get(inputs, "clip_vision")
+    if is_some(ipadapter_obj):
+        ipadapter_model = ipadapter_obj.name
+    else:
+        ipadapter_model = get_str(inputs, "ipadapter_model", "")
+    if is_some(clip_vision_obj):
+        clip_vision_model = clip_vision_obj.name
+    else:
+        clip_vision_model = get_str(inputs, "clip_vision_model", "")
+
+    image_path = get_str(inputs, "image_path", "")
+    weight = get_float(inputs, "weight", 1.0)
+
+    if ipadapter_model == "" or clip_vision_model == "" or image_path == "":
+        print("IPAdapterApply: empty model/image path, skipping")
+        return (model,)
+
+    ipadapter_path = resolve_model_path(ipadapter_model)
+    clip_vision_path = resolve_model_path(clip_vision_model)
+
+    rc = sd_set_ipadapter(pipeline, ipadapter_path, clip_vision_path, image_path, weight)
+    if rc != 0:
+        print("IPAdapterApply: set_ipadapter failed, rc=" + string_of_int(rc))
+        return (None,)
+
+    print("IPAdapterApply: model=" + ipadapter_model + " clip=" + clip_vision_model + " image=" + image_path + " weight=" + format_float(weight, 2))
+    return (model,)
+
+
+register_node("IPAdapterApply", "IPAdapter Apply",
+              "ipadapter_apply", ("MODEL",), False)
+
+
+def clip_vision_loader(inputs):
+    name = get_str(inputs, "clip_name", "")
+    if name == "":
+        print("CLIPVisionLoader: no clip_name provided")
+        return (None,)
+    return (CLIPVisionModel(name),)
+
+
+register_node("CLIPVisionLoader", "CLIP Vision Loader",
+              "clip_vision_loader", ("CLIP_VISION",), False)
+
+
+def ipadapter_model_loader(inputs):
+    name = get_str(inputs, "ipadapter_file", "")
+    if name == "":
+        print("IPAdapterModelLoader: no ipadapter_file provided")
+        return (None,)
+    return (IPAdapterModel(name),)
+
+
+register_node("IPAdapterModelLoader", "IPAdapter Model Loader",
+              "ipadapter_model_loader", ("IPADAPTER",), False)
+
+
+def load_image(inputs):
+    image_path = get_str(inputs, "image", "")
+    if image_path == "":
+        print("LoadImage: no image path provided")
+        return (None,)
+    return (image_path,)
+
+
+register_node("LoadImage", "Load Image",
+              "load_image", ("IMAGE", "MASK"), False)
+
+
+def preview_image(inputs):
+    image_path = dict_get(inputs, "images")
+    if is_none(image_path):
+        print("PreviewImage: no image received")
+        return (None,)
+    return (image_path,)
+
+
+register_node("PreviewImage", "Preview Image",
+              "preview_image", ("IMAGE",), True)
+
+
+def clip_set_last_layer(inputs):
+    clip = dict_get(inputs, "clip")
+    layer = get_int(inputs, "stop_at_clip_layer", -1)
+    # The backend currently always uses the default CLIP layer;
+    # this node is provided for workflow compatibility.
+    if is_none(clip):
+        return (None,)
+    return (clip,)
+
+
+register_node("CLIPSetLastLayer", "CLIP Set Last Layer",
+              "clip_set_last_layer", ("CLIP",), False)
+
+
+def conditioning_combine(inputs):
+    text = merge_conditioning_text(
+        conditioning_text(dict_get(inputs, "conditioning_1")),
+        conditioning_text(dict_get(inputs, "conditioning_2")))
+    return (Conditioning(text),)
+
+
+register_node("ConditioningCombine", "Conditioning Combine",
+              "conditioning_combine", ("CONDITIONING",), False)
+
+
+def conditioning_concat(inputs):
+    text = merge_conditioning_text(
+        conditioning_text(dict_get(inputs, "conditioning_to")),
+        conditioning_text(dict_get(inputs, "conditioning_from")))
+    return (Conditioning(text),)
+
+
+register_node("ConditioningConcat", "Conditioning Concat",
+              "conditioning_concat", ("CONDITIONING",), False)
+
+
+def conditioning_average(inputs):
+    c_to = conditioning_text(dict_get(inputs, "conditioning_to"))
+    c_from = conditioning_text(dict_get(inputs, "conditioning_from"))
+    strength = get_float(inputs, "conditioning_to_strength", 0.5)
+    # Simple strength-aware combination: stronger text goes first.
+    if strength >= 0.5:
+        return (Conditioning(merge_conditioning_text(c_to, c_from)),)
+    return (Conditioning(merge_conditioning_text(c_from, c_to)),)
+
+
+register_node("ConditioningAverage", "Conditioning Average",
+              "conditioning_average", ("CONDITIONING",), False)
+
+
+def latent_upscale(inputs):
+    latent = dict_get(inputs, "samples")
+    if is_none(latent):
+        print("LatentUpscale: no samples received")
+        return (None,)
+    # In this simplified backend, width/height directly replace latent dimensions.
+    width = get_int(inputs, "width", latent.width)
+    height = get_int(inputs, "height", latent.height)
+    batch_size = latent.batch_size
+    return (LatentImage(width, height, batch_size),)
+
+
+register_node("LatentUpscale", "Latent Upscale",
+              "latent_upscale", ("LATENT",), False)
+
+
+def latent_crop(inputs):
+    latent = dict_get(inputs, "samples")
+    if is_none(latent):
+        print("LatentCrop: no samples received")
+        return (None,)
+    width = get_int(inputs, "width", latent.width)
+    height = get_int(inputs, "height", latent.height)
+    batch_size = latent.batch_size
+    return (LatentImage(width, height, batch_size),)
+
+
+register_node("LatentCrop", "Latent Crop",
+              "latent_crop", ("LATENT",), False)
+
+
+def reroute(inputs):
+    val = dict_get(inputs, "anything")
+    return (val,)
+
+
+register_node("Reroute", "Reroute",
+              "reroute", ("*",), False)
+
+
+def ksampler_advanced(inputs):
+    model: SDPipelineHandle = dict_get(inputs, "model")
+    if is_none(model):
+        print("KSamplerAdvanced: model is missing")
+        return (None,)
+
+    prompt = resolve_prompt_text(inputs, "positive", "prompt")
+    negative_prompt = resolve_prompt_text(inputs, "negative", "negative_prompt")
+
+    latent: LatentImage = dict_get(inputs, "latent_image")
+    if is_none(latent):
+        width = get_int(inputs, "width", 1024)
+        height = get_int(inputs, "height", 1024)
+    else:
+        width = latent.width
+        height = latent.height
+
+    opts = parse_sampler_opts(inputs)
+    out = sampler_output(inputs)
+    rc = run_sampler(model, prompt, negative_prompt, width, height, opts, out[0], out[1])
+    if rc != 0:
+        print("KSamplerAdvanced generate failed, rc=" + string_of_int(rc))
+        return (None,)
+
+    return (out[1],)
+
+
+register_node("KSamplerAdvanced", "KSampler Advanced",
+              "ksampler_advanced", ("LATENT", "IMAGE"), False)
+
+
 def call_node(class_type: str, inputs):
     if class_type == "CheckpointLoaderSimple":
         return checkpoint_loader_simple(inputs)
@@ -1495,16 +920,46 @@ def call_node(class_type: str, inputs):
         return dual_clip_loader(inputs)
     elif class_type == "CLIPTextEncode":
         return clip_text_encode(inputs)
+    elif class_type == "CLIPSetLastLayer":
+        return clip_set_last_layer(inputs)
+    elif class_type == "ConditioningCombine":
+        return conditioning_combine(inputs)
+    elif class_type == "ConditioningConcat":
+        return conditioning_concat(inputs)
+    elif class_type == "ConditioningAverage":
+        return conditioning_average(inputs)
     elif class_type == "EmptyLatentImage":
         return empty_latent_image(inputs)
+    elif class_type == "LatentUpscale":
+        return latent_upscale(inputs)
+    elif class_type == "LatentCrop":
+        return latent_crop(inputs)
     elif class_type == "KSampler":
         return ksampler(inputs)
+    elif class_type == "KSamplerAdvanced":
+        return ksampler_advanced(inputs)
+    elif class_type == "LORALoader":
+        return lora_loader(inputs)
     elif class_type == "DiffusionModelLoader":
         return diffusion_model_loader(inputs)
     elif class_type == "HiResFix":
         return hires_fix(inputs)
+    elif class_type == "ADetailer":
+        return adetailer(inputs)
+    elif class_type == "IPAdapterApply":
+        return ipadapter_apply(inputs)
+    elif class_type == "CLIPVisionLoader":
+        return clip_vision_loader(inputs)
+    elif class_type == "IPAdapterModelLoader":
+        return ipadapter_model_loader(inputs)
     elif class_type == "VAEDecode":
         return vae_decode(inputs)
+    elif class_type == "LoadImage":
+        return load_image(inputs)
+    elif class_type == "PreviewImage":
+        return preview_image(inputs)
+    elif class_type == "Reroute":
+        return reroute(inputs)
     elif class_type == "SaveImage":
         return save_image(inputs)
     else:
@@ -1576,14 +1031,14 @@ def execute_prompt(prompt_json: str, output_dir: str):
         i = 0
         while i < n:
             nid = node_ids[i]
-            if dict_get(executed, nid) is None:
+            if is_none(dict_get(executed, nid)):
                 ready = 1
                 dep_list = dict_get(deps, nid)
                 m = len(dep_list)
                 j = 0
                 while j < m:
                     dep_id = dep_list[j]
-                    if dict_get(executed, dep_id) is None:
+                    if is_none(dict_get(executed, dep_id)):
                         ready = 0
                     j = j + 1
                 if ready == 1:
@@ -1598,7 +1053,7 @@ def execute_prompt(prompt_json: str, output_dir: str):
                     progress = 1
             i = i + 1
         if progress == 0:
-            break
+            remaining = 0
     return node_outputs
 # === main.static.py ===
 
@@ -1618,7 +1073,7 @@ def build_prompt_workflow(checkpoint: str, prompt: str, output_path: str, output
                           width: int, height: int, steps: int, cfg: float,
                           seed: int, sampler: str, scheduler: str) -> str:
     # Determine output directory and filename prefix.
-    if output_path is not None and str_length(output_path) > 0:
+    if is_some(output_path) and str_length(output_path) > 0:
         out_dir = path_dirname(output_path)
         if str_length(out_dir) == 0:
             out_dir = "."
@@ -1673,10 +1128,10 @@ def main():
         print_help()
         exit_program(0)
     output_dir = dict_get(args, "output_dir")
-    if output_dir is None:
+    if is_none(output_dir):
         output_dir = "./output"
     workflow_path = dict_get(args, "workflow")
-    if workflow_path is not None and str_length(workflow_path) > 0:
+    if is_some(workflow_path) and str_length(workflow_path) > 0:
         content = file_read_all(workflow_path)
         result = execute_prompt(content, output_dir)
     else:
@@ -1690,7 +1145,7 @@ def main():
         seed = get_int(args, "seed", 42)
         sampler = get_str(args, "sampler", "euler_a")
         scheduler = get_str(args, "scheduler", "discrete")
-        if checkpoint is not None and prompt is not None:
+        if is_some(checkpoint) and is_some(prompt):
             content = build_prompt_workflow(checkpoint, prompt, output_path, output_dir,
                                               width, height, steps, cfg, seed,
                                               sampler, scheduler)

@@ -214,25 +214,9 @@
 (define make_dict (lambda () (make-dict)))
 (define dict_get (lambda (d key) (dict-get d key)))
 (define dict_set (lambda (d key val) (dict-set! d key val)))
-(define dict_contains (lambda (d key) (dict-contains? d key)))
-(define dict_keys (lambda (d) (hashtable-keys d)))
-(define (make_dict_from . kvs)
-  (let ((d (make-dict)))
-    (let loop ((remaining kvs))
-      (if (not (null? remaining))
-        (begin (dict-set! d (car remaining) (cadr remaining)) (loop (cddr remaining)))
-        d))
-    d))
 (define file_open (lambda (path mode) (file-open path mode)))
 (define file_close (lambda (fp) (file-close fp)))
-(define (file_read_all path)
-  "读取整个文件（自动打开和关闭）"
-  (let ((fp (libc-fopen path "r")))
-    (if fp
-        (let ((content (file-read-all fp)))
-          (libc-fclose fp)
-          content)
-        (begin (display "file_read_all: cannot open ") (display path) (newline) ""))))
+(define file_read_all (lambda (fp) (file-read-all fp)))
 (define file_write (lambda (fp s) (file-write fp s)))
 (define file_exists (lambda (path) (file-exists? path)))
 (define http_get_simple (lambda (url) (http-get-simple url)))
@@ -678,6 +662,7 @@
 (define (os-mkdir path) (= (libc-mkdir path 511) 0))
 (define (os-rmdir path) (= (libc-rmdir path) 0))
 (define (os-shell cmd) (libc-system cmd))
+(define (os_shell cmd) (os-shell cmd))
 (define (os_cwd) (os-getcwd))
 (define (os_list_dir path) (os-list-dir path))
 (define (os_getenv name) (os-getenv name))
@@ -801,8 +786,8 @@
 (define True #t)
 (define False #f)
 (define (argv)
-  "返回命令行参数列表（vector，兼容 py-list）"
-  (list->vector (command-line)))
+  "返回命令行参数列表"
+  (command-line))
 
 (define libc-exit (foreign-procedure "exit" (int) void))
 
@@ -834,18 +819,6 @@
 ;; formats a float to fixed decimal places
 (define (format_float f digits)
   (format "~,vf" digits (inexact f)))
-
-(define (is_link x)
-  "Check if x is a workflow link: [node_id_string, output_index_number]"
-  (and (vector? x) (= (vector-length x) 2) (string? (vector-ref x 0)) (number? (vector-ref x 1))))
-
-(define (tensor_shape t)
-  "Get tagged tensor shape vector"
-  (tagged-tensor-shape t))
-
-(define (tensor_shape_dim t i)
-  "Get tagged tensor dimension i"
-  (tagged-tensor-dim t i))
 
 (define (list_length v)
   (cond ((string? v) (string-length v))
@@ -957,6 +930,10 @@
 (define (py-list-append lst val)
   "在通用列表末尾追加元素，返回新列表"
   (list->vector (append (vector->list lst) (list val))))
+
+(define (py-list-concat a b)
+  "列表拼接（对应 python list + list），返回新列表"
+  (list->vector (append (vector->list a) (vector->list b))))
 
 (define (py-list-ref lst i)
   "读取通用列表第 i 个元素"

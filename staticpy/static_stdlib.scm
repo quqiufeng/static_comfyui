@@ -585,12 +585,6 @@
         (return))
       (lambda ()
         (load-shared-object "libtorch_std_helper.so")
-        ;; 加载 CLIP-from-safetensors helper
-        ;; 先试相对路径，再试绝对路径
-        (or (guard (e (else #f)) (load-shared-object "clip_helper.so") #t)
-            (guard (e (else #f)) (load-shared-object "/opt/ReScheme/clip_helper.so") #t)
-            (guard (e (else #f)) (load-shared-object "/tmp/comfycli_bin/clip_helper.so") #t)
-            (display "WARNING: clip_helper.so not loaded, CLIP from safetensors disabled\n"))
         (set! *torch-available* #t)))))
 
 ;; dtype 常量
@@ -610,6 +604,25 @@
 (define torch-std-clone #f)
 (define torch-std-detach #f)
 (define torch-std-to-dtype #f)
+(define torch-std-dtype #f)
+(define torch-std-scalar-tensor #f)
+(define torch-std-scalar-tensor-like #f)
+(define torch-std-index-rows2 #f)
+(define torch-std-arange-f-cuda #f)
+(define torch-std-arange-f-offset #f)
+(define torch-std-cat-int64 #f)
+(define torch-std-last-argmax #f)
+(define torch-std-image-resize-float #f)
+(define torch-std-rsqrt #f)
+(define torch-std-topk #f)
+(define torch-std-tpack-load #f)
+(define torch-std-tpack-get #f)
+(define torch-std-cos #f)
+(define torch-std-sin #f)
+(define torch-std-outer #f)
+(define torch-std-rope-inv #f)
+(define torch-std-arange-f #f)
+(define torch-std-causal-mask #f)
 (define torch-std-delete-tensor #f)
 (define torch-std-numel #f)
 (define torch-std-ndim #f)
@@ -650,6 +663,7 @@
 (define torch-std-multinomial #f)
 (define torch-std-gather #f)
 (define torch-std-index-select #f)
+(define torch-std-index-rows2 #f)
 (define torch-std-index-tensor #f)
 
 (define torch-std-reshape #f)
@@ -736,7 +750,6 @@
 (define torch-std-sample-ddim #f)
 (define torch-std-sample-euler #f)
 (define torch-std-sample-euler-ancestral #f)
-(define torch-std-euler-step #f)
 (define torch-std-sample-dpmpp-2m #f)
 (define torch-std-sampler-sigmas #f)
 ;; Image processing
@@ -750,28 +763,12 @@
 ;; VAE tiling
 (define torch-std-vae-encode-tiled #f)
 (define torch-std-vae-decode-tiled #f)
-(define torch-std-vae-decode-from-dict #f)
 ;; CLIP tokenizer
 (define torch-std-clip-tokenizer-create #f)
 (define torch-std-clip-tokenizer-encode #f)
 (define torch-std-clip-tokenizer-free #f)
 ;; CLIP text encoder forward
 (define torch-std-clip-text-forward #f)
-(define torch-std-clip-text-forward-from-dict #f)
-;; SDXL UNet forward (new)
-(define torch-std-sdxl-unet-forward #f)
-(define torch-std-sdxl-dual-clip #f)
-(define torch-std-sdxl-get-pooled #f)
-(define torch-std-sdxl-get-pooled-l #f)
-;; T5 tokenizer (new)
-(define torch-std-t5-tokenizer-create #f)
-(define torch-std-t5-tokenizer-encode #f)
-(define torch-std-t5-tokenizer-free #f)
-;; FLUX forward (new)
-(define torch-std-flux-forward #f)
-;; Flow Matching (new)
-(define torch-std-fm-sigmas #f)
-(define torch-std-fm-step #f)
 
 (when *torch-available*
   (set! torch-std-tensor-from-blob
@@ -794,6 +791,44 @@
     (foreign-procedure "torch_std_detach" (void*) void*))
   (set! torch-std-to-dtype
     (foreign-procedure "torch_std_to_dtype" (void* int) void*))
+  (set! torch-std-dtype
+    (foreign-procedure "torch_std_dtype" (void*) int))
+  (set! torch-std-scalar-tensor
+    (foreign-procedure "torch_std_scalar_tensor" (double) void*))
+  (set! torch-std-scalar-tensor-like
+    (foreign-procedure "torch_std_scalar_tensor_like" (void* double) void*))
+  (set! torch-std-index-rows2
+    (foreign-procedure "torch_std_index_rows2" (void* void*) void*))
+  (set! torch-std-arange-f-cuda
+    (foreign-procedure "torch_std_arange_f_cuda" (long) void*))
+  (set! torch-std-arange-f-offset
+    (foreign-procedure "torch_std_arange_f_offset" (long long) void*))
+  (set! torch-std-cat-int64
+    (foreign-procedure "torch_std_cat_int64" (void* long) void*))
+  (set! torch-std-last-argmax
+    (foreign-procedure "torch_std_last_argmax" (void*) long))
+  (set! torch-std-image-resize-float
+    (foreign-procedure "torch_std_image_resize_float" (void* int int string) void*))
+  (set! torch-std-rsqrt
+    (foreign-procedure "torch_std_rsqrt" (void*) void*))
+  (set! torch-std-topk
+    (foreign-procedure "torch_std_topk" (void* long long int) void*))
+  (set! torch-std-tpack-load
+    (foreign-procedure "torch_std_tpack_load" (string) void*))
+  (set! torch-std-tpack-get
+    (foreign-procedure "torch_std_tpack_tensor" (string) void*))
+  (set! torch-std-cos
+    (foreign-procedure "torch_std_cos" (void*) void*))
+  (set! torch-std-sin
+    (foreign-procedure "torch_std_sin" (void*) void*))
+  (set! torch-std-outer
+    (foreign-procedure "torch_std_outer" (void* void*) void*))
+  (set! torch-std-rope-inv
+    (foreign-procedure "torch_std_rope_inv" (long double) void*))
+  (set! torch-std-arange-f
+    (foreign-procedure "torch_std_arange_f" (long) void*))
+  (set! torch-std-causal-mask
+    (foreign-procedure "torch_std_causal_mask" (long) void*))
   (set! torch-std-delete-tensor
     (foreign-procedure "torch_std_delete_tensor" (void*) void))
   (set! torch-std-numel
@@ -870,6 +905,8 @@
     (foreign-procedure "torch_std_gather" (void* long void*) void*))
   (set! torch-std-index-select
     (foreign-procedure "torch_std_index_select" (void* long void*) void*))
+  (set! torch-std-index-rows
+    (foreign-procedure "torch_std_index_rows" (void* void*) void*))
   (set! torch-std-index-tensor
     (foreign-procedure "torch_std_index_tensor" (void* void*) void*))
 
@@ -980,16 +1017,6 @@
   (set! torch-std-is-cuda
     (foreign-procedure "torch_std_is_cuda" (void*) int))
 
-  ;; ---- CUDA 显存管理 (可能无 CUDA 编译) ----
-  (set! torch-std-cuda-get-free-memory
-    (guard (e (else #f)) (foreign-procedure "torch_std_cuda_get_free_memory" () long)))
-  (set! torch-std-cuda-load-model
-    (guard (e (else #f)) (foreign-procedure "torch_std_cuda_load_model" (int void*) void*)))
-  (set! torch-std-cuda-unload-model
-    (guard (e (else #f)) (foreign-procedure "torch_std_cuda_unload_model" (void*) void)))
-  (set! torch-std-cuda-soft-empty-cache
-    (guard (e (else #f)) (foreign-procedure "torch_std_cuda_soft_empty_cache" () void)))
-
   ;; ---- JIT module loading (new) ----
   (set! torch-std-jit-load
     (foreign-procedure "torch_std_jit_load" (string) void*))
@@ -1054,8 +1081,6 @@
     (foreign-procedure "torch_std_sample_euler_ancestral" (void* void* void* void*) void*))
   (set! torch-std-sample-dpmpp-2m
     (foreign-procedure "torch_std_sample_dpmpp_2m" (void* void* void* void* void* int) void*))
-  (set! torch-std-euler-step
-    (foreign-procedure "torch_std_euler_step" (void* void* void* void* void* double) void*))
   (set! torch-std-sampler-sigmas
     (foreign-procedure "torch_std_sampler_sigmas" (int double double string) void*))
 
@@ -1080,8 +1105,6 @@
     (foreign-procedure "torch_std_vae_encode_tiled" (void* void* int int) void*))
   (set! torch-std-vae-decode-tiled
     (foreign-procedure "torch_std_vae_decode_tiled" (void* void* int int) void*))
-  (set! torch-std-vae-decode-from-dict
-    (foreign-procedure "torch_std_vae_decode_from_dict" (void* void*) void*))
 
   ;; ---- CLIP BPE tokenizer ----
   (set! torch-std-clip-tokenizer-create
@@ -1091,51 +1114,9 @@
   (set! torch-std-clip-tokenizer-free
     (foreign-procedure "torch_std_clip_tokenizer_free" (void*) void))
 
-  ;; ---- CLIP text encoder forward (from safetensors dict) ----
+  ;; ---- CLIP text encoder forward ----
   (set! torch-std-clip-text-forward
-    (foreign-procedure "torch_std_clip_text_forward" (void* void* int) void*))
-  ;; ---- CLIP text encoder forward from safetensors dict (no JIT modules!) ----
-  (set! torch-std-clip-text-forward-from-dict
-    (foreign-procedure "torch_std_clip_text_forward_from_dict" (void* void* int int int int) void*))
-
-  ;; ---- CUDA 显存管理 wrapper (可能无 CUDA 编译) ----
-  (set! torch-std-cuda-get-free-memory
-    (guard (e (else #f)) (foreign-procedure "torch_std_cuda_get_free_memory" () long)))
-  (set! torch-std-cuda-load-model
-    (guard (e (else #f)) (foreign-procedure "torch_std_cuda_load_model" (int void*) void*)))
-  (set! torch-std-cuda-unload-model
-    (guard (e (else #f)) (foreign-procedure "torch_std_cuda_unload_model" (void*) void)))
-  (set! torch-std-cuda-soft-empty-cache
-    (guard (e (else #f)) (foreign-procedure "torch_std_cuda_soft_empty_cache" () void)))
-
-  ;; ---- SDXL UNet forward ----
-  (set! torch-std-sdxl-unet-forward
-    (foreign-procedure "torch_std_sdxl_unet_forward"
-      (void* void* void* void* void* double double double double double double) void*))
-  ;; ---- SDXL dual CLIP ----
-  (set! torch-std-sdxl-dual-clip
-    (foreign-procedure "torch_std_sdxl_dual_clip" (void* void* void*) void*))
-  ;; ---- SDXL pooled embeddings ----
-  (set! torch-std-sdxl-get-pooled
-    (foreign-procedure "torch_std_sdxl_get_pooled" () void*))
-  (set! torch-std-sdxl-get-pooled-l
-    (foreign-procedure "torch_std_sdxl_get_pooled_l" () void*))
-  ;; ---- T5 tokenizer ----
-  (set! torch-std-t5-tokenizer-create
-    (foreign-procedure "torch_std_t5_tokenizer_create" (string) void*))
-  (set! torch-std-t5-tokenizer-encode
-    (foreign-procedure "torch_std_t5_tokenizer_encode" (void* string int) void*))
-  (set! torch-std-t5-tokenizer-free
-    (foreign-procedure "torch_std_t5_tokenizer_free" (void*) void))
-  ;; ---- FLUX forward ----
-  (set! torch-std-flux-forward
-    (foreign-procedure "torch_std_flux_forward"
-      (void* void* void* double void* int int int int int) void*))
-  ;; ---- Flow Matching ----
-  (set! torch-std-fm-sigmas
-    (foreign-procedure "torch_std_fm_sigmas" (int double double) void*))
-  (set! torch-std-fm-step
-    (foreign-procedure "torch_std_fm_step" (void* void* double) void*)))
+    (foreign-procedure "torch_std_clip_text_forward" (void* void* int) void*)))
 
 ;; ============================================================
 ;; Part 11a: tagged tensor 抽象：#(ptr shape-vec)
@@ -1248,42 +1229,29 @@
           (torch-std-empty shape-ptr ndim *torch-dtype-float64*)
           shape-vec)))))
 
-(define (torch-to-tensor x)
-  "将 number 转成 1-element tensor，否则原样返回"
-  (if (number? x)
-    (let* ((shape (vector 1))
-           (shape-ptr (make-ffi-shape shape)))
-      (make-tagged-tensor
-        (torch-std-full shape-ptr 1 (inexact x) 1)  ;; dtype=1 = float64
-        shape))
-    x))
-
 (define (torch-add a b)
   "逐元素相加，返回新的 tagged tensor"
   (torch-check "torch not available"
     (lambda ()
-      (let ((tb (torch-to-tensor b)))
-        (make-tagged-tensor
-          (torch-std-add (tagged-tensor-ptr a) (tagged-tensor-ptr tb))
-          (tagged-tensor-shape a))))))
+      (make-tagged-tensor
+        (torch-std-add (tagged-tensor-ptr a) (tagged-tensor-ptr b))
+        (tagged-tensor-shape a)))))
 
 (define (torch-mul a b)
   "逐元素相乘，返回新的 tagged tensor"
   (torch-check "torch not available"
     (lambda ()
-      (let ((tb (torch-to-tensor b)))
-        (make-tagged-tensor
-          (torch-std-mul (tagged-tensor-ptr a) (tagged-tensor-ptr tb))
-          (tagged-tensor-shape a))))))
+      (make-tagged-tensor
+        (torch-std-mul (tagged-tensor-ptr a) (tagged-tensor-ptr b))
+        (tagged-tensor-shape a)))))
 
 (define (torch-sub a b)
   "逐元素相减，返回新的 tagged tensor"
   (torch-check "torch not available"
     (lambda ()
-      (let ((tb (torch-to-tensor b)))
-        (make-tagged-tensor
-          (torch-std-sub (tagged-tensor-ptr a) (tagged-tensor-ptr tb))
-          (tagged-tensor-shape a))))))
+      (make-tagged-tensor
+        (torch-std-sub (tagged-tensor-ptr a) (tagged-tensor-ptr b))
+        (tagged-tensor-shape a)))))
 
 (define (torch-clone a)
   "拷贝 tensor，返回新的 tagged tensor"
@@ -1310,22 +1278,13 @@
           s)))))
 
 (define (torch-matmul a b)
-  "矩阵乘法 C = A × B，自动推断并分配输出 tensor（目前仅支持 2D）"
+  "矩阵乘法 C = A × B（任意维 batched matmul，含广播；形状实时查询）"
   (torch-check "torch not available"
     (lambda ()
-      (let* ((shape-a (tagged-tensor-shape a))
-             (shape-b (tagged-tensor-shape b))
-             (ndim-a (vector-length shape-a))
-             (ndim-b (vector-length shape-b)))
-        (if (and (= ndim-a 2) (= ndim-b 2))
-          (let* ((m (vector-ref shape-a 0))
-                 (k (vector-ref shape-a 1))
-                 (n (vector-ref shape-b 1))
-                 (shape-c (vector m n)))
-            (make-tagged-tensor
-              (torch-std-matmul (tagged-tensor-ptr a) (tagged-tensor-ptr b))
-              shape-c))
-          (begin (display "torch-matmul only supports 2D tensors\n") #f))))))
+      (let ((p (torch-std-matmul (tagged-tensor-ptr a) (tagged-tensor-ptr b))))
+        (if p
+          (make-tagged-tensor p (torch-query-shape p))
+          (begin (display "torch-matmul failed\n") #f))))))
 
 (define (torch-to-list t)
   "将 tensor 数据复制为 Scheme vector（扁平化，按行优先）"
@@ -1338,6 +1297,297 @@
         (torch-std-to-double-array ptr data n)
         (do ((i 0 (+ i 1))) ((= i n) vec)
           (vector-set! vec i (foreign-ref 'double data (* i 8))))))))
+
+;; ============================================================
+;; 张量方法运行时（transformers 风格 x.pow(2).mean(-1, keepdim=True)）
+;; 由 static_translate 的 TENSOR_METHODS/TENSOR_ATTR_FN 生成 torch-tensor-* 调用
+;; ============================================================
+
+(define (torch-query-shape ptr)
+  "从 tensor ptr 读取真实 shape -> Scheme vector（int64 dims）"
+  (let* ((n (torch-std-ndim ptr))
+         (buf (foreign-alloc (if (fx= n 0) 8 (fx* n 8)))))
+    (torch-std-shape ptr buf)
+    (let ((v (make-vector n)))
+      (do ((i 0 (+ i 1))) ((= i n))
+        (vector-set! v i (foreign-ref 'long buf (* i 8))))
+      (foreign-free buf)
+      v)))
+
+(define (torch-tensor-binop std-fn a b)
+  "张量二元运算（标量提升：非 tensor 操作数转 0 维 f32 tensor）"
+  (let* ((pa (if (tagged-tensor? a)
+                 (tagged-tensor-ptr a)
+                 (torch-std-scalar-tensor-like (tagged-tensor-ptr b) (exact->inexact a))))
+         (pb (if (tagged-tensor? b)
+                 (tagged-tensor-ptr b)
+                 (torch-std-scalar-tensor-like (tagged-tensor-ptr a) (exact->inexact b))))
+         (p (std-fn pa pb)))
+    (make-tagged-tensor p (torch-query-shape p))))
+
+(define (torch-tensor-add a b) (torch-check "torch not available" (lambda () (torch-tensor-binop torch-std-add a b))))
+(define (torch-tensor-sub a b) (torch-check "torch not available" (lambda () (torch-tensor-binop torch-std-sub a b))))
+(define (torch-tensor-mul a b) (torch-check "torch not available" (lambda () (torch-tensor-binop torch-std-mul a b))))
+(define (torch-tensor-div a b) (torch-check "torch not available" (lambda () (torch-tensor-binop torch-std-div a b))))
+
+(define (torch-tensor-pow t e)
+  (torch-check "torch not available"
+    (lambda ()
+      (let ((p (torch-std-pow (tagged-tensor-ptr t) (exact->inexact e))))
+        (make-tagged-tensor p (torch-query-shape p))))))
+
+(define (torch-tensor-mean t dim keepdim)
+  (torch-check "torch not available"
+    (lambda ()
+      (let ((p (torch-std-mean-dim (tagged-tensor-ptr t) dim (if keepdim 1 0))))
+        (make-tagged-tensor p (torch-query-shape p))))))
+
+(define (torch-tensor-sum t dim keepdim)
+  (torch-check "torch not available"
+    (lambda ()
+      (let ((p (torch-std-sum-dim (tagged-tensor-ptr t) dim (if keepdim 1 0))))
+        (make-tagged-tensor p (torch-query-shape p))))))
+
+(define (torch-tensor-to t dtype)
+  (torch-check "torch not available"
+    (lambda ()
+      (let ((p (torch-std-to-dtype (tagged-tensor-ptr t) dtype)))
+        (make-tagged-tensor p (torch-query-shape p))))))
+
+(define (torch-tensor-float t)
+  (torch-tensor-to t 0))
+
+(define (torch-tensor-dtype t)
+  (torch-std-dtype (tagged-tensor-ptr t)))
+
+(define (torch-tensor-shape t)
+  (torch-query-shape (tagged-tensor-ptr t)))
+
+(define (torch-tensor-ndim t)
+  (torch-std-ndim (tagged-tensor-ptr t)))
+
+(define (torch-tensor-sqrt t)
+  (torch-check "torch not available"
+    (lambda () (make-tagged-tensor (torch-std-sqrt (tagged-tensor-ptr t))
+                                   (torch-query-shape (tagged-tensor-ptr t))))))
+
+(define (torch-tensor-clone t)
+  (torch-check "torch not available"
+    (lambda () (make-tagged-tensor (torch-std-clone (tagged-tensor-ptr t))
+                                   (tagged-tensor-shape t)))))
+
+(define (torch-cos t)
+  (torch-check "torch not available" (lambda () (make-tagged-tensor (torch-std-cos (tagged-tensor-ptr t)) (torch-query-shape (tagged-tensor-ptr t))))))
+(define (torch-sin t)
+  (torch-check "torch not available" (lambda () (make-tagged-tensor (torch-std-sin (tagged-tensor-ptr t)) (torch-query-shape (tagged-tensor-ptr t))))))
+(define (torch-outer a b)
+  (torch-check "torch not available" (lambda () (make-tagged-tensor (torch-std-outer (tagged-tensor-ptr a) (tagged-tensor-ptr b)) (torch-query-shape (tagged-tensor-ptr a))))))
+(define (torch-rope-inv-freq dim base)
+  (torch-check "torch not available" (lambda () (make-tagged-tensor (torch-std-rope-inv dim base) (vector (/ dim 2))))))
+(define (torch-rope-t-pos seq off)
+  (torch-check "torch not available" (lambda () (make-tagged-tensor (torch-std-arange-f-offset seq off) (vector seq)))))
+
+(define (torch-rope-t seq)
+  (torch-check "torch not available" (lambda () (make-tagged-tensor (torch-std-arange-f seq) (vector seq)))))
+(define (torch-causal-mask s)
+  (torch-check "torch not available" (lambda () (make-tagged-tensor (torch-std-causal-mask s) (vector s s)))))
+
+(define (torch-tpack-index t ids)
+  "torch.tpack_index(t, ids)：对 tpack 张量按 ids 取行（embed_tokens[ids]）"
+  (torch-check "torch not available"
+    (lambda ()
+      (let ((p (torch-std-index-rows2 (tagged-tensor-ptr t) (tagged-tensor-ptr ids))))
+        (make-tagged-tensor p (torch-query-shape p))))))
+
+(define (torch-tensor-ptr-debug t)
+  (tagged-tensor-ptr t))
+
+(define (torch-cat-id ids v)
+  "把标量 int 追加到 int64 ids 张量末尾，返回新张量"
+  (torch-check "torch not available"
+    (lambda ()
+      (let ((p (torch-std-cat-int64 (tagged-tensor-ptr ids) v)))
+        (make-tagged-tensor p (torch-query-shape p))))))
+
+(define (torch-narrow t dim start length)
+  "torch.narrow: 沿 dim 取 [start, start+length)"
+  (torch-check "torch not available"
+    (lambda ()
+      (make-tagged-tensor (torch-std-narrow (tagged-tensor-ptr t) dim start length)
+                          (torch-query-shape (tagged-tensor-ptr t))))))
+
+(define (torch-last-argmax logits)
+  "取 [1, s, V] 最后 token 的 argmax token id"
+  (torch-check "torch not available"
+    (lambda () (torch-std-last-argmax (tagged-tensor-ptr logits)))))
+
+(define (torch-tpack-load path)
+  "torch.tpack_load(path)：加载 TensorPack 权重（全局包），返回状态"
+  (torch-std-tpack-load path))
+
+(define (torch-tpack-get name)
+  "torch.tpack_get(name)：取已加载权重为 float32 tagged tensor"
+  (let ((p (torch-std-tpack-get name)))
+    (if p (make-tagged-tensor p (torch-query-shape p)) #f)))
+
+(define (torch-topk t k dim)
+  "torch.topk(t,k,dim) -> Scheme vector [values, indices]（各为 tagged tensor）"
+  (torch-check "torch not available"
+    (lambda ()
+      (let ((pv (torch-std-topk (tagged-tensor-ptr t) k dim 1))
+            (pi (torch-std-topk (tagged-tensor-ptr t) k dim 0)))
+        (vector (make-tagged-tensor pv (torch-query-shape pv))
+                (make-tagged-tensor pi (torch-query-shape pi)))))))
+
+(define (torch-rsqrt t)
+  (torch-check "torch not available"
+    (lambda () (make-tagged-tensor (torch-std-rsqrt (tagged-tensor-ptr t))
+                                   (torch-query-shape (tagged-tensor-ptr t))))))
+
+(define (torch-tensor-transpose-all t)
+  (torch-check "torch not available"
+    (lambda ()
+      (let* ((n (torch-std-ndim (tagged-tensor-ptr t)))
+             (p (if (fx<= n 2)
+                    (torch-std-transpose (tagged-tensor-ptr t) 0 1)
+                    (torch-std-transpose (tagged-tensor-ptr t) (- n 1) (- n 2)))))
+        (make-tagged-tensor p (torch-query-shape p))))))
+
+(define (torch-tensor-unsqueeze t dim)
+  (torch-check "torch not available"
+    (lambda ()
+      (let* ((ptr (tagged-tensor-ptr t))
+             (dd (if (< dim 0) (+ (torch-std-ndim ptr) dim 1) dim))
+             (p (torch-std-unsqueeze ptr dd)))
+        (make-tagged-tensor p (torch-query-shape p))))))
+
+(define (torch-tensor-squeeze t)
+  (torch-check "torch not available"
+    (lambda ()
+      (let ((p (torch-std-squeeze (tagged-tensor-ptr t))))
+        (make-tagged-tensor p (torch-query-shape p))))))
+
+(define (torch-tensor-contiguous t)
+  t)
+
+(define (torch-tensor-transpose t d0 d1)
+  (torch-check "torch not available"
+    (lambda () (make-tagged-tensor (torch-std-transpose (tagged-tensor-ptr t) d0 d1)
+                                   (torch-query-shape (tagged-tensor-ptr t))))))
+
+(define (torch-tensor-view . dims-args)
+  (torch-check "torch not available"
+    (lambda ()
+      (let* ((t (car dims-args))
+             (dims (cdr dims-args))
+             (n (length dims))
+             (buf (foreign-alloc (if (fx= n 0) 8 (fx* n 8)))))
+        (do ((i 0 (+ i 1)) (d dims (cdr d))) ((= i n))
+          (foreign-set! 'long buf (* i 8) (car d)))
+        (let ((p (torch-std-reshape (tagged-tensor-ptr t) buf n)))
+          (foreign-free buf)
+          (make-tagged-tensor p (list->vector dims)))))))
+
+(define (torch-tensor-reshape . dims-args)
+  (apply torch-tensor-view dims-args))
+
+(define (torch-tensor-permute t . dims)
+  (torch-check "torch not available"
+    (lambda ()
+      (let* ((n (length dims))
+             (buf (foreign-alloc (if (fx= n 0) 8 (fx* n 8)))))
+        (do ((i 0 (+ i 1)) (d dims (cdr d))) ((= i n))
+          (foreign-set! 'long buf (* i 8) (car d)))
+        (let ((p (torch-std-permute (tagged-tensor-ptr t) buf n)))
+          (foreign-free buf)
+          (make-tagged-tensor p (torch-query-shape p)))))))
+
+(define (torch-tensor-neg t)
+  (torch-check "torch not available"
+    (lambda () (make-tagged-tensor (torch-std-neg (tagged-tensor-ptr t))
+                                   (torch-query-shape (tagged-tensor-ptr t))))))
+
+(define (torch-tensor-slice-last t start end)
+  "沿最后一维切片 [start, end)。end=-1 表示到末尾。返回张量（保持原维度数）"
+  (torch-check "torch not available"
+    (lambda ()
+      (let* ((ptr (tagged-tensor-ptr t))
+             (ndim (torch-std-ndim ptr))
+             (buf (foreign-alloc (* ndim 8)))
+             (dim (- ndim 1)))
+        (torch-std-shape ptr buf)
+        (let* ((last-len (foreign-ref 'long buf (* dim 8)))
+               (hi (if (fx< end 0) last-len end))
+               (p (torch-std-narrow ptr dim start (fx- hi start))))
+          (foreign-free buf)
+          (make-tagged-tensor p (torch-query-shape p)))))))
+
+(define torch-tensor-index-select-raw #f)
+
+(define (torch-tensor-index-select t idx)
+  "t[idx]：高级索引取行（支持 1D/2D 任意形状 idx，语义同 python x[idx]）"
+  (torch-check "torch not available"
+    (lambda ()
+      (let ((p (torch-std-index-rows2 (tagged-tensor-ptr t) (tagged-tensor-ptr idx))))
+        (make-tagged-tensor p (torch-query-shape p))))))
+
+(define (torch-cat . args)
+  "torch.cat((a,b,...), dim)：首参为 tagged tensor 列表/vector，第二参 dim"
+  (torch-check "torch not available"
+    (lambda ()
+      (let* ((ts (car args))
+             (dim (if (pair? (cdr args)) (cadr args) 0))
+             (n (vector-length ts))
+             (buf (foreign-alloc (fx* n 8))))
+        (do ((i 0 (+ i 1))) ((= i n))
+          (foreign-set! 'void* buf (* i 8) (tagged-tensor-ptr (vector-ref ts i))))
+        (let ((p (torch-std-cat buf n dim)))
+          (foreign-free buf)
+          (make-tagged-tensor p (torch-query-shape p)))))))
+
+
+(define (torch-tensor-split t n dim)
+  (torch-check "torch not available"
+    (lambda () (list (torch-tensor-view t n dim)))))
+
+(define (torch-tensor-expand t a b)
+  (torch-check "torch not available"
+    (lambda () (make-tagged-tensor (torch-std-expand (tagged-tensor-ptr t) a b)
+                                   (vector a b)))))
+
+(define (torch-tensor-max t dim keepdim)
+  (torch-check "torch not available"
+    (lambda ()
+      (let ((p (torch-std-max-dim (tagged-tensor-ptr t) dim (if keepdim 1 0))))
+        (make-tagged-tensor p (torch-query-shape p))))))
+
+(define (torch-tensor-argmax t dim keepdim)
+  (torch-check "torch not available"
+    (lambda ()
+      (let ((p (torch-std-argmax-dim1 (tagged-tensor-ptr t) dim)))
+        (make-tagged-tensor p (vector))))))
+
+(define (torch-tensor-softmax t dim)
+  (torch-check "torch not available"
+    (lambda () (make-tagged-tensor (torch-std-softmax (tagged-tensor-ptr t) dim)
+                                   (tagged-tensor-shape t)))))
+
+(define (torch-tensor-masked-fill t mask value)
+  (torch-check "torch not available"
+    (lambda ()
+      (let ((p (torch-std-masked-fill (tagged-tensor-ptr t) (tagged-tensor-ptr mask) value)))
+        (make-tagged-tensor p (tagged-tensor-shape t))))))
+
+(define (torch-tensor-gather t dim index)
+  (torch-check "torch not available"
+    (lambda ()
+      (let ((p (torch-std-gather (tagged-tensor-ptr t) dim (tagged-tensor-ptr index))))
+        (make-tagged-tensor p (tagged-tensor-shape t))))))
+
+(define (torch-tensor-narrow t dim start length)
+  (torch-check "torch not available"
+    (lambda () (make-tagged-tensor (torch-std-slice (tagged-tensor-ptr t) dim start length)
+                                   (vector)))))
 
 (define (torch-randn . args)
   "创建 float64 随机正态 tensor，接受 shape vector 或若干整数"
@@ -1452,7 +1702,7 @@
 
 ;; 通用辅助：从裸 tensor 指针构造 tagged tensor，自动查询 shape
 (define (make-tagged-tensor-auto ptr)
-  (let* ((ndim (max 1 (torch-std-ndim ptr)))
+  (let* ((ndim (torch-std-ndim ptr))
          (shape-ptr (foreign-alloc (* ndim 8)))
          (shape (make-vector ndim)))
     (torch-std-shape ptr shape-ptr)
@@ -1565,13 +1815,6 @@
   (torch-check "torch not available"
     (lambda ()
       (make-tagged-tensor-auto (torch-std-unsqueeze (tagged-tensor-ptr t) dim)))))
-
-(define (torch-narrow t dim start len)
-  "张量切片: t[dim, start:start+len]"
-  (torch-check "torch not available"
-    (lambda ()
-      (make-tagged-tensor-auto
-        (torch-std-narrow (tagged-tensor-ptr t) dim start len)))))
 
 (define (torch-transpose t dim0 dim1)
   "交换两个维度"
@@ -1810,33 +2053,6 @@
     (lambda ()
       (> (torch-std-is-cuda (tagged-tensor-ptr t)) 0))))
 
-(define (torch-cuda-get-free-memory)
-  "获取 CUDA 空闲显存（字节）"
-  (torch-check "torch not available"
-    (lambda ()
-      (torch-std-cuda-get-free-memory))))
-
-(define (torch-cuda-load-model device t)
-  "将模型 tensor 加载到指定 CUDA 设备，返回新 tensor"
-  (torch-check "torch not available"
-    (lambda ()
-      (make-tagged-tensor-auto
-        (torch-std-cuda-load-model device (tagged-tensor-ptr t))))))
-
-(define (torch-cuda-unload-model t)
-  "从 GPU 卸载模型 tensor（释放内存）"
-  (torch-check "torch not available"
-    (lambda ()
-      (torch-std-cuda-unload-model (tagged-tensor-ptr t))
-      #t)))
-
-(define (torch-cuda-soft-empty-cache)
-  "清空 CUDA 缓存"
-  (torch-check "torch not available"
-    (lambda ()
-      (torch-std-cuda-soft-empty-cache)
-      #t)))
-
 (define (torch-where condition x y)
   "按 condition 选择 x 或 y"
   (torch-check "torch not available"
@@ -1845,11 +2061,10 @@
         (torch-std-where (tagged-tensor-ptr condition) (tagged-tensor-ptr x) (tagged-tensor-ptr y))))))
 
 (define (torch-eq a b)
-  "逐元素 == (b 可为 number)"
+  "逐元素 =="
   (torch-check "torch not available"
     (lambda ()
-      (let ((tb (torch-to-tensor b)))
-        (make-tagged-tensor (torch-std-eq (tagged-tensor-ptr a) (tagged-tensor-ptr tb)) (tagged-tensor-shape a))))))
+      (make-tagged-tensor (torch-std-eq (tagged-tensor-ptr a) (tagged-tensor-ptr b)) (tagged-tensor-shape a)))))
 
 (define (torch-gt a b)
   "逐元素 >"
@@ -1990,10 +2205,10 @@ Returns (B,4,H,W) output latent (autograd graph built)"
       (make-tagged-tensor-auto (torch-std-load-image path)))))
 
 (define (torch-save-image tensor path as-pgm)
-  "保存图像到文件。as-pgm: 0=color PPM, 1=grayscale PGM"
+  "保存 tensor 为图像文件。as-pgm=1 输出灰度 PGM，否则 PPM"
   (torch-check "torch not available"
     (lambda ()
-      (torch-std-save-image (tagged-tensor-ptr tensor) path (if (eqv? as-pgm 1) 1 0)))))
+      (torch-std-save-image (tagged-tensor-ptr tensor) path (if as-pgm 1 0)))))
 
 ;; ====== DDPM Scheduler ======
 
@@ -2110,19 +2325,6 @@ Returns (B,4,H,W) output latent (autograd graph built)"
           (tagged-tensor-ptr sigma-t)
           (tagged-tensor-ptr sigma-prev))))))
 
-(define (torch-euler-step x sigma-t sigma-next cond uncond cfg)
-  "CFG + Euler 一步融合（内部处理 device 兼容）"
-  (torch-check "torch not available"
-    (lambda ()
-      (make-tagged-tensor-auto
-        (torch-std-euler-step
-          (tagged-tensor-ptr x)
-          (tagged-tensor-ptr sigma-t)
-          (tagged-tensor-ptr sigma-next)
-          (tagged-tensor-ptr cond)
-          (tagged-tensor-ptr uncond)
-          cfg)))))
-
 (define (torch-sample-dpmpp-2m noise-pred x-t sigma-t sigma-prev old-denoisd is-first-step)
   "DPM++ 2M 二阶采样步"
   (torch-check "torch not available"
@@ -2144,6 +2346,13 @@ Returns (B,4,H,W) output latent (autograd graph built)"
         (torch-std-sampler-sigmas steps sigma-min sigma-max schedule)))))
 
 ;; ====== Image processing ======
+
+(define (torch-image-resize-float img new-h new-w mode)
+  "resize 图像返回 float tensor（模型输入用）"
+  (torch-check "torch not available"
+    (lambda ()
+      (make-tagged-tensor-auto
+        (torch-std-image-resize-float (tagged-tensor-ptr img) new-h new-w mode)))))
 
 (define (torch-image-resize img new-h new-w mode)
   "调整图像大小。mode: 'bilinear'/'nearest'/'bicubic'/'lanczos'"
@@ -2228,15 +2437,6 @@ Returns (B,4,H,W) output latent (autograd graph built)"
           vae-module
           (tagged-tensor-ptr latent) tile-size overlap)))))
 
-(define (torch-vae-decode-from-dict vae-dict latent)
-  "VAE decode from safetensors dict，返回 tagged tensor"
-  (torch-check "torch not available"
-    (lambda ()
-      (make-tagged-tensor-auto
-        (torch-std-vae-decode-from-dict
-          vae-dict
-          (tagged-tensor-ptr latent))))))
-
 ;; ====== CLIP BPE Tokenizer ======
 
 (define (torch-clip-tokenizer-create vocab-path merges-path)
@@ -2270,16 +2470,6 @@ cast-to-float16: 非零则输出转为 float16"
           clip-module
           (tagged-tensor-ptr token-ids)
           (if cast-to-float16 1 0))))))
-
-(define (torch-clip-text-forward-from-dict clip-dict token-ids d-model n-layers n-heads d-ffn)
-  "CLIP text encoder forward from safetensors dict: token_ids → (1,77,D) embeddings"
-  (torch-check "torch not available"
-    (lambda ()
-      (make-tagged-tensor-auto
-        (torch-std-clip-text-forward-from-dict
-          clip-dict
-          (tagged-tensor-ptr token-ids)
-          d-model n-layers n-heads d-ffn)))))
 
 ;; ====== nn 初始化辅助 ======
 
@@ -2500,88 +2690,3 @@ cast-to-float16: 非零则输出转为 float16"
     ((nn-sequential? model) (nn-sequential-call model x))
     ((procedure? model) (model x))
     (else (display "nn-call: unsupported model type\n") x)))
-
-;; ====== SDXL UNet forward (weight dict + meta) ======
-
-(define (torch-sdxl-unet-forward wdict input timestep text-emb pooled-emb
-                                  os-h os-w crop-t crop-l ts-h ts-w)
-  "SDXL UNet forward: weight dict + latent + text_emb + pooled + size/crop/target meta.
-All returns auto-grad graph output latent tensor."
-  (torch-check "torch not available"
-    (lambda ()
-      (make-tagged-tensor-auto
-        (torch-std-sdxl-unet-forward
-          wdict
-          (tagged-tensor-ptr input)
-          (tagged-tensor-ptr timestep)
-          (tagged-tensor-ptr text-emb)
-          (tagged-tensor-ptr pooled-emb)
-          os-h os-w crop-t crop-l ts-h ts-w)))))
-
-(define (torch-sdxl-dual-clip clip-l clip-g token-ids)
-  "Run SDXL Dual CLIP (CLIP-L + CLIP-G) on token ids, returns cat([l_out, g_out], -1) = (1,77,2048)
-Also stores pooled embeddings internally for retrieval via torch-sdxl-get-pooled / torch-sdxl-get-pooled-l"
-  (torch-check "torch not available"
-    (lambda ()
-      (make-tagged-tensor-auto
-        (torch-std-sdxl-dual-clip clip-l clip-g (tagged-tensor-ptr token-ids))))))
-
-(define (torch-sdxl-get-pooled)
-  "返回上一次 sdxl_dual_clip 的 CLIP-G pooled embedding (1,1280)"
-  (torch-check "torch not available"
-    (lambda ()
-      (make-tagged-tensor-auto (torch-std-sdxl-get-pooled)))))
-
-(define (torch-sdxl-get-pooled-l)
-  "返回上一次 sdxl_dual_clip 的 CLIP-L pooled embedding (1,768)"
-  (torch-check "torch not available"
-    (lambda ()
-      (make-tagged-tensor-auto (torch-std-sdxl-get-pooled-l)))))
-
-;; ====== T5 tokenizer (for FLUX / SD3) ======
-
-(define (torch-t5-tokenizer-create model-path)
-  "加载 T5 tokenizer（sentencepiece model），返回 opaque 句柄"
-  (torch-std-t5-tokenizer-create model-path))
-
-(define (torch-t5-tokenizer-encode tokenizer text max-len)
-  "将文本编码为 token_ids tensor (max-len,) int64"
-  (torch-check "torch not available"
-    (lambda ()
-      (make-tagged-tensor-auto
-        (torch-std-t5-tokenizer-encode tokenizer text max-len)))))
-
-(define (torch-t5-tokenizer-free tokenizer)
-  "释放 T5 tokenizer"
-  (torch-std-t5-tokenizer-free tokenizer))
-
-;; ====== FLUX forward ======
-
-(define (torch-flux-forward wdict img txt t img-pos guidance n-blocks n-heads-img n-heads-txt head-dim)
-  "FLUX forward pass: weight dict + image latent + T5 text embeddings + timestep + optional pos embed"
-  (torch-check "torch not available"
-    (lambda ()
-      (let ((pos (if img-pos (tagged-tensor-ptr img-pos) (void* 0))))
-        (make-tagged-tensor-auto
-          (torch-std-flux-forward
-            wdict
-            (tagged-tensor-ptr img)
-            (tagged-tensor-ptr txt)
-            (tagged-tensor-ptr t)
-            pos
-            guidance n-blocks n-heads-img n-heads-txt head-dim))))))
-
-;; ====== Flow Matching scheduler ======
-
-(define (torch-fm-sigmas steps sigma-min sigma-max)
-  "生成 flow matching sigma 调度 (steps+1,)，从 1.0 (noise) 到 0.0 (clean)"
-  (torch-check "torch not available"
-    (lambda ()
-      (make-tagged-tensor-auto (torch-std-fm-sigmas steps sigma-min sigma-max)))))
-
-(define (torch-fm-step velocity x-t dt)
-  "Flow Matching ODE 步：x_{t+1} = x_t + dt * velocity"
-  (torch-check "torch not available"
-    (lambda ()
-      (make-tagged-tensor-auto
-        (torch-std-fm-step (tagged-tensor-ptr velocity) (tagged-tensor-ptr x-t) dt)))))

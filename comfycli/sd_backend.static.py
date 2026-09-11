@@ -17,12 +17,6 @@ extern fn sd_pipeline_generate_full(pipeline: ptr, prompt: str, negative_prompt:
 
 extern fn sd_ensure_dir(path: str) -> int from "sdcpp_adapter"
 
-# SD weight type constants (matching stable-diffusion.h sd_type_t)
-SD_WTYPE_F32: int = 0
-SD_WTYPE_F16: int = 1
-SD_WTYPE_AUTO: int = 42  # SD_TYPE_COUNT
-
-
 def sd_create() -> ptr:
     return sd_pipeline_create()
 

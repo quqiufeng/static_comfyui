@@ -6,21 +6,25 @@
 
 ## 理解 StaticPy 语言
 
-三文件对照阅读（无需单独文档）：
+编译器核心（`staticpy/static_{translate.py,prelude.scm,stdlib.scm}`）是 `/opt/ReScheme` 上游的**原样拷贝，项目不做修改**。三文件对照阅读：
 
 | 文件 | 读什么 |
 |------|--------|
-| `staticpy/static_translate.py` | 支持/不支持哪些 Python 语法，`import torch` 如何映射为 `torch-*` |
-| `staticpy/static_prelude.scm` | int/float/bool 怎么编译为 fixnum/flonum，文件 I/O/dict/JSON 等内置函数 |
-| `staticpy/static_stdlib.scm` | `extern fn` 如何映射到 C++，`torch.add` 等 80+ 函数签名 |
+| `staticpy/static_translate.py` | 支持/不支持哪些 Python 语法 |
+| `staticpy/static_prelude.scm` | int/float/bool 编译为 fixnum/flonum，文件 I/O/dict/JSON 等内置 |
+| `staticpy/static_stdlib.scm` | `extern fn` / 张量函数签名 |
+
+项目侧只维护两处**胶水**（不 fork 翻译器）：
+- `comfycli/comfycli_ffi.scm` — `load-shared-object "libsdcpp_adapter.so"` + 上游缺失的内置
+- `staticpy/static_build_comfycli.sh` — 本地构建脚本（不链 torch、支持 GLIBC sysroot）
 
 快速理解：
 - **值类型**：int→fixnum（机器整数）、float→flonum（64位浮点）、bool→boolean
-- **列表**：`list[int]` → Scheme vector，非 Python list
-- **字典**：`make_dict()` / `dict_get()` → Scheme hashtable
+- **列表**：`list[int]` → Scheme vector，非 Python list（`len`→`list_length`，索引→`vector-ref`）
+- **字典**：`make_dict()` / `dict_get()` / `dict_set()` → Scheme hashtable（缺失返回 `#f`）
 - **异常**：不支持 try/except，用 `if` + 返回值检查替代
 - **类**：不支持继承，用 `@dataclass` + 组合替代
-- **FFI**：`torch.zeros([1,4,64,64])` → `(torch-zeros #(1 4 64 64))` → C++ `torch::zeros`
+- **FFI**：`extern fn ... from "sdcpp_adapter"` 声明 → 翻译器生成 `foreign-procedure`，`comfycli_ffi.scm` 负责 `load-shared-object`
 
 ## 编译与部署
 
@@ -117,29 +121,27 @@ comfycli-bin workflow.json --output-dir ./output
 - `libsdcpp_adapter.so` 已封装 `sd_pipeline_create/load/generate/free` 等 C API，供 StaticPy FFI 调用
 
 ## 已搭建的基础设施
-- `staticpy/` — StaticPy 编译器 (`static_translate.py`)、运行时 (`prelude`/`stdlib`)、构建脚本
+- `staticpy/` — StaticPy 工具链（上游 `/opt/ReScheme` 原样拷贝）+ `static_build_comfycli.sh` 本地构建胶水
+- `comfycli/comfycli_ffi.scm` — sd.cpp 共享库加载 + 上游缺失的内置（`dict_keys`/`is_none`/`is_link`/`path_dirname` 等）
 - `cpp/sd/` — stable-diffusion.cpp 推理后端封装 (`sdcpp_adapter.h/.cpp` + `build.sh` / `build_sd_dl.sh`)
 - `build.sh` — 编译 ELF + `libsdcpp_adapter.so`
 - `deploy.sh` — 打包依赖 .so + GLIBC 兼容层 + 动态后端插件 + 可选 CUDA Runtime
 - `comfycli_remote.sh` + `xgc_ctl.py` + `.env` + `remote_server.md` — Xiangongyun 远程 GPU 部署
 - `design.md` — 架构设计、文件映射、C++ 依赖清单
-- code search: ComfyUI 全量索引 (656 文件, 20,141 chunks, 2,633 函数)
+- code search: ComfyUI 全量索引 (797 文件, 25,586 chunks, 4,017 函数) — 见 `comfyui_analysis.md`
 
-## CUDA 显存管理（已就绪）
-4 个 extern fn 已加到 `libtorch_std_helper` + `static_stdlib.scm` + `static_translate.py`：
-- `torch.cuda_get_free_memory() → int`
-- `torch.cuda_load_model(device, tensor) → tensor`
-- `torch.cuda_unload_model(tensor)`
-- `torch.cuda_soft_empty_cache()`
-
-注意：当前后端已切换至 stable-diffusion.cpp（`libsdcpp_adapter.so`），上述 torch helper 暂时未使用，但接口保留。sd.cpp 内部通过 CUDA backend 自动管理显存；1024×1024 等较大分辨率在 VAE decode 阶段会自动启用 tiling 以避免 OOM。
+## CUDA 显存管理
+后端为 stable-diffusion.cpp（`libsdcpp_adapter.so`），显存由 sd.cpp 内部通过 CUDA backend 自动管理；1024×1024 等较大分辨率在 VAE decode 阶段会自动启用 tiling 以避免 OOM。
 
 ## StaticPy 关键约束
 - 无类继承/多态 → dataclass + 组合
-- 无 try/except → if 守卫 + Result 类型
+- 无 try/except → if 守卫 + 返回值检查
 - 无 lambda 闭包 / eval / exec
-- `import torch` 自动映射为 `torch-*` Scheme 函数
-- `extern fn foo(x: int, y: float) -> int from "torch_std"` 声明 C FFI
+- **无模块级可变全局变量** — 函数体内引用会被判 `undefined name`（硬错误）
+- **无 `break` / `continue`** — 翻译器不处理，需改写循环条件
+- **无 `is None` / `is not None`** — 用 `is_none()` / `is_some()`（见 `comfycli_ffi.scm`）
+- `list` 即 Scheme vector（`len`→`list_length`，索引→`vector-ref`）
+- `extern fn foo(x: int) -> int from "sdcpp_adapter"` 声明 C FFI；共享库由 `comfycli_ffi.scm` 加载
 
 ## 开发顺序（bottom-up）
 
@@ -219,10 +221,11 @@ python3 xgc_ctl.py shutdown_destroy <instance_id>
 ## 命名约定
 - ComfyUI 的 `a.py` → `a.static.py`
 - 放在 `comfycli/` 目录下
-- `extern fn` 走 `from "sdcpp_adapter"` 库
+- `extern fn` 走 `from "sdcpp_adapter"` 库；共享库加载与缺失内置统一放 `comfycli/comfycli_ffi.scm`
 
 ## 关键设计决策
 - 命令版先不做 HTTP/WS，后续再补 UI 层
 - C++ 推理后端已切换为 stable-diffusion.cpp（`libsdcpp_adapter.so`），不再依赖 libtorch helper
+- StaticPy 编译器核心用 `/opt/ReScheme` **上游原样拷贝，不打补丁**；comfycli 特有内容全放项目侧（`comfycli_ffi.scm` + `static_build_comfycli.sh`），便于跟随上游升级
 - 编译（build.sh）和部署（deploy.sh）职责分离
 - 产物 ELF 命名为 `comfycli-bin`，避免与源码目录 `comfycli/` 冲突

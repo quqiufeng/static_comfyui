@@ -220,14 +220,16 @@ StaticPy 只负责**编排**：解析 workflow JSON、拓扑排序、把节点�
 comfycli/*.static.py  ──→  concat_src.py  ──→  _bundle.static.py
                                                 │
                                                 ▼
-                         staticpy/static_translate.py  ──→  .ss (Scheme)
+                    staticpy/static_translate.py  ──→  .ss (Scheme)
                                                 │
                                                 ▼
-                         staticpy/static_build.sh  ──→  Chez AOT compile-file
-                                                │
+        staticpy/static_build_comfycli.sh  ──→  Chez AOT compile-file
+        （拼接 prelude + stdlib + comfycli_ffi.scm + code）   │
                                                 ▼
                          C launcher + objcopy + gcc  ──→  comfycli-bin (ELF)
 ```
+
+> `staticpy/` 下的编译器核心（`static_translate.py` / `static_prelude.scm` / `static_stdlib.scm`）是 `/opt/ReScheme` 上游的**原样拷贝**；comfycli 特有的 FFI 与缺失内置放在 `comfycli/comfycli_ffi.scm`，构建脚本为 `staticpy/static_build_comfycli.sh`。详见 [BUILD.md](./BUILD.md)。
 
 ### 技术栈
 
@@ -419,8 +421,8 @@ Phase 5: 端到端验证（workflow + prompt 均已通）
 
 | 目录 | 说明 |
 |------|------|
-| [`staticpy/`](./staticpy/) | StaticPy 编译器 (static_translate.py) + 运行时 (prelude / stdlib) + 构建脚本 |
-| [`comfycli/`](./comfycli/) | StaticPy 编排层源码（节点、DAG、CLI） |
+| [`staticpy/`](./staticpy/) | StaticPy 工具链（上游 `/opt/ReScheme` 原样拷贝）+ `static_build_comfycli.sh` 构建胶水 |
+| [`comfycli/`](./comfycli/) | StaticPy 编排层源码（节点、DAG、CLI）+ `comfycli_ffi.scm`（FFI/内置） |
 | [`cpp/sd/`](./cpp/sd/) | stable-diffusion.cpp 适配器 (`sdcpp_adapter.h/.cpp` + build 脚本) |
 
 ### 参考

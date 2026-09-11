@@ -1,8 +1,4 @@
-from sd_backend import sd_create, sd_free, sd_load, sd_load_ex, sd_load_lora, sd_generate_full, sd_ensure_directory, sd_set_ipadapter, sd_set_ipadapter_enabled, SD_WTYPE_AUTO
-
-
-NODE_CLASS_MAPPINGS: dict = make_dict()
-NODE_DISPLAY_NAMES: dict = make_dict()
+from sd_backend import sd_create, sd_free, sd_load, sd_load_ex, sd_load_lora, sd_generate_full, sd_ensure_directory, sd_set_ipadapter, sd_set_ipadapter_enabled
 
 
 @dataclass
@@ -51,13 +47,13 @@ def resolve_model_path(name: str) -> str:
 
 def resolve_prompt_text(inputs, key: str, fallback_key: str) -> str:
     c: Conditioning = dict_get(inputs, key)
-    if c is not None:
+    if is_some(c):
         return c.text
     return get_str(inputs, fallback_key, "")
 
 
 def conditioning_text(c: Conditioning) -> str:
-    if c is None:
+    if is_none(c):
         return ""
     return c.text
 
@@ -123,32 +119,26 @@ def run_sampler(model: SDPipelineHandle, prompt: str, negative_prompt: str,
 
 def register_node(class_type: str, display: str, func_name: str, ret_types: list,
                   is_output: bool):
-    meta = make_dict()
-    dict_set(meta, "display", display)
-    dict_set(meta, "function", func_name)
-    dict_set(meta, "return_types", ret_types)
-    dict_set(meta, "output_node", is_output)
-    dict_set(NODE_CLASS_MAPPINGS, class_type, meta)
-    dict_set(NODE_DISPLAY_NAMES, class_type, display)
+    pass
 
 
 def get_int(inputs, key: str, default: int) -> int:
     v = dict_get(inputs, key)
-    if v is None:
+    if is_none(v):
         return default
     return v
 
 
 def get_float(inputs, key: str, default: float) -> float:
     v = dict_get(inputs, key)
-    if v is None:
+    if is_none(v):
         return default
     return v
 
 
 def get_str(inputs, key: str, default: str) -> str:
     v = dict_get(inputs, key)
-    if v is None:
+    if is_none(v):
         return default
     return v
 
@@ -159,17 +149,17 @@ def checkpoint_loader_simple(inputs):
     clip_g_name = dict_get(inputs, "clip_g_name")
 
     ckpt_path = resolve_model_path(ckpt_name)
-    if clip_l_name is None:
+    if is_none(clip_l_name):
         clip_l_path = ""
     else:
         clip_l_path = resolve_model_path(clip_l_name)
-    if clip_g_name is None:
+    if is_none(clip_g_name):
         clip_g_path = ""
     else:
         clip_g_path = resolve_model_path(clip_g_name)
 
     pipeline = sd_create()
-    rc = sd_load(pipeline, ckpt_path, clip_l_path, clip_g_path, "", SD_WTYPE_AUTO, 8, 0)
+    rc = sd_load(pipeline, ckpt_path, clip_l_path, clip_g_path, "", 42, 8, 0)
     if rc != 0:
         print("SD checkpoint load failed, rc=" + string_of_int(rc))
         return (None, None, None)
@@ -219,7 +209,7 @@ register_node("EmptyLatentImage", "Empty Latent Image",
 
 def ksampler(inputs):
     model: SDPipelineHandle = dict_get(inputs, "model")
-    if model is None:
+    if is_none(model):
         print("KSampler: model is missing")
         return (None,)
 
@@ -227,7 +217,7 @@ def ksampler(inputs):
     negative_prompt = resolve_prompt_text(inputs, "negative", "negative_prompt")
 
     latent: LatentImage = dict_get(inputs, "latent_image")
-    if latent is None:
+    if is_none(latent):
         width = get_int(inputs, "width", 1024)
         height = get_int(inputs, "height", 1024)
     else:
@@ -253,7 +243,7 @@ def vae_decode(inputs):
     vae = dict_get(inputs, "vae")
     # In this backend VAE decode is already performed inside KSampler, so
     # this node just passes the already-decoded image path through.
-    if samples is None:
+    if is_none(samples):
         print("VAEDecode: no samples received")
         return (None,)
     return (samples,)
@@ -268,21 +258,21 @@ def diffusion_model_loader(inputs):
     llm_name = dict_get(inputs, "llm_name")
     vae_name = dict_get(inputs, "vae_name")
 
-    if diffusion_model_name is None:
+    if is_none(diffusion_model_name):
         print("DiffusionModelLoader: diffusion_model_name is required")
         return (None,)
-    if llm_name is None:
+    if is_none(llm_name):
         print("DiffusionModelLoader: llm_name is required")
         return (None,)
 
     diffusion_model_path = resolve_model_path(diffusion_model_name)
     llm_path = resolve_model_path(llm_name)
     vae_path = ""
-    if vae_name is not None:
+    if is_some(vae_name):
         vae_path = resolve_model_path(vae_name)
 
     pipeline = sd_create()
-    rc = sd_load_ex(pipeline, "", "", "", vae_path, SD_WTYPE_AUTO, 8, 1,
+    rc = sd_load_ex(pipeline, "", "", "", vae_path, 42, 8, 1,
                     diffusion_model_path, llm_path)
     if rc != 0:
         print("DiffusionModelLoader: load failed, rc=" + string_of_int(rc))
@@ -298,7 +288,7 @@ register_node("DiffusionModelLoader", "Load Diffusion Model (GGUF)",
 
 def lora_loader(inputs):
     model: SDPipelineHandle = dict_get(inputs, "model")
-    if model is None:
+    if is_none(model):
         print("LORALoader: model is missing")
         return (None,)
     lora_name = get_str(inputs, "lora_name", "")
@@ -322,7 +312,7 @@ register_node("LORALoader", "Load LoRA",
 
 def hires_fix(inputs):
     model: SDPipelineHandle = dict_get(inputs, "model")
-    if model is None:
+    if is_none(model):
         print("HiResFix: model is missing")
         return (None,)
 
@@ -376,7 +366,7 @@ register_node("HiResFix", "HiRes Fix",
 
 def save_image(inputs):
     image_path = dict_get(inputs, "images")
-    if image_path is None:
+    if is_none(image_path):
         print("SaveImage: no image path received")
         return (None,)
     print("Image saved to: " + image_path)
@@ -389,7 +379,7 @@ register_node("SaveImage", "Save Image",
 
 def adetailer(inputs):
     model: SDPipelineHandle = dict_get(inputs, "model")
-    if model is None:
+    if is_none(model):
         print("ADetailer: model is missing")
         return (None,)
 
@@ -419,18 +409,18 @@ register_node("ADetailer", "ADetailer",
 
 def ipadapter_apply(inputs):
     model: SDPipelineHandle = dict_get(inputs, "model")
-    if model is None:
+    if is_none(model):
         print("IPAdapterApply: model is missing")
         return (None,)
     pipeline = model.pipeline
 
     ipadapter_obj: IPAdapterModel = dict_get(inputs, "ipadapter")
     clip_vision_obj: CLIPVisionModel = dict_get(inputs, "clip_vision")
-    if ipadapter_obj is not None:
+    if is_some(ipadapter_obj):
         ipadapter_model = ipadapter_obj.name
     else:
         ipadapter_model = get_str(inputs, "ipadapter_model", "")
-    if clip_vision_obj is not None:
+    if is_some(clip_vision_obj):
         clip_vision_model = clip_vision_obj.name
     else:
         clip_vision_model = get_str(inputs, "clip_vision_model", "")
@@ -496,7 +486,7 @@ register_node("LoadImage", "Load Image",
 
 def preview_image(inputs):
     image_path = dict_get(inputs, "images")
-    if image_path is None:
+    if is_none(image_path):
         print("PreviewImage: no image received")
         return (None,)
     return (image_path,)
@@ -511,7 +501,7 @@ def clip_set_last_layer(inputs):
     layer = get_int(inputs, "stop_at_clip_layer", -1)
     # The backend currently always uses the default CLIP layer;
     # this node is provided for workflow compatibility.
-    if clip is None:
+    if is_none(clip):
         return (None,)
     return (clip,)
 
@@ -558,7 +548,7 @@ register_node("ConditioningAverage", "Conditioning Average",
 
 def latent_upscale(inputs):
     latent = dict_get(inputs, "samples")
-    if latent is None:
+    if is_none(latent):
         print("LatentUpscale: no samples received")
         return (None,)
     # In this simplified backend, width/height directly replace latent dimensions.
@@ -574,7 +564,7 @@ register_node("LatentUpscale", "Latent Upscale",
 
 def latent_crop(inputs):
     latent = dict_get(inputs, "samples")
-    if latent is None:
+    if is_none(latent):
         print("LatentCrop: no samples received")
         return (None,)
     width = get_int(inputs, "width", latent.width)
@@ -598,7 +588,7 @@ register_node("Reroute", "Reroute",
 
 def ksampler_advanced(inputs):
     model: SDPipelineHandle = dict_get(inputs, "model")
-    if model is None:
+    if is_none(model):
         print("KSamplerAdvanced: model is missing")
         return (None,)
 
@@ -606,7 +596,7 @@ def ksampler_advanced(inputs):
     negative_prompt = resolve_prompt_text(inputs, "negative", "negative_prompt")
 
     latent: LatentImage = dict_get(inputs, "latent_image")
-    if latent is None:
+    if is_none(latent):
         width = get_int(inputs, "width", 1024)
         height = get_int(inputs, "height", 1024)
     else:

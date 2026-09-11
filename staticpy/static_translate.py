@@ -44,7 +44,7 @@ def scheme_name(name):
 # ====== C 类型映射 ======
 TYPE_MAP = {
     "int": "int",
-    "float": "float",
+    "float": "double",
     "double": "double",
     "bool": "boolean",
     "str": "string",
@@ -288,47 +288,8 @@ BUILTIN_FN_RETURN_TYPES = {
     "range": Type("list", [Type("int")]),
     "print": Type("none"),
     "exit": Type("none"),
-    "argv": Type("list", [Type("str")]),
-    "exit_program": Type("none"),
     "make_float_array": Type("list", [Type("float")]),
     "make_int_array": Type("list", [Type("int")]),
-    # dict
-    "make_dict": Type("dict"),
-    "dict_get": Type("Any"),
-    "dict_get_or_empty": Type("str"),
-    "dict_set": Type("void"),
-    "dict_contains": Type("bool"),
-    "dict_keys": Type("list", [Type("str")]),
-    "make_dict_from": Type("dict"),
-    "dict_copy": Type("dict"),
-    # string
-    "str_length": Type("int"),
-    "str_ends_with": Type("bool"),
-    "str_starts_with": Type("bool"),
-    "str_replace": Type("str"),
-    "str_slice": Type("str"),
-    "str_join": Type("str"),
-    "str_split": Type("list", [Type("str")]),
-    "str_contains": Type("bool"),
-    "str_lower": Type("str"),
-    "str_upper": Type("str"),
-    "str_trim": Type("str"),
-    # list/vector
-    "py_list": Type("list", [Type("Any")]),
-    "py_list_append": Type("list", [Type("Any")]),
-    "py_list_ref": Type("Any"),
-    "py_list_length": Type("int"),
-    "list_to_py_list": Type("list", [Type("Any")]),
-    # os
-    "os_file_exists": Type("bool"),
-    "os_list_dir": Type("list", [Type("str")]),
-    "os_mkdir": Type("void"),
-    "os_getcwd": Type("str"),
-    "os_file_size": Type("int"),
-    # conversion
-    "string_of_int": Type("str"),
-    "string_to_int": Type("int"),
-    "string_to_float": Type("float"),
 }
 
 MODULE_FN_RETURN_TYPES = {
@@ -404,7 +365,6 @@ MODULE_FN_RETURN_TYPES = {
     "torch-sample-ddim": Type("torch-tensor"),
     "torch-sample-euler": Type("torch-tensor"),
     "torch-sample-euler-ancestral": Type("torch-tensor"),
-    "torch-euler-step": Type("torch-tensor"),
     "torch-sample-dpmpp-2m": Type("torch-tensor"),
     "torch-sampler-sigmas": Type("torch-tensor"),
     "torch-image-resize": Type("torch-tensor"),
@@ -415,12 +375,10 @@ MODULE_FN_RETURN_TYPES = {
     "torch-controlnet-apply": Type("torch-tensor"),
     "torch-vae-encode-tiled": Type("torch-tensor"),
         "torch-vae-decode-tiled": Type("torch-tensor"),
-    "torch-vae-decode-from-dict": Type("torch-tensor"),
         "torch-clip-tokenizer-create": Type("ptr"),
         "torch-clip-tokenizer-encode": Type("torch-tensor"),
         "torch-clip-tokenizer-free": Type("void"),
         "torch-clip-text-forward": Type("torch-tensor"),
-        "torch-clip-text-forward-from-dict": Type("torch-tensor"),
         "torch-gguf-load": Type("ptr"),
         "torch-gguf-tensor-count": Type("int"),
         "torch-gguf-tensor-name": Type("string"),
@@ -435,8 +393,6 @@ MODULE_FN_RETURN_TYPES = {
         "torch-flux-forward": Type("torch-tensor"),
         "torch-fm-sigmas": Type("torch-tensor"),
         "torch-fm-step": Type("torch-tensor"),
-        "torch-sdxl-get-pooled": Type("torch-tensor"),
-        "torch-sdxl-get-pooled-l": Type("torch-tensor"),
     "torch-conv2d": Type("torch-tensor"),
     "torch-max-pool2d": Type("torch-tensor"),
     "torch-avg-pool2d": Type("torch-tensor"),
@@ -452,7 +408,6 @@ MODULE_FN_RETURN_TYPES = {
     "torch-index-select": Type("torch-tensor"),
     "torch-squeeze": Type("torch-tensor"),
     "torch-unsqueeze": Type("torch-tensor"),
-    "torch-narrow": Type("torch-tensor"),
     "torch-transpose": Type("torch-tensor"),
     "nn-linear": Type("Any"),
     "nn-conv2d": Type("Any"),
@@ -488,10 +443,6 @@ MODULE_FN_RETURN_TYPES = {
     "torch-sgd": Type("ptr"),
     "torch-clip-grad-norm": Type("bool"),
     "torch-cuda-is-available": Type("bool"),
-    "torch-cuda-get-free-memory": Type("int"),
-    "torch-cuda-load-model": Type("torch-tensor"),
-    "torch-cuda-unload-model": Type("void"),
-    "torch-cuda-soft-empty-cache": Type("void"),
     "torch-to-cuda": Type("torch-tensor"),
     "torch-to-cpu": Type("torch-tensor"),
     "torch-is-cuda": Type("bool"),
@@ -636,7 +587,6 @@ BUILTIN_MODULES = {
         "index_select": "torch-index-select",
         "squeeze": "torch-squeeze",
         "unsqueeze": "torch-unsqueeze",
-        "narrow": "torch-narrow",
         "transpose": "torch-transpose",
         "div": "torch-div",
         "pow": "torch-pow",
@@ -664,10 +614,6 @@ BUILTIN_MODULES = {
         "to_cuda": "torch-to-cuda",
         "to_cpu": "torch-to-cpu",
         "is_cuda": "torch-is-cuda",
-        "cuda_get_free_memory": "torch-cuda-get-free-memory",
-        "cuda_load_model": "torch-cuda-load-model",
-        "cuda_unload_model": "torch-cuda-unload-model",
-        "cuda_soft_empty_cache": "torch-cuda-soft-empty-cache",
         "where": "torch-where",
         "eq": "torch-eq",
         "gt": "torch-gt",
@@ -699,8 +645,6 @@ BUILTIN_MODULES = {
         # SDXL UNet
         "sdxl_unet_forward": "torch-sdxl-unet-forward",
         "sdxl_dual_clip": "torch-sdxl-dual-clip",
-        "sdxl_get_pooled": "torch-sdxl-get-pooled",
-        "sdxl_get_pooled_l": "torch-sdxl-get-pooled-l",
         # T5 tokenizer
         "t5_tokenizer_create": "torch-t5-tokenizer-create",
         "t5_tokenizer_encode": "torch-t5-tokenizer-encode",
@@ -717,7 +661,6 @@ BUILTIN_MODULES = {
         "clip_tokenizer_free": "torch-clip-tokenizer-free",
         # CLIP text encoder
         "clip_text_forward": "torch-clip-text-forward",
-        "clip_text_forward_from_dict": "torch-clip-text-forward-from-dict",
         # safetensors
         "safetensors_load": "torch-safetensors-load",
         "safetensors_count": "torch-safetensors-count",
@@ -730,14 +673,12 @@ BUILTIN_MODULES = {
         "lora_merge_into": "torch-lora-merge-into",
         # Samplers
         "sample_ddim": "torch-sample-ddim",
-                     "sample_euler": "torch-sample-euler",
-                     "sample_euler_ancestral": "torch-sample-euler-ancestral",
-                     "euler_step": "torch-euler-step",
-        "euler_step": "torch-euler-step",
+        "sample_euler": "torch-sample-euler",
+        "sample_euler_ancestral": "torch-sample-euler-ancestral",
         "sample_dpmpp_2m": "torch-sample-dpmpp-2m",
         "sampler_sigmas": "torch-sampler-sigmas",
         # Image processing
-        "image_resize": "torch-image-resize",
+        "image_resize": "torch-image-resize", "image_resize_float": "torch-image-resize-float",
         "image_crop": "torch-image-crop",
         "image_composite": "torch-image-composite",
         "color_convert": "torch-color-convert",
@@ -840,14 +781,12 @@ PRELUDE_FUNCTIONS = {
     "re_match", "re_search",
     "random_seed", "random_int", "random_float", "random_range",
     "random_uniform", "random_choice",
-    "string_to_float", "string_to_int", "string_of_int", "format_float", "list_length", "list_ref", "vec_ref", "tuple_ref", "is_link", "tensor_shape", "tensor_shape_dim",
+    "string_to_float", "string_to_int", "string_of_int", "format_float", "list_length", "list_ref", "vec_ref", "tuple_ref",
     "cuda_gemm", "cuda_gemm_tn", "cuda_axpy", "cuda_dot", "cuda_copy",
     "sleep", "clock",
     "argv", "exit_program", "exit",
     "pi", "e",
     "py_list", "py_list_append", "py_list_ref", "py_list_length", "list_to_py_list", "list_append_str",
-    "make_dict_from", "dict_keys", "dict_contains",
-    "slice_string", "slice_array",
 } | MATH_FUNCTIONS
 
 def parse_extern_functions(code):
@@ -1057,10 +996,7 @@ def infer_expr_type(node):
             return "str"
         return None
     if isinstance(node, ast.Name):
-        t = TYPE_ENV.get(mangle_name(node.id))
-        if t:
-            return str(t)
-        return None
+        return TYPE_ENV.get(mangle_name(node.id))
     if isinstance(node, ast.Subscript):
         vt = infer_expr_type(node.value)
         if vt == "list":
@@ -1232,7 +1168,11 @@ def translate_binop(op_name, left_node, right_node):
     fx_op, fl_op, generic = op_map.get(op_name, (None, None, op_name.lower()))
 
     if op_name == "Add":
-        if (lt and str(lt).startswith("list")) or (rt and str(rt).startswith("list")):
+        l_list = lt and str(lt).startswith("list")
+        r_list = rt and str(rt).startswith("list")
+        if l_list and r_list:
+            return f"(py-list-concat {left} {right})"
+        if l_list or r_list:
             return f"(py-list-append {left} {right})"
     if is_int and fx_op:
         return f"({fx_op} {left} {right})"
@@ -1240,6 +1180,13 @@ def translate_binop(op_name, left_node, right_node):
         return f"({fl_op} {left} {right})"
     if (is_str or lt == "str" or rt == "str") and op_name == "Add":
         return f"(string-append {left} {right})"
+    # 张量二元运算：任一侧是张量表达式/变量 → torch-tensor-<op>（带标量提升）
+    if op_name in ("Add", "Sub", "Mult", "Div"):
+        if expr_is_tensor(left_node) or expr_is_tensor(right_node):
+            tname = {
+                "Add": "add", "Sub": "sub", "Mult": "mul", "Div": "div",
+            }[op_name]
+            return f"(torch-tensor-{tname} {left} {right})"
     return f"({generic} {left} {right})"
 
 
@@ -1269,10 +1216,6 @@ def translate_compare(op, left_node, right_node):
         "Eq":   "string=?",
         "NotEq":None,
     }
-    if isinstance(op, ast.Is):
-        return f"(eq? {left} {right})"
-    if isinstance(op, ast.IsNot):
-        return f"(not (eq? {left} {right}))"
     if type(op).__name__ == "NotEq":
         inner = translate_compare(ast.Eq(), left_node, right_node)
         return f"(not {inner})"
@@ -1342,6 +1285,14 @@ def translate_stmt(node, bindings=None):
         return f"  ;; annot-assign {ast.dump(node)}"
     elif isinstance(node, ast.Assign):
         targets = node.targets
+        if len(targets) == 1 and isinstance(targets[0], ast.Tuple) and all(isinstance(e, ast.Name) for e in targets[0].elts):
+            # a, b = expr（expr 是 Scheme vector）→ 逐元素 vector-ref
+            tmp = f"__unpack_{node.lineno}"
+            names = [e.id for e in targets[0].elts]
+            val = translate_expr(node.value)
+            sets = " ".join(f"(set! {n} (vector-ref {tmp} {i}))" for i, n in enumerate(names))
+            bindings.append((tmp, val))
+            return f"  ;; tuple-unpack\n  (begin {sets})"
         if len(targets) == 1 and isinstance(targets[0], ast.Name):
             name = targets[0].id
             val = translate_expr(node.value)
@@ -1426,7 +1377,7 @@ def translate_block(stmts):
                 val = translate_expr(s.value) if s.value else "#f"
             else:
                 if len(s.targets) == 1 and isinstance(s.targets[0], ast.Name):
-                    target = mangle_name(s.targets[0].id)
+                    target = s.targets[0].id
                     val = translate_expr(s.value)
                 elif len(s.targets) == 1 and isinstance(s.targets[0], ast.Tuple):
                     # 元组解构：a, b = expr → (let ((tmp expr)) (set! a (vector-ref tmp 0)) ...)
@@ -1450,14 +1401,10 @@ def translate_block(stmts):
                     exprs.append(f"(dict-set! {d} {k} {v})")
                     destructure_done = True
             if target and val:
-                # 优先用注释类型，否则从右侧表达式推断
-                ann_type = parse_type(s.annotation) if isinstance(s, ast.AnnAssign) else None
-                if ann_type:
-                    TYPE_ENV[target] = ann_type
-                else:
-                    inferred = infer_expr_type(s.value)
-                    if inferred:
-                        TYPE_ENV[target] = inferred
+                # 从右侧表达式推断目标变量类型，仅用于辅助代码生成
+                inferred = infer_expr_type(s.value)
+                if inferred:
+                    TYPE_ENV[target] = inferred
                 exprs.append(f"(set! {target} {val})")
             elif not destructure_done:
                 exprs.append(f";; {ast.dump(s)}")
@@ -1479,23 +1426,8 @@ def translate_block(stmts):
                 exprs.append(f"(if {test}\n        (begin {' '.join(inner_then)}))")
         elif isinstance(s, ast.While):
             test = translate_expr(s.test)
-            body_parts = translate_block(s.body)
-            body_str = " ".join(body_parts)
-            # Check for break in direct body (not nested while loops)
-            def has_direct_break(stmts):
-                for st in stmts:
-                    if isinstance(st, ast.Break):
-                        return True
-                    if isinstance(st, ast.While) or isinstance(st, ast.For):
-                        continue  # skip nested loops
-                    if isinstance(st, ast.If):
-                        if has_direct_break(st.body) or (st.orelse and has_direct_break(st.orelse)):
-                            return True
-                return False
-            if has_direct_break(s.body):
-                exprs.append(f"(let ((__done #f)) (let loop () (if (and {test} (not __done)) (begin {body_str} (loop)))))")
-            else:
-                exprs.append(f"(let loop () (if {test} (begin {body_str} (loop))))")
+            body = translate_block(s.body)
+            exprs.append(f"(let loop () (if {test} (begin {' '.join(body)} (loop))))")
         elif isinstance(s, ast.With):
             # with 在 block 内简化为直接执行 body
             exprs.extend(translate_block(s.body))
@@ -1528,10 +1460,6 @@ def translate_block(stmts):
             exprs.append("(void)")
         elif isinstance(s, ast.Delete):
             exprs.append(f";; del: {ast.dump(s)}")
-        elif isinstance(s, ast.Continue):
-            exprs.append("(loop)")
-        elif isinstance(s, ast.Break):
-            exprs.append("(set! __done #t)")
         elif isinstance(s, ast.Call):
             exprs.append(translate_expr(s))
         else:
@@ -1698,7 +1626,7 @@ def typecheck_function(node, function_arities, module_env=None):
                      "make_array", "make_float_array", "make_int_array",
                      "float_array_set", "float_array_ref",
                      "int_array_set", "int_array_ref",
-    "make_dict", "dict_get", "dict_get_or_empty", "dict_set", "dict_contains", "dict_keys", "make_dict_from",
+                     "make_dict", "dict_get", "dict_get_or_empty", "dict_set",
                      "to_list", "available", "Ok", "Error", "Some", "none",
                      "is_ok", "is_error", "is_some", "is_none",
                      "unwrap", "unwrap_or", "unwrap_error", "EConst", "EVar", "EBinop",
@@ -1996,8 +1924,8 @@ def typecheck_function(node, function_arities, module_env=None):
                     typecheck_error(stmt, f"return value of type '{val_t}' does not match declared return type '{ret_type}'")
         elif isinstance(stmt, ast.If):
             cond_t = check_expr(stmt.test)
-            if cond_t and cond_t.base not in ("bool", "Any", "none", "int", "float", "str", "list"):
-                typecheck_error(stmt, f"if condition must be bool/Any/value type, got '{cond_t}'")
+            if cond_t and cond_t.base != "bool":
+                typecheck_error(stmt, f"if condition must be bool, got '{cond_t}'")
             for s in stmt.body:
                 check_stmt(s)
             for s in stmt.orelse:
@@ -2055,11 +1983,6 @@ def typecheck_module(tree):
             for item in node.body:
                 if isinstance(item, ast.Assign) and len(item.targets) == 1 and isinstance(item.targets[0], ast.Name):
                     module_env[f"{node.name}_{item.targets[0].id}"] = Type("int")
-        # 收集模块级变量声明，使函数体能引用全局变量
-        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            t = parse_type(node.annotation)
-            if t:
-                module_env[node.target.id] = t
     for node in tree.body:
         if isinstance(node, ast.FunctionDef):
             typecheck_function(node, arities, module_env)
@@ -2071,6 +1994,216 @@ def debug_annotation(node, source_file=""):
         fname = source_file or "<input>"
         return f";; {fname}:{node.lineno}"
     return ""
+
+# =============================================================================
+# 张量方法 / 属性翻译（transformers 风格 tensor 语法 → StaticPy 函数式调用）
+#
+# 参考实现（modeling_deepseekv2.py）写的是 x.to(dtype).pow(2).mean(-1, keepdim=True)
+# 这类方法链，StaticPy 原本不支持。这里把 <expr>.method(args, **kw) 统一翻译成
+# (torch-tensor-<method> <expr> 位置参数)，kw 按 TENSOR_METHOD_KW 表展开成位置参数。
+# =============================================================================
+
+# 允许的张量方法（只在已知集合内分派，避免劫持普通对象属性）
+TENSOR_METHODS = {
+    "to", "pow", "mean", "sum", "view", "reshape", "transpose", "permute",
+    "unsqueeze", "squeeze", "split", "contiguous", "expand", "masked_fill",
+    "gather", "index_select", "sqrt", "mul", "add", "sub", "div", "softmax", "argmax",
+    "clone", "float", "detach", "max", "new_zeros", "repeat", "ne", "gt",
+    "lt", "eq", "matmul", "reshape_as", "narrow", "neg", "permute", "cat", "div", "add", "mul",
+    "unsqueeze", "squeeze", "transpose", "view", "mean", "sum",
+}
+
+# 方法关键字参数 → 最终位置参数下标（不含接收者）
+# 例如 to(dtype=..) 的第 0 个位置参数是 dtype；mean(dim, keepdim) …
+TENSOR_METHOD_KW = {
+    "to":         {"dtype": 0, "device": 1},
+    "mean":       {"dim": 0, "keepdim": 1},
+    "sum":        {"dim": 0, "keepdim": 1},
+    "softmax":    {"dim": 0},
+    "max":        {"dim": 0, "keepdim": 1},
+    "argmax":     {"dim": 0, "keepdim": 1},
+    "masked_fill": {"mask": 0, "value": 1},
+    "pow":        {},
+    "transpose":  {},
+    "permute":    {},
+    "unsqueeze":  {},
+    "squeeze":    {},
+    "split":      {},
+    "expand":     {},
+    "view":       {},
+    "reshape":    {},
+    "matmul":     {},
+    "sqrt":       {},
+    "mul":        {},
+    "add":        {},
+    "clone":      {},
+    "contiguous": {},
+    "gather":     {},
+    "index_select": {},
+    "float":      {},
+    "detach":     {},
+    "ne":         {},
+    "gt":         {},
+    "lt":         {},
+    "eq":         {},
+    "repeat":     {},
+    "narrow":     {},
+    "reshape_as": {},
+    "new_zeros":  {},
+}
+
+# torch.<dtype> 常量 → dtype 码（与 libtorch_std_helper dtype 枚举一致）
+TORCH_DTYPE_CONST = {
+    "float32": 0, "float64": 1, "int32": 2, "int64": 3,
+    "float16": 5, "half": 5, "bfloat16": 6,
+}
+
+# tensor 无调用属性 → 运行时查询
+TENSOR_ATTR_FN = {
+    "dtype": "torch-tensor-dtype",
+    "shape": "torch-tensor-shape",
+    "T":     "torch-tensor-transpose-all",
+    "ndim":  "torch-tensor-ndim",
+}
+
+# torch.<fn>(...) 返回张量的模块函数（用于二元运算的类型路由）
+TENSOR_MODULE_FNS = {
+    "rsqrt", "sqrt", "ones", "zeros", "empty", "tensor", "randn", "randint",
+                    "matmul", "add", "mul", "sub", "cat", "stack", "softmax", "relu",
+                    "sigmoid", "tanh", "clone", "reshape", "mean", "sum", "gather",
+                    "argmax", "exp", "log", "abs", "where", "masked_fill", "to",
+    "argmax", "exp", "log", "abs", "where", "masked_fill", "to",
+    "expm1", "log1p", "full", "arange",
+}
+
+# 当前函数作用域内已知的张量变量（translate_function 预扫描后填充）
+CURRENT_TENSOR_VARS = set()
+
+
+def _tensor_module_call(node):
+    """ast.Call 形如 torch.rsqrt(...) / 模块别名.fn(...) 且 fn 返回张量"""
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+        recv = node.func.value
+        attr = node.func.attr
+        if isinstance(recv, ast.Name) and is_module_alias(recv.id):
+            # 排除非张量返回：available / to_list / numel 等
+            if attr in TENSOR_MODULE_FNS:
+                return True
+    return False
+
+
+def expr_is_tensor(node):
+    """启发式：表达式是否为（或产生）张量。用于二元运算的类型路由。"""
+    if node is None:
+        return False
+    if isinstance(node, ast.Call):
+        if isinstance(node.func, ast.Attribute):
+            if node.func.attr in TENSOR_METHODS:
+                return True
+        if _tensor_module_call(node):
+            return True
+    if isinstance(node, ast.Name):
+        return node.id in CURRENT_TENSOR_VARS
+    if isinstance(node, ast.Attribute):
+        return node.attr in ("T",) or (isinstance(node.value, ast.Name) and node.value.id in CURRENT_TENSOR_VARS)
+    if isinstance(node, ast.Subscript):
+        # 张量 Ellipsis 切片结果 / 对张量的下标 → 张量
+        if isinstance(node.slice, ast.Tuple) and len(node.slice.elts) == 2 and \
+           isinstance(node.slice.elts[0], ast.Constant) and node.slice.elts[0].value is Ellipsis:
+            return True
+        return expr_is_tensor(node.value)
+    if isinstance(node, ast.BinOp):
+        # 张量二元运算结果仍是张量（任一侧是张量）
+        return expr_is_tensor(node.left) or expr_is_tensor(node.right)
+    if isinstance(node, ast.Call):
+        return expr_is_tensor(node.func) if isinstance(node.func, ast.Call) else False
+    return False
+
+
+def scan_tensor_vars(stmts):
+    """扫描函数体，收集被赋值为张量表达式的变量名"""
+    out = set()
+    def rec(nodes):
+        for s in nodes:
+            if isinstance(s, ast.Assign):
+                if len(s.targets) == 1 and isinstance(s.targets[0], ast.Name):
+                    if expr_is_tensor(s.value):
+                        out.add(s.targets[0].id)
+            elif isinstance(s, ast.AnnAssign) and isinstance(s.target, ast.Name) and s.value:
+                if expr_is_tensor(s.value):
+                    out.add(s.target.id)
+            elif isinstance(s, ast.AugAssign) and isinstance(s.target, ast.Name):
+                if expr_is_tensor(s.value):
+                    out.add(s.target.id)
+            elif isinstance(s, ast.If):
+                rec(s.body); rec(s.orelse)
+            elif isinstance(s, ast.For):
+                rec(s.body)
+            elif isinstance(s, ast.While):
+                rec(s.body)
+            elif isinstance(s, ast.With):
+                for w in s.items:
+                    if w.body: rec(w.body)
+    rec(stmts)
+    return out
+
+
+def tensor_dtype_code(node):
+    """torch.float32 / torch.bfloat16 等常量 → dtype 码"""
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+        if is_module_alias(node.value.id):
+            scheme_fn = resolve_module_function(node.value.id, node.value.attr)
+            if scheme_fn == "torch-available":
+                return None
+        # torch.float32 / np.float32 字面常量
+        if node.attr in TORCH_DTYPE_CONST:
+            return TORCH_DTYPE_CONST[node.attr]
+    return None
+
+
+def translate_tensor_method(receiver, attr, node):
+    """把 <receiver>.<attr>(args, **kwargs) 翻译为 (torch-tensor-<attr> ...)。
+    返回 None 表示不是（可识别的）张量方法调用。"""
+    if attr not in TENSOR_METHODS:
+        return None
+    # 位置参数（转 dtype 常量 / 常规表达式）
+    pos = []
+    for a in node.args:
+        dc = tensor_dtype_code(a)
+        if dc is not None:
+            pos.append(str(dc))
+        else:
+            pos.append(translate_expr(a))
+    # 关键字参数 → 按表展开到最终位置
+    if node.keywords:
+        kw = TENSOR_METHOD_KW.get(attr, {})
+        # 先算已有位置参数个数，kwarg 必须落在后续空位
+        kwargs = {}
+        for k in node.keywords:
+            if k.arg is None:
+                continue
+            if k.arg not in kw:
+                continue
+            v = k.value
+            dc = tensor_dtype_code(v)
+            if dc is not None:
+                kwargs[kw[k.arg]] = str(dc)
+            elif isinstance(v, ast.Constant) and isinstance(v.value, bool):
+                # FFI int 位用 0/1（不能 #t）
+                kwargs[kw[k.arg]] = "1" if v.value else "0"
+            else:
+                kwargs[kw[k.arg]] = translate_expr(v)
+        # 合并：位置参数先占 [0, n)，kwarg 填剩余位置（保证不重叠）
+        npos = len(pos)
+        merged = pos[:]
+        for idx in sorted(kwargs):
+            while len(merged) <= idx:
+                merged.append("#f")
+            merged[idx] = kwargs[idx]
+        pos = merged
+    return f"(torch-tensor-{attr} {receiver} {' '.join(pos)})"
+
+
 
 def translate_expr(node):
     """翻译一个表达式"""
@@ -2097,6 +2230,9 @@ def translate_expr(node):
         if isinstance(node.op, ast.Not):
             return f"(not {translate_expr(node.operand)})"
         if isinstance(node.op, ast.USub):
+            # 张量取负 → torch-tensor-neg
+            if expr_is_tensor(node.operand):
+                return f"(torch-tensor-neg {translate_expr(node.operand)})"
             return f"(- {translate_expr(node.operand)})"
         return f"({type(node.op).__name__} {translate_expr(node.operand)})"
     elif isinstance(node, ast.BinOp):
@@ -2135,9 +2271,6 @@ def translate_expr(node):
                     return f"(np-array (vector {inner}) {len(node.args[0].elts)})"
                 return f"(np-array {' '.join(args)})"
             if scheme_fn:
-                # 用户模块（非 BUILTIN_MODULES）的函数调用加 static_ 前缀
-                if module and module not in BUILTIN_MODULES:
-                    return f"(static_{scheme_fn} {' '.join(args)})"
                 return f"({scheme_fn} {' '.join(args)})"
             # Pythonic from import: from math import sin
             if name in MATH_FUNCTIONS:
@@ -2180,11 +2313,8 @@ def translate_expr(node):
             # 预置函数（Scheme 运行时，不走 FFI，无需 extern fn 声明）
             if name in PRELUDE_FUNCTIONS:
                 return f"({scheme_name(name)} {' '.join(args)})"
-            # dataclass-style class constructors: CliArgs(x) -> (make-CliArgs x)
-            if name in RECORD_TYPES:
-                return f"(make-{name} {' '.join(args)})"
-            # IR constructors: EConst(x) -> (vector 'EConst x)
-            if name in ("EConst", "EVar", "EBinop", "EUnary", "ECall", "SLet", "SSet", "SReturn", "SExpr", "SIf", "SWhile", "SFor", "IRFunc"):
+            # IR / dataclass-style class constructors: EConst(x) -> (vector 'EConst x)
+            if name in RECORD_TYPES or name in ("EConst", "EVar", "EBinop", "EUnary", "ECall", "SLet", "SSet", "SReturn", "SExpr", "SIf", "SWhile", "SFor", "IRFunc"):
                 return f"(vector '{name} {' '.join(args)})"
             # 参数可能是函数值（高阶函数），不加 static_ 前缀
             if isinstance(node, ast.FunctionDef):
@@ -2221,7 +2351,10 @@ def translate_expr(node):
                             return f"(np-array (vector {inner}) {len(node.args[0].elts)})"
                         return f"(np-array {' '.join(args)})"
                     if scheme_fn:
-                        return f"({scheme_fn} {' '.join(args)})"
+                        # 追加关键字实参（按出现顺序排在位置参数后），如 torch.cat(ts, dim=-1)
+                        extra = [translate_expr(k.value) for k in node.keywords if k.arg is not None]
+                        all_args = args + extra
+                        return f"({scheme_fn} {' '.join(all_args)})"
                 # 处理嵌套模块别名：os.path.exists
                 if isinstance(func.value, ast.Attribute) and isinstance(func.value.value, ast.Name):
                     top = func.value.value.id
@@ -2342,9 +2475,15 @@ def translate_expr(node):
                     "ones": "torch-ones",
                     "add": "torch-add", "mul": "torch-mul",
                     "sub": "torch-sub", "matmul": "torch-matmul",
+                    "cat": "torch-cat", "neg": "torch-tensor-neg", "topk": "torch-topk", "tpack_load": "torch-tpack-load", "tpack_get": "torch-tpack-get", "tpack_index": "torch-tpack-index", "tensor_ptr": "torch-tensor-ptr-debug", "cos": "torch-cos", "sin": "torch-sin", "outer": "torch-outer", "rope_inv_freq": "torch-rope-inv-freq", "rope_t": "torch-rope-t", "rope_t_pos": "torch-rope-t-pos", "causal_mask": "torch-causal-mask", "cat_id": "torch-cat-id", "last_argmax": "torch-last-argmax", "narrow": "torch-narrow",
+                    "neg": "torch-tensor-neg", "rsqrt": "torch-rsqrt",
+                    "sqrt": "torch-sqrt", "softmax": "torch-softmax",
+                    "index_select": "torch-tensor-index-select",
                     "clone": "torch-clone", "reshape": "torch-reshape",
                     "to_list": "torch-to-list",
                     "available": "torch-available",
+                    "rsqrt": "torch-rsqrt",
+                    "sqrt": "torch-sqrt",
                     "conv2d": "torch-conv2d",
                     # SD / JIT / DDPM extensions
                     "sd_unet_forward": "torch-sd-unet-forward",
@@ -2362,7 +2501,6 @@ def translate_expr(node):
                     "clip_tokenizer_free": "torch-clip-tokenizer-free",
                     # CLIP text encoder
                     "clip_text_forward": "torch-clip-text-forward",
-                    "clip_text_forward_from_dict": "torch-clip-text-forward-from-dict",
                     # safetensors
                     "safetensors_load": "torch-safetensors-load",
                     "safetensors_count": "torch-safetensors-count",
@@ -2380,7 +2518,7 @@ def translate_expr(node):
                     "sample_dpmpp_2m": "torch-sample-dpmpp-2m",
                     "sampler_sigmas": "torch-sampler-sigmas",
                     # Image processing
-                    "image_resize": "torch-image-resize",
+                    "image_resize": "torch-image-resize", "image_resize_float": "torch-image-resize-float",
                     "image_crop": "torch-image-crop",
                     "image_composite": "torch-image-composite",
                     "color_convert": "torch-color-convert",
@@ -2389,8 +2527,7 @@ def translate_expr(node):
                     "controlnet_apply": "torch-controlnet-apply",
                     # VAE tiling
                     "vae_encode_tiled": "torch-vae-encode-tiled",
-        "vae_decode_tiled": "torch-vae-decode-tiled",
-        "vae_decode_from_dict": "torch-vae-decode-from-dict",
+                    "vae_decode_tiled": "torch-vae-decode-tiled",
                     # GGUF
                     "gguf_load": "torch-gguf-load",
                     "gguf_tensor_count": "torch-gguf-tensor-count",
@@ -2401,9 +2538,7 @@ def translate_expr(node):
                     # SDXL
                     "sdxl_unet_forward": "torch-sdxl-unet-forward",
                     "sdxl_dual_clip": "torch-sdxl-dual-clip",
-                    "sdxl_get_pooled": "torch-sdxl-get-pooled",
-                    "sdxl_get_pooled_l": "torch-sdxl-get-pooled-l",
-                # T5
+                    # T5
                     "t5_tokenizer_create": "torch-t5-tokenizer-create",
                     "t5_tokenizer_encode": "torch-t5-tokenizer-encode",
                     "t5_tokenizer_free": "torch-t5-tokenizer-free",
@@ -2420,8 +2555,19 @@ def translate_expr(node):
             if obj == "ml":
                 return f"(ml_{attr} {' '.join(args)})"
 
+            # 张量方法调用：<tensor>.method(args, **kwargs) → (torch-tensor-<method> <tensor> 位置参数)
+            # 用于把 transformers 风格代码（x.to(dtype), x.pow(2).mean(-1, keepdim=True)）忠实翻译。
+            if not is_module_alias(obj):
+                t = translate_tensor_method(value, attr, node)
+                if t:
+                    return t
             # 普通属性访问（未知对象）：content.splitlines → content-splitlines
             return f"({value}-{attr})"
+        # 接收者是表达式（如嵌套调用/下标），非模块名 → 同样尝试张量方法
+        if isinstance(func.value, ast.Attribute) or isinstance(func.value, ast.Subscript) or isinstance(func.value, ast.Call):
+            t = translate_tensor_method(value, attr, node)
+            if t:
+                return t
         return f"({ast.dump(func)} {' '.join(args)})"
     elif isinstance(node, ast.Dict):
         # {"a": 1, "b": 2} → dict literal
@@ -2476,6 +2622,26 @@ def translate_expr(node):
         value = translate_expr(node.value)
         slc = node.slice
         vt = infer_expr_type(node.value)
+        # x[..., :k] / x[..., k:]（Ellipsis + 单段切片）→ 沿最后一维切片（恒为张量语义）
+        if isinstance(slc, ast.Tuple) and len(slc.elts) == 2:
+            if isinstance(slc.elts[0], ast.Constant) and slc.elts[0].value is Ellipsis and isinstance(slc.elts[1], ast.Slice):
+                s = slc.elts[1]
+                lo = translate_expr(s.lower) if s.lower else "0"
+                up = translate_expr(s.upper) if s.upper else "-1"
+                return f"(torch-tensor-slice-last {value} {lo} {up})"
+        # <tensor>.shape[i] / <vec>[i]：shape 查询返回 Scheme vector → vector-ref
+        if isinstance(node.value, ast.Attribute) and node.value.attr in ("shape", "dims"):
+            # 负索引：.shape[-1] → (vector-ref v (fx- (vector-length v) 1))
+            if isinstance(slc, ast.UnaryOp) and isinstance(slc.op, ast.USub) and isinstance(slc.operand, ast.Constant):
+                return f"(vector-ref {value} (fx- (vector-length {value}) {slc.operand.value}))"
+            idx = translate_expr(slc)
+            return f"(vector-ref {value} {idx})"
+        # 张量特殊语法
+        if expr_is_tensor(node.value):
+            # x[pos_ids] / x[i]（tensor 索引）→ 沿 dim0 index_select
+            if not isinstance(slc, (ast.Slice, ast.Tuple)):
+                idx = translate_expr(slc)
+                return f"(torch-tensor-index-select {value} {idx})"
         # 切片
         if isinstance(slc, ast.Slice):
             start = translate_expr(slc.lower) if slc.lower else "0"
@@ -2514,6 +2680,12 @@ def translate_expr(node):
             return f"(slice-string {value} {idx} (fx+ {idx} 1))"
         return f"(vector-ref {value} {idx})"
     elif isinstance(node, ast.Attribute):
+        # torch.float32 / torch.bfloat16 等 dtype 常量 → dtype 码
+        if isinstance(node.value, ast.Name) and is_module_alias(node.value.id) and node.attr in TORCH_DTYPE_CONST:
+            return str(TORCH_DTYPE_CONST[node.attr])
+        # 张量属性：<tensor>.dtype / .shape / .ndim / .T → 运行时查询函数
+        if node.attr in TENSOR_ATTR_FN:
+            return f"({TENSOR_ATTR_FN[node.attr]} {translate_expr(node.value)})"
         if isinstance(node.value, ast.Name) and node.attr == "append":
             return f"(py-list-append {mangle_name(node.value.id)}"
         # list.length -> (py-list-length lst)
@@ -2527,14 +2699,8 @@ def translate_expr(node):
         # 记录字段访问：p.x -> (Point-x p)，若知道 p 的类型
         if isinstance(node.value, ast.Name):
             vtype = TYPE_ENV.get(node.value.id)
-            vtype_str = vtype
-            if vtype is not None:
-                if hasattr(vtype, 'base'):
-                    vtype_str = vtype.base
-                elif isinstance(vtype, str):
-                    vtype_str = vtype
-                if isinstance(vtype_str, str) and vtype_str in RECORD_TYPES and node.attr in RECORD_TYPES[vtype_str]:
-                    return f"({vtype_str}-{node.attr} {node.value.id})"
+            if vtype in RECORD_TYPES and node.attr in RECORD_TYPES[vtype]:
+                return f"({vtype}-{node.attr} {node.value.id})"
         value = translate_expr(node.value)
         # dict.copy() -> (dict-copy dict)
         if node.attr == "copy":
@@ -2594,6 +2760,11 @@ def translate_function(node, source_file=""):
     saved_env = TYPE_ENV.copy()
     collect_function_types(node)
 
+    # 张量变量作用域：预扫描本函数赋值，供二元运算路由
+    global CURRENT_TENSOR_VARS
+    saved_tensor_vars = CURRENT_TENSOR_VARS
+    CURRENT_TENSOR_VARS = scan_tensor_vars(node.body)
+
     name = f"static_{node.name}"
     args = [mangle_name(arg.arg) for arg in node.args.args]
 
@@ -2631,7 +2802,7 @@ def translate_function(node, source_file=""):
                 if len(stmt.targets) == 1:
                     t = stmt.targets[0]
                     if isinstance(t, ast.Name):
-                        target = mangle_name(t.id)
+                        target = t.id
                         val = translate_expr(stmt.value)
                     elif isinstance(t, ast.Tuple):
                         # 元组解构：a, b = expr → (let ((tmp expr)) (set! a (vector-ref tmp 0)) ...)
@@ -2656,19 +2827,10 @@ def translate_function(node, source_file=""):
                         v = translate_expr(stmt.value)
                         body_exprs.append(f"(dict-set! {d} {k} {v})")
             if target and val and target != "__destructured__":
-                # 优先用注释类型（AnnAssign），否则从右侧表达式推断
-                if isinstance(stmt, ast.AnnAssign):
-                    ann_type = parse_type(stmt.annotation)
-                    if ann_type:
-                        TYPE_ENV[mangle_name(target)] = ann_type
-                    else:
-                        inferred = infer_expr_type(stmt.value)
-                        if inferred:
-                            TYPE_ENV[mangle_name(target)] = inferred
-                else:
-                    inferred = infer_expr_type(stmt.value)
-                    if inferred:
-                        TYPE_ENV[mangle_name(target)] = inferred
+                # 从右侧表达式推断目标变量类型，仅用于辅助代码生成（如 subscript 选择 accessor）
+                inferred = infer_expr_type(stmt.value)
+                if inferred:
+                    TYPE_ENV[mangle_name(target)] = inferred
                 # 根据目标变量类型选择数组创建方式
                 target_type = TYPE_ENV.get(mangle_name(target))
                 if target_type == "list[float]" and isinstance(stmt.value, ast.Call):
@@ -2743,20 +2905,7 @@ def translate_function(node, source_file=""):
             test = translate_expr(stmt.test)
             body_parts = translate_block(stmt.body)
             body_str = " ".join(body_parts)
-            def has_direct_break(stmts):
-                for st in stmts:
-                    if isinstance(st, ast.Break):
-                        return True
-                    if isinstance(st, (ast.While, ast.For)):
-                        continue
-                    if isinstance(st, ast.If):
-                        if has_direct_break(st.body) or (st.orelse and has_direct_break(st.orelse)):
-                            return True
-                return False
-            if has_direct_break(stmt.body):
-                body_exprs.append(f"(let ((__done #f)) (let loop () (if (and {test} (not __done)) (begin {body_str} (loop)))))")
-            else:
-                body_exprs.append(f"(let loop () (if {test} (begin {body_str} (loop))))")
+            body_exprs.append(f"(let loop () (if {test} (begin {body_str} (loop))))")
         elif isinstance(stmt, ast.Expr):
             body_exprs.append(translate_expr(stmt.value))
         elif isinstance(stmt, ast.With):
@@ -2791,10 +2940,6 @@ def translate_function(node, source_file=""):
         elif isinstance(stmt, ast.Delete):
             # del a[i] → (dict-set! / vector-set! ...) 暂不支持
             body_exprs.append(f";; del: {ast.dump(stmt)}")
-        elif isinstance(stmt, ast.Continue):
-            body_exprs.append("(loop)")
-        elif isinstance(stmt, ast.Break):
-            body_exprs.append("(set! __done #t)")
         else:
             body_exprs.append(f";; {type(stmt).__name__}: {ast.dump(stmt)}")
         si += 1
@@ -2817,13 +2962,8 @@ def translate_function(node, source_file=""):
         body = f"  (begin\n    {exprs_str}\n  )"
     
     # 将函数体内被赋值的变量绑定为局部变量，避免递归调用时覆盖全局变量
-    # global 声明的变量不受 let 遮蔽
-    global_names = set()
-    for stmt in node.body:
-        if isinstance(stmt, ast.Global):
-            global_names.update(stmt.names)
     param_names = {arg.arg for arg in node.args.args}
-    local_vars = collect_assigned_names(node.body) - param_names - global_names
+    local_vars = collect_assigned_names(node.body) - param_names
     if local_vars:
         bindings = " ".join(f"({mangle_name(v)} #f)" for v in sorted(local_vars))
         body = f"  (let ({bindings})\n{body}\n  )"
@@ -2834,6 +2974,7 @@ def translate_function(node, source_file=""):
     
     # 恢复外层类型环境
     TYPE_ENV = saved_env
+    CURRENT_TENSOR_VARS = saved_tensor_vars
     func_ann = debug_annotation(node, source_file)
     header = f"{func_ann}\n" if func_ann else ""
     return f"{header}(define ({name} {' '.join(args)})\n{body})"
@@ -2864,8 +3005,8 @@ def generate_extern_ffi():
             lines.append('(load-shared-object "/home/quqiufeng/libdgemm_row.so")')
         elif lib == "stock_rl" and lib not in loaded_libs:
             lines.append('(load-shared-object "libstock_rl_helper.so")')
-        elif lib == "sdcpp_adapter" and lib not in loaded_libs:
-            lines.append('(load-shared-object "/opt/static_comfyui/cpp/sd/build/libsdcpp_adapter.so")')
+        elif lib == "torch_std" and lib not in loaded_libs:
+            lines.append('(load-shared-object "libtorch_std_helper.so")')
         loaded_libs.add(lib)
         
         # 构建参数类型列表
@@ -2965,24 +3106,12 @@ def _run_pipeline(input_files):
     output_parts.append(f";; Source: {source_filename}")
     output_parts.append("")
     
-    # 模块级变量定义 + 函数定义（跳过 import 语句）
-    output_parts.append(";; StaticPy code")
+    # 函数定义（跳过 import 语句）
+    output_parts.append(";; StaticPy functions")
     for node in tree.body:
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             continue
-        if isinstance(node, ast.AnnAssign):
-            target = mangle_name(node.target.id) if isinstance(node.target, ast.Name) else None
-            val = translate_expr(node.value) if node.value else "#f"
-            if target:
-                output_parts.append(f"(define {target} {val})")
-        elif isinstance(node, ast.Assign):
-            if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
-                target = mangle_name(node.targets[0].id)
-                val = translate_expr(node.value)
-                output_parts.append(f"(define {target} {val})")
-        elif isinstance(node, ast.Expr):
-            output_parts.append(translate_expr(node.value))
-        elif isinstance(node, ast.ClassDef):
+        if isinstance(node, ast.ClassDef):
             output_parts.append(translate_class(node))
         elif isinstance(node, ast.FunctionDef):
             output_parts.append(translate_function(node, source_filename))

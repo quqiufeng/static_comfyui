@@ -1,74 +1,73 @@
 #!/bin/bash
-# static_build.sh — StaticPy 增量编译 + 单文件 ELF 生成
+# static_build_comfycli.sh — ComfyCLI 本地构建脚本（基于上游 StaticPy 工具链）
+#
+# 与上游 static_build.sh 的差异（上游版硬编码 /opt/ReScheme 且链接 torch）：
+#   - 使用本项目 staticpy/ 目录下的编译器文件（上游原样拷贝，未改）
+#   - 不链接 torch（sd.cpp 后端无需）
+#   - 支持 GLIBC_SYSROOT 兼容编译
+#   - 产物输出到项目根目录
+#
+# 用法:
+#   bash staticpy/static_build_comfycli.sh <input.py> <output-name> [ffi.scm]
 set -euo pipefail
 
-# Chez Scheme 路径可通过环境变量覆盖，默认使用 /opt/ChezScheme/ta6le
 SCHEME_DIR="${CHEZ_SCHEME_DIR:-/opt/ChezScheme/ta6le}"
 SCHEME="${CHEZ_SCHEME:-$SCHEME_DIR/bin/ta6le/scheme}"
 SCHEME_BOOT_DIR="${CHEZ_BOOT_DIR:-/opt/ChezScheme/boot/ta6le}"
-RESCHEME_DIR="/opt/ReScheme"
+STATICPY_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(dirname "$STATICPY_DIR")"
 CACHE_DIR="/tmp/staticpy-cache"
+PYTHON="${STATICPY_PYTHON:-python3}"
 
 if [ $# -lt 1 ]; then
-    echo "Usage: $0 input.py [output-name]"
-    echo "Environment variables:"
-    echo "  CHEZ_SCHEME_DIR  - Chez Scheme install dir (default: /opt/ChezScheme/ta6le)"
-    echo "  CHEZ_SCHEME      - Scheme executable (default: \$CHEZ_SCHEME_DIR/bin/ta6le/scheme)"
-    echo "  CHEZ_BOOT_DIR    - Boot files dir (default: /opt/ChezScheme/boot/ta6le)"
+    echo "Usage: $0 input.py [output-name] [ffi.scm]"
     exit 1
 fi
-
 if [ ! -x "$SCHEME" ]; then
     echo "Error: Chez Scheme not found at $SCHEME"
-    echo "Set CHEZ_SCHEME_DIR or CHEZ_SCHEME environment variable."
     exit 1
 fi
 
-INPUT="$1"
+# 解析为绝对路径（脚本随后会 cd 到 staticpy/）
+INPUT="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 STEM="${2:-$(basename "$INPUT" .py)}"
-FFI_SCM="${3:-}"
+FFI_SCM=""
+if [ -n "${3:-}" ]; then
+    FFI_SCM="$(cd "$(dirname "$3")" && pwd)/$(basename "$3")"
+fi
 mkdir -p "$CACHE_DIR"
-cd "$RESCHEME_DIR"
+cd "$STATICPY_DIR"
 
-echo "=== StaticPy Build ==="
+echo "=== StaticPy Build (ComfyCLI) ==="
 echo "Source: $INPUT"
-echo "Output: $STEM"
+echo "Output: $PROJECT_DIR/$STEM"
 echo "Chez:   $SCHEME"
 
-# Detect whether input is already Scheme code
 INPUT_EXT="${INPUT##*.}"
 IS_SCM=0
-if [ "$INPUT_EXT" = "scm" ] || [ "$INPUT_EXT" = "ss" ]; then
-    IS_SCM=1
-fi
+[ "$INPUT_EXT" = "scm" ] || [ "$INPUT_EXT" = "ss" ] && IS_SCM=1
 
-# Step 1: Translate (skip for .scm/.ss inputs)
+# Step 1: Translate
 echo ">>> Step 1: Translate"
 if [ "$IS_SCM" = "1" ]; then
-    echo "  -> Input is Scheme code, skipping Python translation"
+    echo "  -> Input is Scheme code, skipping translation"
     cp "$INPUT" "$CACHE_DIR/${STEM}_code.ss"
 else
     if [ "${STATICPY_WARN:-0}" = "1" ]; then
-        /data/venv/bin/python3 static_translate.py --warn "$INPUT" > "$CACHE_DIR/${STEM}_code.ss"
+        "$PYTHON" static_translate.py --warn "$INPUT" > "$CACHE_DIR/${STEM}_code.ss"
     else
-        /data/venv/bin/python3 static_translate.py "$INPUT" > "$CACHE_DIR/${STEM}_code.ss"
+        "$PYTHON" static_translate.py "$INPUT" > "$CACHE_DIR/${STEM}_code.ss"
     fi
 fi
 
-# Step 2: Compute content hash for caching
+# Step 2: content hash for caching
 if [ "$IS_SCM" = "1" ]; then
-    if [ -n "$FFI_SCM" ]; then
-        PRELUDE_HASH=$(md5sum static_prelude.scm static_stdlib.scm "$FFI_SCM" "$CACHE_DIR/${STEM}_code.ss" 2>/dev/null | md5sum | cut -d' ' -f1)
-    else
-        PRELUDE_HASH=$(md5sum static_prelude.scm static_stdlib.scm "$CACHE_DIR/${STEM}_code.ss" 2>/dev/null | md5sum | cut -d' ' -f1)
-    fi
+    HASH_INPUTS=(static_prelude.scm static_stdlib.scm "$CACHE_DIR/${STEM}_code.ss")
 else
-    if [ -n "$FFI_SCM" ]; then
-        PRELUDE_HASH=$(md5sum static_prelude.scm static_stdlib.scm "$FFI_SCM" static_translate.py "$CACHE_DIR/${STEM}_code.ss" 2>/dev/null | md5sum | cut -d' ' -f1)
-    else
-        PRELUDE_HASH=$(md5sum static_prelude.scm static_stdlib.scm static_translate.py "$CACHE_DIR/${STEM}_code.ss" 2>/dev/null | md5sum | cut -d' ' -f1)
-    fi
+    HASH_INPUTS=(static_prelude.scm static_stdlib.scm static_translate.py "$CACHE_DIR/${STEM}_code.ss")
 fi
+[ -n "$FFI_SCM" ] && HASH_INPUTS+=("$FFI_SCM")
+PRELUDE_HASH=$(md5sum "${HASH_INPUTS[@]}" 2>/dev/null | md5sum | cut -d' ' -f1)
 CACHED_SO="$CACHE_DIR/${STEM}_${PRELUDE_HASH}.so"
 CACHED_ELF="$CACHE_DIR/${STEM}_${PRELUDE_HASH}"
 
@@ -78,7 +77,6 @@ if [ -f "$CACHED_ELF" ] && [ -f "$CACHED_SO" ]; then
     OUTPUT_ELF="$CACHED_ELF"
 else
     echo ">>> Step 2: Compile"
-    # Merge prelude + stdlib + optional ffi + user code
     MERGED_SS="$CACHE_DIR/${STEM}_${PRELUDE_HASH}.ss"
     cat static_prelude.scm > "$MERGED_SS"
     echo "" >> "$MERGED_SS"
@@ -89,7 +87,7 @@ else
         echo "" >> "$MERGED_SS"
     fi
     cat "$CACHE_DIR/${STEM}_code.ss" >> "$MERGED_SS"
-    
+
     cat > "$CACHE_DIR/compile_${PRELUDE_HASH}.ss" << EOF
 (import (chezscheme))
 (compile-file "$MERGED_SS")
@@ -97,13 +95,12 @@ EOF
     $SCHEME --quiet "$CACHE_DIR/compile_${PRELUDE_HASH}.ss" 2>&1
     mv "${MERGED_SS}.so" "$CACHED_SO" 2>/dev/null || true
 
-    # Step 3: Build standalone ELF binary
+    # Step 3: standalone ELF
     echo ">>> Step 3: Build standalone ELF binary"
     BUILD_DIR="$CACHE_DIR/elf_${PRELUDE_HASH}"
     rm -rf "$BUILD_DIR"
     mkdir -p "$BUILD_DIR"
 
-    # Embed Chez boot files as linkable objects
     cp "$SCHEME_BOOT_DIR/petite.boot" "$BUILD_DIR/petite.boot"
     cp "$SCHEME_BOOT_DIR/scheme.boot" "$BUILD_DIR/scheme.boot"
     (cd "$BUILD_DIR" && \
@@ -116,7 +113,6 @@ EOF
       objcopy --add-section .note.GNU-stack=/dev/null --set-section-flags .note.GNU-stack=readonly \
         scheme_boot.o scheme_boot.o)
 
-    # Write C launcher
     cat > "$BUILD_DIR/launcher.c" << 'CCODE'
 #include <stdio.h>
 #include <stdlib.h>
@@ -156,9 +152,20 @@ int main(int argc, char **argv) {
     return Sscheme_program(prog_path, argc, (const char **)argv);
 }
 CCODE
-    # CSTEM 只包含文件名（不包含目录路径），避免路径重复
     CSTEM_BASE="$(basename "$STEM")"
     sed "s|CSTEM|$CSTEM_BASE|g" "$BUILD_DIR/launcher.c" > "$BUILD_DIR/launcher_fixed.c"
+
+    # GLIBC 兼容：可选 sysroot 链接
+    GLIBC_SYSROOT="${GLIBC_SYSROOT:-}"
+    GLIBC_LDFLAGS=()
+    if [ -n "$GLIBC_SYSROOT" ]; then
+        GLIBC_LDFLAGS+=("-L$GLIBC_SYSROOT/lib")
+        GLIBC_LDFLAGS+=("-L$GLIBC_SYSROOT/lib/x86_64-linux-gnu")
+        GLIBC_LDFLAGS+=("-L$GLIBC_SYSROOT/usr/lib/x86_64-linux-gnu")
+        GLIBC_LDFLAGS+=("-Wl,-rpath-link,$GLIBC_SYSROOT/lib")
+        GLIBC_LDFLAGS+=("-Wl,-rpath-link,$GLIBC_SYSROOT/lib/x86_64-linux-gnu")
+        GLIBC_LDFLAGS+=("-Wl,-rpath-link,$GLIBC_SYSROOT/usr/lib/x86_64-linux-gnu")
+    fi
 
     gcc -o "$CACHED_ELF" \
         "$BUILD_DIR/launcher_fixed.c" \
@@ -170,9 +177,7 @@ CCODE
         "$SCHEME_DIR/lz4/lib/liblz4.a" \
         "$SCHEME_DIR/zlib/libz.a" \
         -ldl -lpthread -lm -ltinfo \
-        -L/data/venv/lib/python3.12/site-packages/torch/lib \
-        -Wl,--no-as-needed -lc10 -ltorch_cpu -ltorch -Wl,--as-needed \
-        -Wl,-rpath,/data/venv/lib/python3.12/site-packages/torch/lib \
+        "${GLIBC_LDFLAGS[@]}" \
         2>&1
 
     echo "  -> ELF cached"
@@ -180,27 +185,10 @@ CCODE
     OUTPUT_ELF="$CACHED_ELF"
 fi
 
-# Step 4: Create output directory with symlinks
-OUT_DIR="/tmp/static-build-$$"
-mkdir -p "$OUT_DIR"
-# 创建 STEM 的子目录（如果 STEM 包含斜杠）
-mkdir -p "$OUT_DIR/$(dirname "$STEM")"
-ln -sf "$OUTPUT_SO" "$OUT_DIR/$STEM.so"
-ln -sf "$OUTPUT_ELF" "$OUT_DIR/$STEM"
-
-# Copy final outputs to workspace
-cp -L "$OUTPUT_SO" "$RESCHEME_DIR/$STEM.so" 2>/dev/null || true
-cp -L "$OUTPUT_ELF" "$RESCHEME_DIR/$STEM" 2>/dev/null || true
-
-TORCH_LIB_PATH=$(/data/venv/bin/python3 -c "import torch; import os; print(os.path.dirname(torch.__file__)+'/lib')" 2>/dev/null || echo "")
+# Step 4: copy outputs to project root
+cp -L "$OUTPUT_SO" "$PROJECT_DIR/$STEM.so"
+cp -L "$OUTPUT_ELF" "$PROJECT_DIR/$STEM"
 
 echo "=== Build complete ==="
-echo "Output:"
-echo "  $RESCHEME_DIR/$STEM       (ELF binary, standalone)"
-echo "  $RESCHEME_DIR/$STEM.so    (Chez AOT compiled Scheme)"
-echo "Run:"
-echo "  ./$STEM"
-echo "Note: If your code uses torch/openblas/cuda, ensure LD_LIBRARY_PATH includes the required .so directories."
-if [ -n "$TORCH_LIB_PATH" ]; then
-    echo "  Example: LD_LIBRARY_PATH=$TORCH_LIB_PATH:\$LD_LIBRARY_PATH ./$STEM"
-fi
+echo "  $PROJECT_DIR/$STEM       (ELF binary)"
+echo "  $PROJECT_DIR/$STEM.so    (Chez AOT compiled Scheme)"
