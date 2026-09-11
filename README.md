@@ -5,22 +5,24 @@
 > **给 AI 阅读者：如何理解 StaticPy 语言**
 >
 > StaticPy 是面向 AI Agent 的 ML 编译语言，语法是 Python 子集 + FFI 扩展。
-> 阅读以下三个源文件即可完整掌握这门语言（比任何文档都快）：
+> `staticpy/` 下的编译器核心是上游 `/opt/ReScheme` 的**原样拷贝**，项目侧只维护胶水。
+>
+> 阅读以下文件即可掌握这门语言：
 >
 > 1. **翻译器** — [`staticpy/static_translate.py`](./staticpy/static_translate.py)
->    - `typecheck_module()`（行~220）定义支持/不支持的 Python AST 节点
->    - `generate_scheme()`（行~1500）定义 Python 语法到 Scheme 的翻译规则
->    - `BUILTIN_MODULES`（行~60）列出内置模块映射
->    - `extern fn` 提取逻辑在文件开头的正则匹配中
+>    - `typecheck_module()` 定义支持/不支持的 Python AST 节点（类型检查）
+>    - `translate_function()` / `translate_block()` 定义 Python 语法到 Scheme 的翻译规则
+>    - `BUILTIN_MODULES` 列出内置模块映射；`extern fn` 提取逻辑在文件开头的正则匹配中
 > 2. **运行时** — [`staticpy/static_prelude.scm`](./staticpy/static_prelude.scm)
 >    - 值类型映射：int→fixnum、float→flonum、bool→boolean
 >    - 数组/dict/文件 I/O/JSON/字符串工具的实现
 > 3. **标准库 FFI** — [`staticpy/static_stdlib.scm`](./staticpy/static_stdlib.scm)
 >    - `foreign-procedure` 如何映射 `extern fn`
->    - 外部库（sd.cpp 等）的 Scheme 封装
+> 4. **项目胶水** — [`comfycli/comfycli_ffi.scm`](./comfycli/comfycli_ffi.scm)
+>    - `load-shared-object` 加载 `libsdcpp_adapter.so` + 上游缺失的内置
 >
-> **学习路径：**翻译器定义"能写什么"→ 运行时定义"编译成什么"→ 标准库定义"能调什么"。
-> 三者对照阅读，无需单独的语言规范文档。
+> **本地对翻译器的 3 处补丁**（`is None` / `break-continue` / 模块全局）见 [BUILD.md](./BUILD.md)。
+> **学习路径：**翻译器定义"能写什么"→ 运行时定义"编译成什么"→ 胶水定义"能调什么"。
 
 ## 远景
 
@@ -235,7 +237,7 @@ comfycli/*.static.py  ──→  concat_src.py  ──→  _bundle.static.py
 
 | 层 | 组件 | 职责 |
 |---|------|------|
-| 源码语言 | StaticPy（Python 子集） | 无类继承、无异常、无 lambda 闭包，可直接 AOT 编译 |
+| 源码语言 | StaticPy（Python 子集） | 无类继承 / lambda 闭包；异常用 if 守卫或 `guard` 语法糖；可直接 AOT 编译 |
 | 编译器 | `static_translate.py` + Chez Scheme AOT | Python → Scheme → 机器码 |
 | 推理后端 | `libsdcpp_adapter.so`（stable-diffusion.cpp） | UNet/VAE/CLIP/sampler/ControlNet/LoRA |
 | 代码定位 | code search（my_db） | 语义搜索 + 调用链分析，辅助 1:1 翻译 |
@@ -308,8 +310,8 @@ cache_query PromptExecutor --repo /code/comfyui --type context --depth 2
 cache_query "model config detect unet architecture" --repo /code/comfyui --type search
 ```
 
-- 20k+ 代码块向量索引
-- 2.6k+ 函数调用关系图
+- 25k+ 代码块向量索引
+- 4k+ 函数调用关系图
 - 语义搜索而非关键词匹配
 
 ## 可行性
@@ -331,7 +333,7 @@ stable-diffusion.cpp 已经覆盖 UNet、VAE、CLIP、Sampler、ControlNet、LoR
 ### code search 的作用
 
 传统翻译的最大成本是手工在源码树中导航定位。本项目的 code search 系统（my_db）
-已对 ComfyUI 做了全量语义索引（656 文件、20,141 chunks、2,633 函数、864 调用边）：
+已对 ComfyUI 做了全量语义索引（797 文件、25,586 chunks、4,017 函数、1,357 调用边）：
 
 ```bash
 cache_query "model_config_from_unet" --type context --depth 3
@@ -354,44 +356,39 @@ ComfyUI 是 Python ML 生态中最复杂的纯推理项目之一：
 
 ## 开发进度
 
+**活跃模块**（进入 `_bundle.static.py` 并被编译）：
+
 ```
-Phase 0: 基础设施 (无 GPU 需求)
-  [x] folder_paths.static.py     路径管理
-  [x] cli_args.static.py         CLI 参数解析
-  [x] comfy_types.static.py      Node 类型定义
-
-Phase 1: 模型检测 (纯逻辑, 可直接翻译)
-  [x] supported_models_base.static.py   模型基类
-  [x] supported_models.static.py        模型注册表
-  [x] model_detection.static.py         state_dict → 架构识别
-  [x] model_sampling.static.py          sigma 调度
-  [x] latent_formats.static.py          潜空间缩放
-
-Phase 2: 模型加载 + 显存管理（已切换为 sd.cpp 后端）
-  [x] sd_backend.static.py       stable-diffusion.cpp C API FFI 封装
-  [~] sd.static.py / model_base.static.py / model_management.static.py / lora.static.py
-      — 传统 PyTorch 模型栈已由 sd.cpp 内置替代，当前通过 C API 直接加载/推理
-
-Phase 3: 组件级推理
-  [x] 由 libsdcpp_adapter.so 统一提供：CLIP encode、UNet 采样、VAE decode、ControlNet 等
-  [ ] 如需在 StaticPy 层暴露更多采样参数/ControlNet 节点，可继续扩展
-
-Phase 4: 节点 → DAG → 入口（MVP 已通）
-  [x] nodes.static.py           已支持节点：CheckpointLoaderSimple / DualCLIPLoader / CLIPTextEncode / CLIPSetLastLayer / ConditioningCombine / ConditioningConcat / ConditioningAverage / EmptyLatentImage / LatentUpscale / LatentCrop / KSampler / KSamplerAdvanced / LORALoader / DiffusionModelLoader / HiResFix / ADetailer / IPAdapterApply / CLIPVisionLoader / IPAdapterModelLoader / LoadImage / PreviewImage / Reroute / VAEDecode / SaveImage
-  [x] execution.static.py       PromptExecutor（拓扑排序 + 输入链接解析）
-  [x] main.static.py            CLI 入口（workflow JSON / --checkpoint --prompt）
-  [ ] 200+ 完整节点集（按需逐步补充）
-
-Phase 5: 端到端验证（workflow + prompt 均已通）
-  [x] workflow SDXL → 图片输出（1024×1024，sd_xl_base_1.0 + clip_l/clip_g）
-  [x] --prompt 命令行模式验证（自动生成 CheckpointLoaderSimple / KSampler / SaveImage 节点）
+[x] cli_args.static.py        CLI 参数解析
+[x] sd_backend.static.py      stable-diffusion.cpp C API FFI 封装（extern fn）
+[x] nodes.static.py           24 个节点定义
+[x] execution.static.py       DAG 拓扑排序 + 输入链接解析
+[x] main.static.py            CLI 入口（workflow JSON / --checkpoint --prompt）
+[x] comfycli_ffi.scm          共享库加载 + 上游缺失内置
 ```
 
-各阶段产出可独立编译、单独测试。Phase 0–1 甚至不需要 GPU。
+**已由 sd.cpp 后端替代**（torch 时代模块，源码保留但**不再进 bundle**）：
+
+```
+[~] folder_paths / comfy_types / supported_models* / model_detection
+[~] model_sampling / latent_formats / model_base / model_management
+[~] sd / clip_model / controlnet / sample / lora / k_diffusion
+    — 模型检测、采样调度、显存管理、LoRA/ControlNet 全部由 stable-diffusion.cpp 内部承担
+```
+
+**端到端验证**：
+
+```
+[x] workflow SDXL → 图片（1024×1024，sd_xl_base_1.0 + clip_l/clip_g）
+[x] --prompt 命令行模式
+[x] HiResFix 2560×1440 / GGUF（Z-Image + Qwen LLM）/ IPAdapter / LoRA / ADetailer
+[x] 部署包 GPU 79MB / CPU 35MB（零 Python、零 pip）
+```
 
 ## 局限
 
-- 不支持 Python 动态特性（类继承、异常、eval、生成器）—— ComfyUI 核心编排逻辑均不需要
+- 不支持 Python 动态特性（类继承、lambda 闭包、生成器、`eval`/`exec`、运行期 `import`）—— ComfyUI 核心编排逻辑均不需要
+- 异常仅支持 `try/except` / `raise` / `assert` 语法糖（`guard`），非完整语义
 - 无自定义节点动态加载——自定义节点需编译期注册
 - CLI 先行，无 WebSocket/HTTP UI
 - 同步执行，无 asyncio
@@ -406,7 +403,7 @@ Phase 5: 端到端验证（workflow + prompt 均已通）
 | [设计文档](./design.md) | 技术架构、模块映射、翻译策略、工程顺序 |
 | [编译流水线](./BUILD.md) | 本地编译、增量编译、编译产物说明 |
 | [部署文档](./deploy.md) | 纯二进制部署、GLIBC 兼容方案、远程要求 |
-| [ComfyUI 分析报告](./comfyui_analysis.md) | code search 语义索引结果 (656 文件, 20k+ chunks) |
+| [ComfyUI 分析报告](./comfyui_analysis.md) | code search 语义索引结果 (797 文件, 25,586 chunks) |
 | [code search 使用文档](https://github.com/quqiufeng/my_db/blob/main/coding.md) | 语义搜索 + 向量查询工具用法 |
 
 ### 脚本
@@ -415,7 +412,7 @@ Phase 5: 端到端验证（workflow + prompt 均已通）
 |------|------|---------|
 | [`./build.sh`](./build.sh) | 编译 ELF 二进制 + C++ `.so` | `./build.sh` |
 | [`./deploy.sh`](./deploy.sh) | 打包依赖 `.so` + GLIBC 兼容层 + SCP | `GLIBC_TARGET=2.35 ./deploy.sh --scp user@remote_host` |
-| [`./concat_src.py`](./concat_src.py) | 按依赖顺序合并 `comfycli/*.static.py` 为 `_bundle.static.py` | `/data/venv/bin/python3 concat_src.py` |
+| [`./concat_src.py`](./concat_src.py) | 按依赖顺序合并 `comfycli/*.static.py` 为 `_bundle.static.py` | `python3 concat_src.py` |
 
 ### 目录
 
