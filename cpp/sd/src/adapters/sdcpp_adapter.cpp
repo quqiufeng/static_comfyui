@@ -37,6 +37,12 @@ public:
     bool has_init_image = false;
     float init_strength = 1.0f;
 
+    // ControlNet control image (owns the RGB pixel buffer)
+    std::vector<uint8_t> control_image_data;
+    sd_image_t control_image{};
+    bool has_control_image = false;
+    float control_strength = 1.0f;
+
     ~Impl() {
         if (ctx) {
             free_sd_ctx(ctx);
@@ -194,6 +200,43 @@ void SDPipeline::set_init_image(const std::string& image_path, float strength) {
                  image_path.c_str(), rgb.cols, rgb.rows, strength);
 }
 
+bool SDPipeline::load_control_net(const std::string& path) {
+    if (!impl_ || !impl_->ctx) return false;
+    if (path.empty()) {
+        return sd_ctx_unload_control_net(impl_->ctx);
+    }
+    bool ok = sd_ctx_load_control_net(impl_->ctx, path.c_str());
+    std::fprintf(stderr, "[C++ gen] load_control_net: %s ok=%d\n", path.c_str(), ok ? 1 : 0);
+    return ok;
+}
+
+void SDPipeline::set_control_image(const std::string& image_path, float strength) {
+    if (!impl_) return;
+    if (image_path.empty()) {
+        impl_->has_control_image = false;
+        impl_->control_image_data.clear();
+        impl_->control_image = sd_image_t{};
+        return;
+    }
+    cv::Mat img = cv::imread(image_path, cv::IMREAD_COLOR);
+    if (img.empty()) {
+        std::fprintf(stderr, "[C++ gen] set_control_image: failed to read %s\n", image_path.c_str());
+        impl_->has_control_image = false;
+        return;
+    }
+    cv::Mat rgb;
+    cv::cvtColor(img, rgb, cv::COLOR_BGR2RGB);
+    impl_->control_image_data.assign(rgb.data, rgb.data + rgb.total() * rgb.channels());
+    impl_->control_image.width   = rgb.cols;
+    impl_->control_image.height  = rgb.rows;
+    impl_->control_image.channel = rgb.channels();
+    impl_->control_image.data    = impl_->control_image_data.data();
+    impl_->has_control_image     = true;
+    impl_->control_strength      = strength;
+    std::fprintf(stderr, "[C++ gen] set_control_image: %s (%dx%d) strength=%.2f\n",
+                 image_path.c_str(), rgb.cols, rgb.rows, strength);
+}
+
 Image SDPipeline::generate(const ImageGenerationParams& params) {
     Image result;
     if (!impl_ || !impl_->ctx) {
@@ -332,6 +375,12 @@ Image SDPipeline::generate(const ImageGenerationParams& params) {
     if (impl_->has_init_image) {
         img_params.init_image = impl_->init_image;
         img_params.strength   = impl_->init_strength;
+    }
+
+    // ControlNet control image
+    if (impl_->has_control_image) {
+        img_params.control_image    = impl_->control_image;
+        img_params.control_strength = impl_->control_strength;
     }
 
     sd_image_t* images = nullptr;
@@ -867,6 +916,24 @@ int sd_pipeline_set_init_image(sd_pipeline_t pipeline,
     std::fprintf(stderr, "[C API] sd_pipeline_set_init_image: path=%s strength=%.2f\n",
                  image_path ? image_path : "(null)", strength);
     p->set_init_image(image_path ? image_path : "", strength);
+    return 0;
+}
+
+int sd_pipeline_load_control_net(sd_pipeline_t pipeline, const char* path) {
+    if (!pipeline) return -1;
+    sd::SDPipeline* p = static_cast<sd::SDPipeline*>(pipeline);
+    std::fprintf(stderr, "[C API] sd_pipeline_load_control_net: path=%s\n", path ? path : "(null)");
+    return p->load_control_net(path ? path : "") ? 0 : -2;
+}
+
+int sd_pipeline_set_control_image(sd_pipeline_t pipeline,
+                                  const char* image_path,
+                                  float strength) {
+    if (!pipeline) return -1;
+    sd::SDPipeline* p = static_cast<sd::SDPipeline*>(pipeline);
+    std::fprintf(stderr, "[C API] sd_pipeline_set_control_image: path=%s strength=%.2f\n",
+                 image_path ? image_path : "(null)", strength);
+    p->set_control_image(image_path ? image_path : "", strength);
     return 0;
 }
 

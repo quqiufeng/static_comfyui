@@ -13,6 +13,8 @@ extern fn sd_pipeline_load_lora(pipeline: ptr, lora_path: str, multiplier: float
 extern fn sd_pipeline_set_ipadapter(pipeline: ptr, model_path: str, clip_vision_path: str, image_path: str, weight: float) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_ipadapter_enabled(pipeline: ptr, enabled: int, weight: float) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_init_image(pipeline: ptr, image_path: str, strength: float) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_load_control_net(pipeline: ptr, path: str) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_set_control_image(pipeline: ptr, image_path: str, strength: float) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_generate_adetailer(pipeline: ptr, prompt: str, negative_prompt: str, width: int, height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires: int, hires_width: int, hires_height: int, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, ad_model_path: str, ad_prompt: str, ad_negative_prompt: str, output_path: str) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_generate_full(pipeline: ptr, prompt: str, negative_prompt: str, width: int, height: int, hires_width: int, hires_height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, clarity: float, sharpen_amount: float, sharpen_radius: int, smart_sharpen_strength: float, smart_sharpen_radius: int, edge_sharpen_amount: float, edge_sharpen_radius: int, edge_sharpen_threshold: float, ad_model_path: str, ad_prompt: str, ad_negative_prompt: str, output_path: str) -> int from "sdcpp_adapter"
 extern fn sd_ensure_dir(path: str) -> int from "sdcpp_adapter"
@@ -106,6 +108,14 @@ def sd_set_ipadapter_enabled(pipeline: ptr, enabled: int, weight: float) -> int:
 
 def sd_set_init_image(pipeline: ptr, image_path: str, strength: float) -> int:
     return sd_pipeline_set_init_image(pipeline, image_path, strength)
+
+
+def sd_load_control_net(pipeline: ptr, path: str) -> int:
+    return sd_pipeline_load_control_net(pipeline, path)
+
+
+def sd_set_control_image(pipeline: ptr, image_path: str, strength: float) -> int:
+    return sd_pipeline_set_control_image(pipeline, image_path, strength)
 
 
 def sd_ensure_directory(path: str) -> int:

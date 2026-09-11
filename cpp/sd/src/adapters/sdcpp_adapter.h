@@ -167,6 +167,10 @@ public:
     // Pass an empty path to clear.
     void set_init_image(const std::string& image_path, float strength);
 
+    // ControlNet: hot-swap the control net and set the per-generation control image.
+    bool load_control_net(const std::string& path);
+    void set_control_image(const std::string& image_path, float strength);
+
 private:
     class Impl;
     std::unique_ptr<Impl> impl_;
@@ -356,6 +360,20 @@ int sd_pipeline_set_ipadapter_enabled(sd_pipeline_t pipeline,
 int sd_pipeline_set_init_image(sd_pipeline_t pipeline,
                                const char* image_path,
                                float strength);
+
+/**
+ * Hot-swap the ControlNet model on a loaded pipeline.
+ * Returns 0 on success, non-zero on failure.
+ */
+int sd_pipeline_load_control_net(sd_pipeline_t pipeline, const char* path);
+
+/**
+ * Set the per-generation ControlNet control image + strength.
+ * Pass an empty path to clear. Returns 0 on success.
+ */
+int sd_pipeline_set_control_image(sd_pipeline_t pipeline,
+                                  const char* image_path,
+                                  float strength);
 
 /**
  * Generate image with ADetailer face restoration post-processing.

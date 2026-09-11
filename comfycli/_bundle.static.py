@@ -151,6 +151,8 @@ extern fn sd_pipeline_load_lora(pipeline: ptr, lora_path: str, multiplier: float
 extern fn sd_pipeline_set_ipadapter(pipeline: ptr, model_path: str, clip_vision_path: str, image_path: str, weight: float) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_ipadapter_enabled(pipeline: ptr, enabled: int, weight: float) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_init_image(pipeline: ptr, image_path: str, strength: float) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_load_control_net(pipeline: ptr, path: str) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_set_control_image(pipeline: ptr, image_path: str, strength: float) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_generate_adetailer(pipeline: ptr, prompt: str, negative_prompt: str, width: int, height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires: int, hires_width: int, hires_height: int, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, ad_model_path: str, ad_prompt: str, ad_negative_prompt: str, output_path: str) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_generate_full(pipeline: ptr, prompt: str, negative_prompt: str, width: int, height: int, hires_width: int, hires_height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, clarity: float, sharpen_amount: float, sharpen_radius: int, smart_sharpen_strength: float, smart_sharpen_radius: int, edge_sharpen_amount: float, edge_sharpen_radius: int, edge_sharpen_threshold: float, ad_model_path: str, ad_prompt: str, ad_negative_prompt: str, output_path: str) -> int from "sdcpp_adapter"
 extern fn sd_ensure_dir(path: str) -> int from "sdcpp_adapter"
@@ -246,6 +248,14 @@ def sd_set_init_image(pipeline: ptr, image_path: str, strength: float) -> int:
     return sd_pipeline_set_init_image(pipeline, image_path, strength)
 
 
+def sd_load_control_net(pipeline: ptr, path: str) -> int:
+    return sd_pipeline_load_control_net(pipeline, path)
+
+
+def sd_set_control_image(pipeline: ptr, image_path: str, strength: float) -> int:
+    return sd_pipeline_set_control_image(pipeline, image_path, strength)
+
+
 def sd_ensure_directory(path: str) -> int:
     return sd_ensure_dir(path)
 
@@ -321,6 +331,14 @@ class SDPipelineHandle:
 @dataclass
 class Conditioning:
     text: str
+    control_net_path: str
+    control_image_path: str
+    control_strength: float
+
+
+@dataclass
+class ControlNetModel:
+    name: str
 
 
 @dataclass
@@ -522,7 +540,7 @@ def clip_text_encode(inputs):
     text = get_str(inputs, "text", "")
     clip = dict_get(inputs, "clip")
     # clip is ignored here because sd.cpp handles CLIP encode internally.
-    return (Conditioning(text),)
+    return (Conditioning(text, "", "", 0.0),)
 
 
 register_node("CLIPTextEncode", "CLIP Text Encode",
@@ -560,6 +578,23 @@ def ksampler(inputs):
     denoise = get_float(inputs, "denoise", 1.0)
     if latent is not None and latent.image_path != "":
         sd_set_init_image(model.pipeline, latent.image_path, denoise)
+
+    pos_c: Conditioning = dict_get(inputs, "positive")
+    neg_c: Conditioning = dict_get(inputs, "negative")
+    cn_image = ""
+    cn_path = ""
+    cn_strength = 0.0
+    if pos_c is not None and pos_c.control_image_path != "":
+        cn_image = pos_c.control_image_path
+        cn_path = pos_c.control_net_path
+        cn_strength = pos_c.control_strength
+    elif neg_c is not None and neg_c.control_image_path != "":
+        cn_image = neg_c.control_image_path
+        cn_path = neg_c.control_net_path
+        cn_strength = neg_c.control_strength
+    if cn_image != "":
+        sd_load_control_net(model.pipeline, cn_path)
+        sd_set_control_image(model.pipeline, cn_image, cn_strength)
 
     opts = parse_sampler_opts(inputs)
     out = sampler_output(inputs)
@@ -866,7 +901,7 @@ def conditioning_combine(inputs):
     text = merge_conditioning_text(
         conditioning_text(dict_get(inputs, "conditioning_1")),
         conditioning_text(dict_get(inputs, "conditioning_2")))
-    return (Conditioning(text),)
+    return (Conditioning(text, "", "", 0.0),)
 
 
 register_node("ConditioningCombine", "Conditioning Combine",
@@ -877,7 +912,7 @@ def conditioning_concat(inputs):
     text = merge_conditioning_text(
         conditioning_text(dict_get(inputs, "conditioning_to")),
         conditioning_text(dict_get(inputs, "conditioning_from")))
-    return (Conditioning(text),)
+    return (Conditioning(text, "", "", 0.0),)
 
 
 register_node("ConditioningConcat", "Conditioning Concat",
@@ -890,8 +925,8 @@ def conditioning_average(inputs):
     strength = get_float(inputs, "conditioning_to_strength", 0.5)
     # Simple strength-aware combination: stronger text goes first.
     if strength >= 0.5:
-        return (Conditioning(merge_conditioning_text(c_to, c_from)),)
-    return (Conditioning(merge_conditioning_text(c_from, c_to)),)
+        return (Conditioning(merge_conditioning_text(c_to, c_from), "", "", 0.0),)
+    return (Conditioning(merge_conditioning_text(c_from, c_to), "", "", 0.0),)
 
 
 register_node("ConditioningAverage", "Conditioning Average",
@@ -971,11 +1006,41 @@ register_node("KSamplerAdvanced", "KSampler Advanced",
 
 def conditioning_zero_out(inputs):
     # 空条件（ComfyUI ConditioningZeroOut）
-    return (Conditioning(""),)
+    return (Conditioning("", "", "", 0.0),)
 
 
 register_node("ConditioningZeroOut", "Conditioning Zero Out",
               "conditioning_zero_out", ("CONDITIONING",), False)
+
+
+def controlnet_loader(inputs):
+    name = get_str(inputs, "control_net_name", "")
+    if name == "":
+        print("ControlNetLoader: no control_net_name provided")
+        return (None,)
+    return (ControlNetModel(name),)
+
+
+register_node("ControlNetLoader", "Load ControlNet",
+              "controlnet_loader", ("CONTROL_NET",), False)
+
+
+def controlnet_apply(inputs):
+    c: Conditioning = dict_get(inputs, "conditioning")
+    if c is None:
+        print("ControlNetApply: no conditioning received")
+        return (None,)
+    cn: ControlNetModel = dict_get(inputs, "control_net")
+    cn_path = ""
+    if cn is not None:
+        cn_path = cn.name
+    image_path = get_str(inputs, "image", "")
+    strength = get_float(inputs, "strength", 1.0)
+    return (Conditioning(c.text, cn_path, image_path, strength),)
+
+
+register_node("ControlNetApply", "Apply ControlNet",
+              "controlnet_apply", ("CONDITIONING",), False)
 register_node("CheckpointLoader", "Load Checkpoint",
               "checkpoint_loader_simple", ("MODEL", "CLIP", "VAE"), False)
 register_node("LoraLoader", "Load LoRA",
@@ -1045,6 +1110,10 @@ def call_node(class_type: str, inputs):
         return vae_decode(inputs)
     elif class_type == "ConditioningZeroOut":
         return conditioning_zero_out(inputs)
+    elif class_type == "ControlNetLoader":
+        return controlnet_loader(inputs)
+    elif class_type == "ControlNetApply":
+        return controlnet_apply(inputs)
     else:
         return (None,)
 # === execution.static.py ===
