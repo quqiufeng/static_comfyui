@@ -991,4 +991,36 @@ int sd_ensure_dir(const char* path) {
     }
 }
 
+int sd_resize_image(const char* input_path, const char* output_path,
+                    int width, int height) {
+    if (!input_path || !output_path || width <= 0 || height <= 0) return -1;
+    cv::Mat img = cv::imread(input_path, cv::IMREAD_COLOR);
+    if (img.empty()) {
+        std::fprintf(stderr, "[C API] sd_resize_image: failed to read %s\n", input_path);
+        return -2;
+    }
+    cv::Mat resized, rgb;
+    cv::resize(img, resized, cv::Size(width, height), 0, 0, cv::INTER_LANCZOS4);
+    cv::cvtColor(resized, rgb, cv::COLOR_BGR2RGB);
+    if (!save_png(output_path, rgb.data, rgb.cols, rgb.rows, rgb.channels())) {
+        std::fprintf(stderr, "[C API] sd_resize_image: failed to write %s\n", output_path);
+        return -3;
+    }
+    std::fprintf(stderr, "[C API] sd_resize_image: %s -> %s (%dx%d)\n",
+                 input_path, output_path, width, height);
+    return 0;
+}
+
+int sd_scale_image(const char* input_path, const char* output_path, float scale_by) {
+    if (!input_path || !output_path || scale_by <= 0.0f) return -1;
+    cv::Mat img = cv::imread(input_path, cv::IMREAD_COLOR);
+    if (img.empty()) {
+        std::fprintf(stderr, "[C API] sd_scale_image: failed to read %s\n", input_path);
+        return -2;
+    }
+    int w = (int)(img.cols * scale_by + 0.5f);
+    int h = (int)(img.rows * scale_by + 0.5f);
+    return sd_resize_image(input_path, output_path, w, h);
+}
+
 } // extern "C"

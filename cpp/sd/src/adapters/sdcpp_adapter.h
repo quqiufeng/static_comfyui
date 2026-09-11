@@ -413,6 +413,13 @@ int sd_pipeline_generate_adetailer(sd_pipeline_t pipeline,
 /** Utility: create directory and all parents if missing. Returns 0 on success. */
 int sd_ensure_dir(const char* path);
 
+/** Resize an image file to width x height and save as PNG. Returns 0 on success. */
+int sd_resize_image(const char* input_path, const char* output_path,
+                    int width, int height);
+
+/** Scale an image file by a factor (dims * scale_by) and save as PNG. Returns 0 on success. */
+int sd_scale_image(const char* input_path, const char* output_path, float scale_by);
+
 #ifdef __cplusplus
 }
 #endif

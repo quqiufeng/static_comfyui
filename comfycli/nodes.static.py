@@ -598,6 +598,43 @@ register_node("LoadImage", "Load Image",
               "load_image", ("IMAGE", "MASK"), False)
 
 
+def image_scale(inputs):
+    image_path = dict_get(inputs, "image")
+    if image_path is None:
+        print("ImageScale: no image received")
+        return (None,)
+    width = get_int(inputs, "width", 1024)
+    height = get_int(inputs, "height", 1024)
+    out = "/tmp/comfycli_scaled_" + string_of_int(width) + "x" + string_of_int(height) + ".png"
+    rc = sd_resize_image(image_path, out, width, height)
+    if rc != 0:
+        print("ImageScale: resize failed, rc=" + string_of_int(rc))
+        return (None,)
+    return (out,)
+
+
+register_node("ImageScale", "Image Scale",
+              "image_scale", ("IMAGE",), False)
+
+
+def image_scale_by(inputs):
+    image_path = dict_get(inputs, "image")
+    if image_path is None:
+        print("ImageScaleBy: no image received")
+        return (None,)
+    scale_by = get_float(inputs, "scale_by", 1.0)
+    out = "/tmp/comfycli_scaled_by.png"
+    rc = sd_scale_image(image_path, out, scale_by)
+    if rc != 0:
+        print("ImageScaleBy: scale failed, rc=" + string_of_int(rc))
+        return (None,)
+    return (out,)
+
+
+register_node("ImageScaleBy", "Image Scale By",
+              "image_scale_by", ("IMAGE",), False)
+
+
 def preview_image(inputs):
     image_path = dict_get(inputs, "images")
     if image_path is None:
@@ -823,6 +860,10 @@ def call_node(class_type: str, inputs):
         return vae_encode(inputs)
     elif class_type == "LoadImage":
         return load_image(inputs)
+    elif class_type == "ImageScale":
+        return image_scale(inputs)
+    elif class_type == "ImageScaleBy":
+        return image_scale_by(inputs)
     elif class_type == "PreviewImage":
         return preview_image(inputs)
     elif class_type == "Reroute":
