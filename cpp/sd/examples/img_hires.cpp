@@ -373,11 +373,12 @@ int main(int argc, char** argv) {
     gen_params.sag_enabled     = sag;
     gen_params.sag_scale       = sag_scale;
 
-    sd::Image image = pipeline.generate(gen_params);
-    if (image.empty()) {
+    std::vector<sd::Image> images = pipeline.generate(gen_params);
+    if (images.empty() || images[0].empty()) {
         std::fprintf(stderr, "Image generation failed\n");
         return 1;
     }
+    sd::Image& image = images[0];
 
     bool has_postproc = (postproc.clarity > 0.0f ||
                          postproc.sharpen_amount > 0.0f ||

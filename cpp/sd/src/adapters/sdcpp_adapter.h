@@ -150,7 +150,7 @@ public:
     bool load(const ModelConfig& config);
     bool is_loaded() const;
 
-    Image generate(const ImageGenerationParams& params);
+    std::vector<Image> generate(const ImageGenerationParams& params);
 
     // LoRA management (persistent, applied at runtime during generate)
     void set_lora(const std::string& path, float multiplier);
@@ -173,6 +173,9 @@ public:
 
     // Inpainting: set the mask image (used together with set_init_image).
     void set_mask(const std::string& mask_path);
+
+    // Batch size for subsequent generate() calls (>= 1).
+    void set_batch_count(int n);
 
 private:
     class Impl;
@@ -383,6 +386,9 @@ int sd_pipeline_set_control_image(sd_pipeline_t pipeline,
  * Pass an empty path to clear. Returns 0 on success.
  */
 int sd_pipeline_set_mask(sd_pipeline_t pipeline, const char* mask_path);
+
+/** Set the batch size for subsequent generate() calls. Returns 0 on success. */
+int sd_pipeline_set_batch_count(sd_pipeline_t pipeline, int n);
 
 /**
  * Generate image with ADetailer face restoration post-processing.

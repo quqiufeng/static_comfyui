@@ -48,6 +48,8 @@ public:
     sd_image_t mask_image{};
     bool has_mask_image = false;
 
+    int batch_count = 1;
+
     ~Impl() {
         if (ctx) {
             free_sd_ctx(ctx);
@@ -265,10 +267,15 @@ void SDPipeline::set_mask(const std::string& mask_path) {
     std::fprintf(stderr, "[C++ gen] set_mask: %s (%dx%d)\n", mask_path.c_str(), img.cols, img.rows);
 }
 
-Image SDPipeline::generate(const ImageGenerationParams& params) {
-    Image result;
+void SDPipeline::set_batch_count(int n) {
+    if (!impl_) return;
+    impl_->batch_count = n > 0 ? n : 1;
+}
+
+std::vector<Image> SDPipeline::generate(const ImageGenerationParams& params) {
+    std::vector<Image> results;
     if (!impl_ || !impl_->ctx) {
-        return result;
+        return results;
     }
 
     sd_img_gen_params_t img_params;
@@ -294,7 +301,7 @@ Image SDPipeline::generate(const ImageGenerationParams& params) {
     img_params.height          = eff_h;
     img_params.clip_skip       = params.clip_skip;
     img_params.seed            = params.seed;
-    img_params.batch_count     = params.batch_count;
+    img_params.batch_count     = impl_->batch_count;
 
     img_params.sample_params.sample_steps     = params.steps;
     img_params.sample_params.guidance.txt_cfg = params.cfg_scale;
@@ -422,23 +429,26 @@ Image SDPipeline::generate(const ImageGenerationParams& params) {
     bool ok = generate_image(impl_->ctx, &img_params, &images, &num_images);
     std::fprintf(stderr, "[C++ gen] generate_image returned ok=%d images=%p num=%d\n", ok, (void*)images, num_images);
     if (!ok || !images || num_images == 0) {
-        return result;
+        return results;
     }
 
-    result.width    = static_cast<int>(images[0].width);
-    result.height   = static_cast<int>(images[0].height);
-    result.channels = static_cast<int>(images[0].channel);
-    const size_t bytes = result.width * result.height * result.channels;
-
-    if (images[0].data != nullptr && bytes > 0) {
-        result.data.assign(images[0].data, images[0].data + bytes);
+    for (int i = 0; i < num_images; i++) {
+        Image img;
+        img.width    = static_cast<int>(images[i].width);
+        img.height   = static_cast<int>(images[i].height);
+        img.channels = static_cast<int>(images[i].channel);
+        const size_t bytes = static_cast<size_t>(img.width) * img.height * img.channels;
+        if (images[i].data != nullptr && bytes > 0) {
+            img.data.assign(images[i].data, images[i].data + bytes);
+        }
+        results.push_back(std::move(img));
     }
 
     free_sd_images(images, num_images);
 
-    // ADetailer post-processing
-    if (result.data.empty()) {
-        return result;
+    // ADetailer post-processing（作用于第一张）
+    if (results.empty() || results[0].data.empty()) {
+        return results;
     }
     if (params.adetailer_enabled && !params.ad_model_path.empty()) {
         std::fprintf(stderr, "[C++ gen] applying ADetailer with model=%s\n", params.ad_model_path.c_str());
@@ -448,10 +458,10 @@ Image SDPipeline::generate(const ImageGenerationParams& params) {
         ad_params.extra_ad_args   = nullptr;
 
         sd_image_t input_img;
-        input_img.width  = static_cast<int>(result.width);
-        input_img.height = static_cast<int>(result.height);
-        input_img.channel = static_cast<int>(result.channels);
-        input_img.data   = result.data.data();
+        input_img.width  = static_cast<int>(results[0].width);
+        input_img.height = static_cast<int>(results[0].height);
+        input_img.channel = static_cast<int>(results[0].channels);
+        input_img.data   = results[0].data.data();
 
         sd_img_gen_params_t inpaint_params;
         sd_img_gen_params_init(&inpaint_params);
@@ -474,12 +484,12 @@ Image SDPipeline::generate(const ImageGenerationParams& params) {
                                         &ad_params, &inpaint_params,
                                         &detailed_images, &detailed_count);
             if (ad_ok && detailed_count > 0 && detailed_images && detailed_images[0].data) {
-                result.width    = static_cast<int>(detailed_images[0].width);
-                result.height   = static_cast<int>(detailed_images[0].height);
-                result.channels = static_cast<int>(detailed_images[0].channel);
-                size_t ad_bytes = result.width * result.height * result.channels;
-                result.data.assign(detailed_images[0].data, detailed_images[0].data + ad_bytes);
-                std::fprintf(stderr, "[C++ gen] ADetailer applied: %dx%d\n", result.width, result.height);
+                results[0].width    = static_cast<int>(detailed_images[0].width);
+                results[0].height   = static_cast<int>(detailed_images[0].height);
+                results[0].channels = static_cast<int>(detailed_images[0].channel);
+                size_t ad_bytes = static_cast<size_t>(results[0].width) * results[0].height * results[0].channels;
+                results[0].data.assign(detailed_images[0].data, detailed_images[0].data + ad_bytes);
+                std::fprintf(stderr, "[C++ gen] ADetailer applied: %dx%d\n", results[0].width, results[0].height);
             } else {
                 std::fprintf(stderr, "[C++ gen] ADetailer failed or returned no images\n");
             }
@@ -490,7 +500,7 @@ Image SDPipeline::generate(const ImageGenerationParams& params) {
         }
     }
 
-    return result;
+    return results;
 }
 
 } // namespace sd
@@ -548,6 +558,16 @@ static bool save_png(const char* path, const uint8_t* data, int w, int h, int ch
     png_destroy_write_struct(&png, &info);
     std::fclose(fp);
     return true;
+}
+
+// Insert a numeric suffix before the file extension: a.png -> a_00001.png
+static std::string indexed_path(const char* path, int idx) {
+    std::string p(path);
+    char buf[16];
+    std::snprintf(buf, sizeof(buf), "_%05d", idx);
+    size_t dot = p.find_last_of('.');
+    if (dot == std::string::npos) return p + buf;
+    return p.substr(0, dot) + buf + p.substr(dot);
 }
 
 extern "C" {
@@ -812,39 +832,46 @@ int sd_pipeline_generate_full(sd_pipeline_t pipeline,
         params.ad_negative_prompt = ad_negative_prompt ? ad_negative_prompt : "";
     }
 
-    sd::Image image = p->generate(params);
-    std::fprintf(stderr, "[C API] generate_full returned empty=%d w=%d h=%d c=%d\n",
-                 image.empty(), image.width, image.height, image.channels);
-    if (image.empty()) return -4;
+    std::vector<sd::Image> images = p->generate(params);
+    std::fprintf(stderr, "[C API] generate_full returned %zu image(s)\n", images.size());
+    if (images.empty()) return -4;
 
     bool has_postproc = (clarity > 0.0f || sharpen_amount > 0.0f ||
                          smart_sharpen_strength > 0.0f || edge_sharpen_amount > 0.0f);
-    if (has_postproc) {
-        std::fprintf(stderr, "[C API] postproc: clarity=%.2f sharpen=%.2f(r=%d)"
-                     " smart=%.2f(r=%d) edge=%.2f(r=%d,t=%.2f)\n",
-                     clarity, sharpen_amount, sharpen_radius,
-                     smart_sharpen_strength, smart_sharpen_radius,
-                     edge_sharpen_amount, edge_sharpen_radius, edge_sharpen_threshold);
-        postproc::Params pp;
-        pp.clarity                = clarity;
-        pp.sharpen_amount         = sharpen_amount;
-        pp.sharpen_radius         = sharpen_radius > 0 ? sharpen_radius : 1;
-        pp.smart_sharpen_strength = smart_sharpen_strength;
-        pp.smart_sharpen_radius   = smart_sharpen_radius > 0 ? smart_sharpen_radius : 2;
-        pp.edge_sharpen_amount    = edge_sharpen_amount;
-        pp.edge_sharpen_radius    = edge_sharpen_radius > 0 ? edge_sharpen_radius : 2;
-        pp.edge_sharpen_threshold = edge_sharpen_threshold >= 0.0f ? edge_sharpen_threshold : 0.3f;
-        if (!postproc::apply(image.data.data(), image.width, image.height, image.channels, pp)) {
-            std::fprintf(stderr, "[C API] postproc failed\n");
-            return -5;
-        }
-    }
 
-    if (!save_png(output_path, image.data.data(), image.width, image.height, image.channels)) {
-        std::fprintf(stderr, "[C API] save_png failed for %s\n", output_path);
-        return -6;
+    for (size_t idx = 0; idx < images.size(); idx++) {
+        sd::Image& image = images[idx];
+        if (image.data.empty()) continue;
+        if (has_postproc) {
+            std::fprintf(stderr, "[C API] postproc: clarity=%.2f sharpen=%.2f(r=%d)"
+                         " smart=%.2f(r=%d) edge=%.2f(r=%d,t=%.2f)\n",
+                         clarity, sharpen_amount, sharpen_radius,
+                         smart_sharpen_strength, smart_sharpen_radius,
+                         edge_sharpen_amount, edge_sharpen_radius, edge_sharpen_threshold);
+            postproc::Params pp;
+            pp.clarity                = clarity;
+            pp.sharpen_amount         = sharpen_amount;
+            pp.sharpen_radius         = sharpen_radius > 0 ? sharpen_radius : 1;
+            pp.smart_sharpen_strength = smart_sharpen_strength;
+            pp.smart_sharpen_radius   = smart_sharpen_radius > 0 ? smart_sharpen_radius : 2;
+            pp.edge_sharpen_amount    = edge_sharpen_amount;
+            pp.edge_sharpen_radius    = edge_sharpen_radius > 0 ? edge_sharpen_radius : 2;
+            pp.edge_sharpen_threshold = edge_sharpen_threshold >= 0.0f ? edge_sharpen_threshold : 0.3f;
+            if (!postproc::apply(image.data.data(), image.width, image.height, image.channels, pp)) {
+                std::fprintf(stderr, "[C API] postproc failed\n");
+                return -5;
+            }
+        }
+
+        std::string path = (images.size() > 1)
+            ? indexed_path(output_path, static_cast<int>(idx))
+            : std::string(output_path);
+        if (!save_png(path.c_str(), image.data.data(), image.width, image.height, image.channels)) {
+            std::fprintf(stderr, "[C API] save_png failed for %s\n", path.c_str());
+            return -6;
+        }
+        std::fprintf(stderr, "[C API] saved %s (%dx%d, %d ch)\n", path.c_str(), image.width, image.height, image.channels);
     }
-    std::fprintf(stderr, "[C API] saved %s (%dx%d, %d ch)\n", output_path, image.width, image.height, image.channels);
 
     return 0;
 }
@@ -975,6 +1002,14 @@ int sd_pipeline_set_mask(sd_pipeline_t pipeline, const char* mask_path) {
     sd::SDPipeline* p = static_cast<sd::SDPipeline*>(pipeline);
     std::fprintf(stderr, "[C API] sd_pipeline_set_mask: path=%s\n", mask_path ? mask_path : "(null)");
     p->set_mask(mask_path ? mask_path : "");
+    return 0;
+}
+
+int sd_pipeline_set_batch_count(sd_pipeline_t pipeline, int n) {
+    if (!pipeline) return -1;
+    sd::SDPipeline* p = static_cast<sd::SDPipeline*>(pipeline);
+    std::fprintf(stderr, "[C API] sd_pipeline_set_batch_count: n=%d\n", n);
+    p->set_batch_count(n);
     return 0;
 }
 

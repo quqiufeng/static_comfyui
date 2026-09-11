@@ -287,7 +287,11 @@ register_node("EmptyLatentImage", "Empty Latent Image",
 
 
 def apply_latent_extras(model: SDPipelineHandle, inputs, latent: LatentImage):
-    # 采样前的通用设置：img2img / inpainting / ControlNet
+    # 采样前的通用设置：batch / img2img / inpainting / ControlNet
+    if latent is not None and latent.batch_size > 1:
+        sd_set_batch_count(model.pipeline, latent.batch_size)
+    else:
+        sd_set_batch_count(model.pipeline, 1)
     if latent is not None and latent.image_path != "":
         sd_set_init_image(model.pipeline, latent.image_path, get_float(inputs, "denoise", 1.0))
     if latent is not None and latent.mask_path != "":

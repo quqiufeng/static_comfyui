@@ -132,11 +132,12 @@ int main(int argc, char** argv) {
     gen_params.sample_method   = method;
     gen_params.scheduler       = scheduler;
 
-    sd::Image image = pipeline.generate(gen_params);
-    if (image.empty()) {
+    std::vector<sd::Image> images = pipeline.generate(gen_params);
+    if (images.empty() || images[0].empty()) {
         std::fprintf(stderr, "Image generation failed\n");
         return 1;
     }
+    sd::Image& image = images[0];
 
     std::string final_output = expand_tilde(output);
     if (!save_png(final_output.c_str(), image.data.data(), image.width, image.height, image.channels)) {

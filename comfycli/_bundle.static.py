@@ -154,6 +154,7 @@ extern fn sd_pipeline_set_init_image(pipeline: ptr, image_path: str, strength: f
 extern fn sd_pipeline_load_control_net(pipeline: ptr, path: str) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_control_image(pipeline: ptr, image_path: str, strength: float) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_mask(pipeline: ptr, mask_path: str) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_set_batch_count(pipeline: ptr, n: int) -> int from "sdcpp_adapter"
 extern fn sd_resize_image(input_path: str, output_path: str, width: int, height: int) -> int from "sdcpp_adapter"
 extern fn sd_scale_image(input_path: str, output_path: str, scale_by: float) -> int from "sdcpp_adapter"
 extern fn sd_invert_image(input_path: str, output_path: str) -> int from "sdcpp_adapter"
@@ -268,6 +269,10 @@ def sd_set_control_image(pipeline: ptr, image_path: str, strength: float) -> int
 
 def sd_set_mask(pipeline: ptr, mask_path: str) -> int:
     return sd_pipeline_set_mask(pipeline, mask_path)
+
+
+def sd_set_batch_count(pipeline: ptr, n: int) -> int:
+    return sd_pipeline_set_batch_count(pipeline, n)
 
 
 def sd_ensure_directory(path: str) -> int:
@@ -619,7 +624,11 @@ register_node("EmptyLatentImage", "Empty Latent Image",
 
 
 def apply_latent_extras(model: SDPipelineHandle, inputs, latent: LatentImage):
-    # 采样前的通用设置：img2img / inpainting / ControlNet
+    # 采样前的通用设置：batch / img2img / inpainting / ControlNet
+    if latent is not None and latent.batch_size > 1:
+        sd_set_batch_count(model.pipeline, latent.batch_size)
+    else:
+        sd_set_batch_count(model.pipeline, 1)
     if latent is not None and latent.image_path != "":
         sd_set_init_image(model.pipeline, latent.image_path, get_float(inputs, "denoise", 1.0))
     if latent is not None and latent.mask_path != "":
