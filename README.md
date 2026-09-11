@@ -128,7 +128,7 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 
 ## 已实现节点
 
-以下 ComfyUI 节点已在 `comfycli/nodes.static.py` 中实现（共 **60 个**），可直接在工作流 JSON 中使用。节点数量持续按需求扩展。
+以下 ComfyUI 节点已在 `comfycli/nodes.static.py` 中实现（共 **62 个**），可直接在工作流 JSON 中使用。节点数量持续按需求扩展。
 
 ### 模型加载
 
@@ -166,6 +166,8 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 | `ImageBlur` | `IMAGE` | 高斯模糊 |
 | `ImageBatch` | `IMAGE` | 两图垂直拼接 |
 | `ImagePadForOutpaint` | `IMAGE`, `MASK` | 外扩 padding（OpenCV） |
+| `ImageCompositeMasked` | `IMAGE` | 掩码合成 |
+| `ImageCrop` | `IMAGE` | 裁剪 |
 | `ImageToMask` / `MaskToImage` | `MASK` / `IMAGE` | 图 ↔ 掩码转换 |
 | `VAEDecode` / `VAEDecodeTiled` | `IMAGE` | 兼容节点（后端已完成 decode） |
 | `VAEEncode` | `LATENT` | img2img：参考图编码 |
@@ -375,7 +377,7 @@ ComfyUI 是 Python ML 生态中最复杂的纯推理项目之一：
 ```
 [x] cli_args.static.py        CLI 参数解析
 [x] sd_backend.static.py      stable-diffusion.cpp C API FFI 封装（extern fn）
-[x] nodes.static.py           60 个节点定义
+[x] nodes.static.py           62 个节点定义
 [x] execution.static.py       DAG 拓扑排序 + 输入链接解析
 [x] main.static.py            CLI 入口（workflow JSON / --checkpoint --prompt）
 [x] comfycli_ffi.scm          共享库加载 + 上游缺失内置
@@ -409,7 +411,7 @@ ComfyUI 是 Python ML 生态中最复杂的纯推理项目之一：
 - 无自定义节点动态加载——自定义节点需编译期注册
 - CLI 先行，无 WebSocket/HTTP UI
 - 同步执行，无 asyncio
-- 已实现 60 个核心节点，完整 ComfyUI 节点集仍在按需扩展中
+- 已实现 62 个核心节点，完整 ComfyUI 节点集仍在按需扩展中
 
 ## 项目文件
 
