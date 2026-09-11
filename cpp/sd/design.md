@@ -193,12 +193,15 @@ git log --oneline origin/master -30     # 查看最近的提交
 git diff 7f410a3..origin/master --stat   # 查看变更概览
 ```
 
-### 5.2 第一步：检查 patch 能否干净应用
+### 5.2 第一步：checkout + **强制**更新 submodule
 
 ```bash
 cd /opt/sd
 git checkout <new-commit>
-git submodule update --init --recursive
+# ⚠️ 必须加 --force：submodule 常停在旧 commit（状态带 +），
+#    不加 --force 会导致 ggml 头文件与 sd.cpp 不匹配（编译报函数未声明）
+git submodule update --init --recursive --force
+git submodule status          # 确认 ggml 前无 '+'，HEAD 与 git ls-tree HEAD ggml 一致
 git apply --check /opt/static_comfyui/cpp/sd/patches/sdcpp-freeu-sag-v2.patch
 ```
 
@@ -304,29 +307,62 @@ cd /opt/static_comfyui/cpp/sd
 cd /opt/static_comfyui
 ./build.sh
 
-# 如果编译失败，检查：
-#   - sdcpp_adapter.cpp 中引用的 sd.cpp 类型/函数是否已改名
-#   - 枚举值是否已被官方重命名
+# 如果编译失败，常见原因：
+#   A. ggml 头文件不匹配 → 见 5.2 的 submodule --force
+#   B. patch 引入的类型未声明（如 UNetModelRunner）→ 补 #include
+#      （例：pipeline/diffusion_engine.cpp 加 #include "model/diffusion/unet.hpp"）
+#   C. sdcpp_adapter.cpp 引用的 sd.cpp 类型/函数已改名 → 改适配层
+#   D. 枚举值被重命名 → 检查 str_to_* 映射
 ```
 
 ### 5.7 第五步：回归验证
 
 ```bash
-# 在本地（有 GPU）运行已知 workflow
+# 1. 基础出图
 LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
   GGML_BACKEND_PATH=/opt/sd/build-dl/bin/libggml-cuda.so \
-  ./comfycli-bin test_remote_2560.json --output-dir /tmp/regression
+  ./comfycli-bin test_sdxl.json --output-dir /tmp/regression
 
-# 对比输出 PNG 的像素 hash 和旧版本是否一致（固定 seed 下应一致）
-sha256sum /tmp/regression/*.png
+# 2. FreeU/SAG 必须验证「开/关输出不同」，否则说明参数没生效
+#    （固定 seed 跑同一 workflow，仅切换 freeu/sag，比较 md5）
+#    历史教训：nodes.parse_sampler_opts 曾硬编码 freeu=0，导致 KSampler 的 FreeU 静默失效
 ```
 
-### 5.8 第六步：锁定版本
+### 5.8 第六步：锁定版本 + 更新 patch 与文档
 
 ```bash
-cd /opt/sd
-git rev-parse --short HEAD > /opt/static_comfyui/cpp/sd/SD_VERSION.lock
+# build_sd_dl.sh 会自动更新 lock；手工核对：
+cd /opt/sd && git rev-parse --short HEAD > /opt/static_comfyui/cpp/sd/SD_VERSION.lock
+
+# 重新生成 patch（排除 submodule 指针）
+git diff -- include src > /opt/static_comfyui/cpp/sd/patches/sdcpp-freeu-sag-v2.patch
 ```
+
+> 更新 `design.md` §4（patch 目标文件/位置）与本文档的基准 commit。
+
+### 5.9 实战踩坑记录
+
+**`7f410a3` 升级（74 commits，含生成管线大重构）实际遇到的问题：**
+
+| # | 问题 | 现象 | 根因 | 修法 |
+|---|------|------|------|------|
+| 1 | ggml submodule 未更新 | 编译报 `ggml_mul_mat_i8_tensorwise` 未声明 | submodule 停在旧 commit（状态带 `+`） | `git submodule update --init --recursive --force` |
+| 2 | patch 冲突 | `stable-diffusion.cpp:239` patch failed | #1956/#1957 把生成管线从 `stable-diffusion.cpp` 拆到 `src/pipeline/` | 5 个 hunk 重定位（见下表） |
+| 3 | 缺 include | `UNetModelRunner does not name a type` | 新 `diffusion_engine.cpp` 未包含 `unet.hpp` | 加 `#include "model/diffusion/unet.hpp"` |
+| 4 | FreeU 静默失效 | 开关输出 hash 相同 | `nodes.parse_sampler_opts` 硬编码 `freeu=0`/`sag=0` | 改为 `get_int(inputs, "freeu", 0)` |
+| 5 | 适配层 | **零改动**（未报错） | `sd_*_params_init` + 按字段名赋值的抗性 | — |
+
+**patch hunk 重定位对照（旧 → 新）：**
+
+| 改动 | 旧位置 | 新位置 |
+|------|--------|--------|
+| 类字段 | `stable-diffusion.cpp` `StableDiffusionGGML` | `pipeline/diffusion_engine.h`（`is_using_edm_v_parameterization` 后） |
+| run_condition FreeU | `stable-diffusion.cpp` `run_condition` | `pipeline/diffusion_engine.cpp`（`diffusion_params.extra` if/else 链后） |
+| SAG/DynCFG | `stable-diffusion.cpp` 采样循环 | `pipeline/diffusion_engine.cpp`（`guided.pred.empty()` 后） |
+| IPAdapter 注入 | `stable-diffusion.cpp` `prepare_image_generation_embeds` | `pipeline/image.cpp` 同名函数 |
+| 参数配线 | `stable-diffusion.cpp` `generate_image` | `pipeline/image.cpp` `generate_image`（`apply_circular_axes` 后） |
+
+**经验**：上游重构会**移动函数到新文件**——不要硬按文件名找，用 `grep -rn '<函数名>' src/` 重新定位。`run_condition` / `prepare_image_generation_embeds` / `generate_image` / `apply_circular_axes` 是 patch 的锚点。
 
 ---
 
