@@ -1,8 +1,8 @@
 diff --git a/include/stable-diffusion.h b/include/stable-diffusion.h
-index 890050a..db012af 100644
+index cf69b48..c99e23e 100644
 --- a/include/stable-diffusion.h
 +++ b/include/stable-diffusion.h
-@@ -356,6 +356,33 @@ typedef struct {
+@@ -377,6 +377,33 @@ typedef struct {
      int custom_sigmas_count;
  } sd_hires_params_t;
  
@@ -36,7 +36,7 @@ index 890050a..db012af 100644
  typedef struct {
      const sd_lora_t* loras;
      uint32_t lora_count;
-@@ -380,6 +407,10 @@ typedef struct {
+@@ -403,6 +430,10 @@ typedef struct {
      sd_tiling_params_t vae_tiling_params;
      sd_cache_params_t cache;
      sd_hires_params_t hires;
@@ -48,10 +48,10 @@ index 890050a..db012af 100644
      bool circular_x;
      bool circular_y;
 diff --git a/src/model/diffusion/unet.hpp b/src/model/diffusion/unet.hpp
-index 118ed63..4d9386a 100644
+index 1c8ddf4..026d503 100644
 --- a/src/model/diffusion/unet.hpp
 +++ b/src/model/diffusion/unet.hpp
-@@ -301,6 +301,20 @@ class UnetModelBlock : public GGMLBlock {
+@@ -302,6 +302,20 @@ class UnetModelBlock : public GGMLBlock {
  public:
      UNetConfig config;
  
@@ -72,7 +72,7 @@ index 118ed63..4d9386a 100644
      explicit UnetModelBlock(UNetConfig config = {})
          : config(config) {
          const SDVersion version           = this->config.version;
-@@ -699,6 +713,46 @@ public:
+@@ -700,6 +714,46 @@ public:
                      control_offset--;
                  }
  
@@ -119,7 +119,7 @@ index 118ed63..4d9386a 100644
                  h = ggml_concat(ctx->ggml_ctx, h, h_skip, 2);
  
                  std::string name = "output_blocks." + std::to_string(output_block_idx) + ".0";
-@@ -749,6 +803,20 @@ struct UNetModelRunner : public DiffusionModelRunner {
+@@ -750,6 +804,20 @@ struct UNetModelRunner : public DiffusionModelRunner {
      UNetConfig config;
      UnetModelBlock unet;
  
@@ -140,7 +140,7 @@ index 118ed63..4d9386a 100644
      UNetModelRunner(ggml_backend_t backend,
                      const String2TensorStorage& tensor_storage_map,
                      const std::string prefix,
-@@ -837,6 +905,11 @@ struct UNetModelRunner : public DiffusionModelRunner {
+@@ -845,6 +913,11 @@ struct UNetModelRunner : public DiffusionModelRunner {
          GGML_ASSERT(diffusion_params.timesteps != nullptr);
          const auto* extra = diffusion_extra_as<UNetDiffusionExtra>(diffusion_params);
          static const std::vector<sd::Tensor<float>> empty_controls;
@@ -152,11 +152,66 @@ index 118ed63..4d9386a 100644
          return compute(n_threads,
                         *diffusion_params.x,
                         *diffusion_params.timesteps,
-diff --git a/src/stable-diffusion.cpp b/src/stable-diffusion.cpp
-index 0bddba2..b5b5c8b 100644
---- a/src/stable-diffusion.cpp
-+++ b/src/stable-diffusion.cpp
-@@ -239,6 +239,23 @@ public:
+diff --git a/src/pipeline/diffusion_engine.cpp b/src/pipeline/diffusion_engine.cpp
+index 5d51e24..1b878fd 100644
+--- a/src/pipeline/diffusion_engine.cpp
++++ b/src/pipeline/diffusion_engine.cpp
+@@ -26,6 +26,7 @@
+ #include "model_builders.h"
+ #include "model_loader.h"
+ #include "model_manager.h"
++#include "model/diffusion/unet.hpp"  // FreeU patch: UNetModelRunner
+ #include "stable-diffusion.h"
+ 
+ #include "conditioning/conditioner.hpp"
+@@ -2358,6 +2359,18 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+                 diffusion_params.extra = std::monostate{};
+             }
+ 
++            // FreeU (本项目 patch)
++            if (sd_version_is_unet(version)) {
++                auto* unet_runner = dynamic_cast<UNetModelRunner*>(work_diffusion_model.get());
++                if (unet_runner) {
++                    unet_runner->set_freeu_params(freeu_enabled,
++                                                  freeu_b1,
++                                                  freeu_b2,
++                                                  freeu_s1,
++                                                  freeu_s2);
++                }
++            }
++
+             sd::Tensor<float> cached_output;
+             if (step_cache.before_condition(&condition, noised_input, &cached_output)) {
+                 return std::move(cached_output);
+@@ -2455,6 +2468,23 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+             return {};
+         }
+ 
++        // SAG (Self-Attention Guidance) — 本项目 patch
++        if (this->sag_enabled && !uncond_out.empty()) {
++            guided.pred = guided.pred * this->sag_scale + uncond_out * (1.0f - this->sag_scale);
++        }
++
++        // Dynamic CFG (dynamic thresholding) — 本项目 patch
++        if (this->dynamic_cfg_enabled) {
++            float max_val = 0.0f;
++            for (int64_t i = 0; i < guided.pred.numel(); i++) {
++                float val = std::abs(guided.pred.data()[i]);
++                if (val > max_val) max_val = val;
++            }
++            if (max_val > 1.0f) {
++                guided.pred = guided.pred / max_val;
++            }
++        }
++
+         denoised = guided.pred * c_out + x * c_skip;
+         sd::guidance::GuiderOutput output;
+         output.pred = denoised;
+diff --git a/src/pipeline/diffusion_engine.h b/src/pipeline/diffusion_engine.h
+index 13cb6e8..b1a25a4 100644
+--- a/src/pipeline/diffusion_engine.h
++++ b/src/pipeline/diffusion_engine.h
+@@ -100,6 +100,23 @@ public:
      bool is_using_v_parameterization     = false;
      bool is_using_edm_v_parameterization = false;
  
@@ -172,126 +227,89 @@ index 0bddba2..b5b5c8b 100644
 +    float sag_scale  = 1.0f;
 +
 +    // Dynamic CFG (dynamic thresholding)
-+    bool dynamic_cfg_enabled             = false;
-+    float dynamic_cfg_percentile         = 1.0f;
-+    float dynamic_cfg_mimic_scale        = 10.0f;
++    bool dynamic_cfg_enabled               = false;
++    float dynamic_cfg_percentile           = 1.0f;
++    float dynamic_cfg_mimic_scale          = 10.0f;
 +    float dynamic_cfg_threshold_percentile = 1.0f;
 +
-     size_t control_net_params_mem_size = 0;
- 
      std::shared_ptr<ModelManager> model_manager;
-@@ -2576,6 +2593,17 @@ public:
-                     diffusion_params.extra = std::monostate{};
-                 }
  
-+                if (sd_version_is_unet(version)) {
-+                    auto* unet_runner = dynamic_cast<UNetModelRunner*>(work_diffusion_model.get());
-+                    if (unet_runner) {
-+                        unet_runner->set_freeu_params(this->freeu_enabled,
-+                                                      this->freeu_b1,
-+                                                      this->freeu_b2,
-+                                                      this->freeu_s1,
-+                                                      this->freeu_s2);
+     enum class RunnerGroup { Core,
+diff --git a/src/pipeline/image.cpp b/src/pipeline/image.cpp
+index 294e5b0..748f48a 100644
+--- a/src/pipeline/image.cpp
++++ b/src/pipeline/image.cpp
+@@ -503,6 +503,47 @@ namespace sd::pipeline {
+         int64_t t1 = ggml_time_ms();
+         LOG_INFO("get_learned_condition completed, taking %.2fs", (t1 - prepare_start_ms) * 1.0f / 1000);
+ 
++        // IPAdapter: inject image tokens into c_crossattn — 本项目 patch
++        if (sd_img_gen_params->ipadapter.num_tokens > 0) {
++            const auto& ipa = sd_img_gen_params->ipadapter;
++            int n_ipa    = ipa.num_tokens;
++            int ipa_dim  = ipa.token_dim;
++            float weight = ipa.weight;
++            auto inject  = [&](SDCondition& c) {
++                if (c.c_crossattn.empty()) return;
++                auto old_shape = c.c_crossattn.shape();
++                int64_t ctx_dim = old_shape[0];
++                int64_t n_text  = old_shape[1];
++                int64_t batch   = 1;
++                if (old_shape.size() >= 3) {
++                    batch = old_shape[2];
++                    for (size_t i = 3; i < old_shape.size(); i++) batch *= old_shape[i];
++                }
++                const int64_t token_stride     = n_text * batch;
++                const int64_t ipa_token_stride = n_ipa * batch;
++                std::vector<float> ipa_data(ctx_dim * ipa_token_stride, 0.0f);
++                int copy_dim = std::min(ipa_dim, (int)ctx_dim);
++                for (int b = 0; b < batch; b++) {
++                    for (int t = 0; t < n_ipa; t++) {
++                        for (int d = 0; d < copy_dim; d++) {
++                            ipa_data[d * ipa_token_stride + t * batch + b] = ipa.tokens[t * ipa_dim + d] * weight;
++                        }
 +                    }
 +                }
-+
-                 sd::Tensor<float> cached_output;
-                 if (step_cache.before_condition(&condition, noised_input, &cached_output)) {
-                     return std::move(cached_output);
-@@ -2670,6 +2698,23 @@ public:
-                 return {};
-             }
- 
-+            // SAG (Self-Attention Guidance)
-+            if (this->sag_enabled && !uncond_out.empty()) {
-+                guided.pred = guided.pred * this->sag_scale + uncond_out * (1.0f - this->sag_scale);
++                const float* old_data = c.c_crossattn.data();
++                std::vector<float> new_data(ctx_dim * (n_text + n_ipa) * batch);
++                std::copy(old_data, old_data + ctx_dim * token_stride, new_data.begin());
++                std::copy(ipa_data.begin(), ipa_data.end(), new_data.begin() + ctx_dim * token_stride);
++                auto new_shape = old_shape;
++                new_shape[1] = n_text + n_ipa;
++                c.c_crossattn = sd::Tensor<float>(new_shape, std::move(new_data));
++            };
++            inject(cond);
++            if (!uncond.empty()) {
++                inject(uncond);
 +            }
-+
-+            // Dynamic CFG (dynamic thresholding)
-+            if (this->dynamic_cfg_enabled) {
-+                float max_val = 0.0f;
-+                for (int64_t i = 0; i < guided.pred.numel(); i++) {
-+                    float val = std::abs(guided.pred.data()[i]);
-+                    if (val > max_val) max_val = val;
-+                }
-+                if (max_val > 1.0f) {
-+                    guided.pred = guided.pred / max_val;
-+                }
-+            }
-+
-             denoised = guided.pred * c_out + x * c_skip;
-             sd::guidance::GuiderOutput output;
-             output.pred = denoised;
-@@ -4986,6 +5031,47 @@ static std::optional<ImageGenerationEmbeds> prepare_image_generation_embeds(sd_c
-     int64_t t1 = ggml_time_ms();
-     LOG_INFO("get_learned_condition completed, taking %.2fs", (t1 - prepare_start_ms) * 1.0f / 1000);
- 
-+    // IPAdapter: inject image tokens into c_crossattn
-+    if (sd_img_gen_params->ipadapter.num_tokens > 0) {
-+        const auto& ipa = sd_img_gen_params->ipadapter;
-+        int n_ipa    = ipa.num_tokens;
-+        int ipa_dim  = ipa.token_dim;
-+        float weight = ipa.weight;
-+        auto inject  = [&](SDCondition& c) {
-+            if (c.c_crossattn.empty()) return;
-+            auto old_shape = c.c_crossattn.shape();
-+            int64_t ctx_dim = old_shape[0];
-+            int64_t n_text  = old_shape[1];
-+            int64_t batch   = 1;
-+            if (old_shape.size() >= 3) {
-+                batch = old_shape[2];
-+                for (size_t i = 3; i < old_shape.size(); i++) batch *= old_shape[i];
-+            }
-+            const int64_t token_stride = n_text * batch;
-+            const int64_t ipa_token_stride = n_ipa * batch;
-+            std::vector<float> ipa_data(ctx_dim * ipa_token_stride, 0.0f);
-+            int copy_dim = std::min(ipa_dim, (int)ctx_dim);
-+            for (int b = 0; b < batch; b++) {
-+                for (int t = 0; t < n_ipa; t++) {
-+                    for (int d = 0; d < copy_dim; d++) {
-+                        ipa_data[d * ipa_token_stride + t * batch + b] = ipa.tokens[t * ipa_dim + d] * weight;
-+                    }
-+                }
-+            }
-+            const float* old_data = c.c_crossattn.data();
-+            std::vector<float> new_data(ctx_dim * (n_text + n_ipa) * batch);
-+            std::copy(old_data, old_data + ctx_dim * token_stride, new_data.begin());
-+            std::copy(ipa_data.begin(), ipa_data.end(), new_data.begin() + ctx_dim * token_stride);
-+            auto new_shape = old_shape;
-+            new_shape[1] = n_text + n_ipa;
-+            c.c_crossattn = sd::Tensor<float>(new_shape, std::move(new_data));
-+        };
-+        inject(cond);
-+        if (!uncond.empty()) {
-+            inject(uncond);
 +        }
-+    }
 +
-     ImageGenerationEmbeds embeds;
-     embeds.img_uncond = std::move(img_uncond);
-     embeds.cond       = std::move(cond);
-@@ -5312,6 +5398,24 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
-     sd_ctx->sd->apply_loras(sd_img_gen_params->loras, sd_img_gen_params->lora_count);
-     apply_circular_axes_to_diffusion(sd_ctx, sd_img_gen_params->circular_x, sd_img_gen_params->circular_y);
+         ImageGenerationEmbeds embeds;
+         embeds.img_uncond = std::move(img_uncond);
+         embeds.cond       = std::move(cond);
+@@ -795,6 +836,25 @@ namespace sd::pipeline {
+             return false;
+         sd->apply_circular_axes(sd_img_gen_params->circular_x, sd_img_gen_params->circular_y);
  
-+    sd_ctx->sd->freeu_enabled = sd_img_gen_params->freeu.enabled;
-+    if (sd_img_gen_params->freeu.enabled) {
-+        sd_ctx->sd->freeu_b1 = sd_img_gen_params->freeu.b1;
-+        sd_ctx->sd->freeu_b2 = sd_img_gen_params->freeu.b2;
-+        sd_ctx->sd->freeu_s1 = sd_img_gen_params->freeu.s1;
-+        sd_ctx->sd->freeu_s2 = sd_img_gen_params->freeu.s2;
-+    }
-+    sd_ctx->sd->sag_enabled = sd_img_gen_params->sag.enabled;
-+    if (sd_img_gen_params->sag.enabled) {
-+        sd_ctx->sd->sag_scale = sd_img_gen_params->sag.scale;
-+    }
-+    sd_ctx->sd->dynamic_cfg_enabled = sd_img_gen_params->dynamic_cfg.enabled;
-+    if (sd_img_gen_params->dynamic_cfg.enabled) {
-+        sd_ctx->sd->dynamic_cfg_percentile         = sd_img_gen_params->dynamic_cfg.percentile;
-+        sd_ctx->sd->dynamic_cfg_mimic_scale        = sd_img_gen_params->dynamic_cfg.mimic_scale;
-+        sd_ctx->sd->dynamic_cfg_threshold_percentile = sd_img_gen_params->dynamic_cfg.threshold_percentile;
-+    }
++        // FreeU / SAG / Dynamic CFG 参数配线 — 本项目 patch
++        sd->freeu_enabled = sd_img_gen_params->freeu.enabled;
++        if (sd_img_gen_params->freeu.enabled) {
++            sd->freeu_b1 = sd_img_gen_params->freeu.b1;
++            sd->freeu_b2 = sd_img_gen_params->freeu.b2;
++            sd->freeu_s1 = sd_img_gen_params->freeu.s1;
++            sd->freeu_s2 = sd_img_gen_params->freeu.s2;
++        }
++        sd->sag_enabled = sd_img_gen_params->sag.enabled;
++        if (sd_img_gen_params->sag.enabled) {
++            sd->sag_scale = sd_img_gen_params->sag.scale;
++        }
++        sd->dynamic_cfg_enabled = sd_img_gen_params->dynamic_cfg.enabled;
++        if (sd_img_gen_params->dynamic_cfg.enabled) {
++            sd->dynamic_cfg_percentile           = sd_img_gen_params->dynamic_cfg.percentile;
++            sd->dynamic_cfg_mimic_scale          = sd_img_gen_params->dynamic_cfg.mimic_scale;
++            sd->dynamic_cfg_threshold_percentile = sd_img_gen_params->dynamic_cfg.threshold_percentile;
++        }
 +
-     const RefImageParams ref_image_params = sd_ctx->sd->resolve_ref_image_params(sd_img_gen_params->ref_image_args);
+         const RefImageParams ref_image_params = sd->resolve_ref_image_params(sd_img_gen_params->ref_image_args);
  
-     ImageVaeAxesGuard axes_guard(sd_ctx, sd_img_gen_params, request);
+         ImageVaeAxesGuard axes_guard(sd, sd_img_gen_params, request);

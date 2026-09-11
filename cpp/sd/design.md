@@ -59,13 +59,16 @@ StaticPy extern fn ← sdcpp_adapter.h (C API) ← sdcpp_adapter.cpp ← stable-
 
 ## 4. 我们对 sd.cpp 的改动
 
-所有改动集中在 **一个 patch 文件** `patches/sdcpp-freeu-sag-v2.patch`（约 240 行），修改 sd.cpp 的 **3 个文件**：
+所有改动集中在 **一个 patch 文件** `patches/sdcpp-freeu-sag-v2.patch`（约 315 行），修改 sd.cpp 的 **5 个文件**。
+
+> **注意**：sd.cpp 在 `7f410a3` 做了大重构（#1956/#1957），生成管线从 `src/stable-diffusion.cpp` 拆到 `src/pipeline/`。patch 已随之重定位。
 
 ### 4.1 `include/stable-diffusion.h`
-新增 3 个结构体 + 在 `sd_img_gen_params_t` 末尾追加对应字段：
+新增 4 个结构体 + 在 `sd_img_gen_params_t` 末尾追加对应字段：
 - `sd_freeu_params_t`：`{enabled, b1, b2, s1, s2}`
 - `sd_sag_params_t`：`{enabled, scale}`
 - `sd_dynamic_cfg_params_t`：`{enabled, percentile, mimic_scale, threshold_percentile}`
+- `sd_ipadapter_params_t`：`{tokens, num_tokens, token_dim, weight}`
 
 ### 4.2 `src/model/diffusion/unet.hpp`
 两处独立改动：
@@ -82,31 +85,39 @@ StaticPy extern fn ← sdcpp_adapter.h (C API) ← sdcpp_adapter.cpp ← stable-
 - `compute(DiffusionParams&)` 中用 `this->freeu_*` 调用 `unet.set_freeu()`
 - **不修改 `DiffusionParams`**——FreeU 字段直接挂在 runner 上
 
-### 4.3 `src/stable-diffusion.cpp`
-三处独立改动：
-
-**A. `StableDiffusionGGML` 类**——新增类字段（各功能默认 disabled）：
+### 4.3 `src/pipeline/diffusion_engine.h`
+`StableDiffusionGGML` 类新增字段（各功能默认 disabled）：
 - FreeU: `freeu_enabled`, `freeu_b1/b2/s1/s2`
 - SAG: `sag_enabled`, `sag_scale`
 - Dynamic CFG: `dynamic_cfg_enabled`, `dynamic_cfg_percentile/mimic_scale/threshold_percentile`
+
+### 4.4 `src/pipeline/diffusion_engine.cpp`
+三处改动：
+
+**A. 顶部 include**：`#include "model/diffusion/unet.hpp"`（FreeU 的 `dynamic_cast<UNetModelRunner*>` 需要完整定义）
 
 **B. `run_condition` lambda 中**——通过 `dynamic_cast<UNetModelRunner*>` + `sd_version_is_unet()` 设置 FreeU：
 ```cpp
 if (sd_version_is_unet(version)) {
     auto* unet_runner = dynamic_cast<UNetModelRunner*>(work_diffusion_model.get());
     if (unet_runner) {
-        unet_runner->set_freeu_params(this->freeu_enabled, ...);
+        unet_runner->set_freeu_params(freeu_enabled, ...);
     }
 }
 ```
 
 **C. 采样循环的 post-compute 阶段**——插入 SAG + Dynamic CFG：
-- SAG：`guided.pred = pred * scale + uncond * (1-scale)`（100% 擦除的纯数学插值）
+- SAG：`guided.pred = pred * scale + uncond * (1-scale)`
 - Dynamic CFG：找到 `pred` 最大绝对值，若 >1 则全张量除以该值
 
-**D. `generate_image()` 中**——从 `sd_img_gen_params_t` 读取参数存入类字段
+### 4.5 `src/pipeline/image.cpp`
+两处改动：
 
-### 4.4 `src/model/vae/vae.hpp` — 不移除 ⚠️ 未修改
+**A. `generate_image()`**——从 `sd_img_gen_params_t` 读取 freeu/sag/dynamic_cfg 存入 `sd->*` 字段
+
+**B. `prepare_image_generation_embeds()`**——把 `sd_img_gen_params_t.ipadapter.tokens` 注入 `c_crossattn`（`[ctx_dim, n_text]` → `[ctx_dim, n_text+n_ipa]`）
+
+### 4.6 `src/model/vae/vae.hpp` — 不移除 ⚠️ 未修改
 VAE tile 大小上限已从 patch 中移除，改由 adapter 层在调用 `generate_image` 前自行 cap。详见 §4.7。
 
 ### 4.5 `src/model/diffusion/model.hpp` ⚠️ 未修改
@@ -179,7 +190,7 @@ LoRA、ControlNet、HiRes Fix、**VAE tiling（含 tile cap）**、sampler/sched
 cd /opt/sd
 git fetch origin
 git log --oneline origin/master -30     # 查看最近的提交
-git diff 5e4e03c..origin/master --stat   # 查看变更概览
+git diff 7f410a3..origin/master --stat   # 查看变更概览
 ```
 
 ### 5.2 第一步：检查 patch 能否干净应用
@@ -202,9 +213,11 @@ patch 修改了 **3 个文件**，需要逐一检查每个文件在新版中的�
 
 | patch 涉及的文件 | 对比命令 | 需要检查什么 |
 |-----------------|----------|-------------|
-| `include/stable-diffusion.h` | `git diff <old>..<new> -- include/stable-diffusion.h` | `sd_img_gen_params_t` 末尾是否新增了字段（拼在 `hires` 后面）；FreeU/SAG/DynCFG 是否已被官方合入 |
-| `src/model/diffusion/unet.hpp` | `git diff <old>..<new> -- src/model/diffusion/unet.hpp` | `UnetModelBlock::forward()` signature/base class 是否变化；`UNetModelRunner` 起始位置是否偏移 |
-| `src/stable-diffusion.cpp` | `git diff <old>..<new> -- src/stable-diffusion.cpp` | `StableDiffusionGGML` class fields 位置；`run_condition` lambda 位置；`generate_image()` 内部逻辑 |
+| `include/stable-diffusion.h` | `git diff <old>..<new> -- include/stable-diffusion.h` | `sd_img_gen_params_t` 末尾是否新增字段；FreeU/SAG/DynCFG/IPAdapter 是否已被官方合入 |
+| `src/model/diffusion/unet.hpp` | `git diff <old>..<new> -- src/model/diffusion/unet.hpp` | `UnetModelBlock::forward()` 签名/基类；`UNetModelRunner` 位置 |
+| `src/pipeline/diffusion_engine.h` | `git diff <old>..<new> -- src/pipeline/diffusion_engine.h` | `StableDiffusionGGML` class fields 位置（在 `is_using_edm_v_parameterization` 之后） |
+| `src/pipeline/diffusion_engine.cpp` | `git diff <old>..<new> -- src/pipeline/diffusion_engine.cpp` | `run_condition` lambda 的 `diffusion_params.extra` 链末尾；采样循环 `guided.pred` post-compute；include 块 |
+| `src/pipeline/image.cpp` | `git diff <old>..<new> -- src/pipeline/image.cpp` | `generate_image` 中 `apply_circular_axes` 之后；`prepare_image_generation_embeds` 中 `ImageGenerationEmbeds embeds;` 之前 |
 
 **不需要对比** `model.hpp`（不再修改）和 `vae.hpp`（tile cap 移到 adapter，不涉及 sd.cpp）。
 
@@ -228,13 +241,18 @@ git apply --reject /opt/static_comfyui/cpp/sd/patches/sdcpp-freeu-sag-v2.patch 2
 ```
 
 **常见冲突处理：**
-1. **stable-diffusion.h**: 如果 upstream 在 `hires` 后新增了字段，patch 的 3 个字段拼在它们后面即可。用 `git diff` 确认 `sd_img_gen_params_t` 末尾内容，调整 offset（或直接在末尾追加）。
-2. **unet.hpp**: `UnetModelBlock::forward()` 中的 FreeU block 需要跟在 `control_offset--` 之后、`ggml_concat(h, h_skip)` 之前。找到这个位置重新插入即可。
-3. **stable-diffusion.cpp**: 三个改动独立互不影响：
-   - Class fields：插在 `is_using_edm_v_parameterization` 后面
-   - `run_condition` 中的 `dynamic_cast`：插在 `diffusion_params.extra` 赋值之后、`cached_output` 之前
+1. **stable-diffusion.h**: 如果 upstream 在末尾新增了字段，patch 的 4 个结构体/字段拼在它们后面即可。
+2. **unet.hpp**: `UnetModelBlock::forward()` 中的 FreeU block 跟在 `control_offset--` 之后、output block 的 concat 之前。
+3. **pipeline/diffusion_engine.h**: 类字段插在 `is_using_edm_v_parameterization` 之后。
+4. **pipeline/diffusion_engine.cpp**:
+   - include：`#include "model/diffusion/unet.hpp"`
+   - `run_condition` 的 `dynamic_cast`：插在 `diffusion_params.extra` if/else 链之后、`cached_output` 之前
    - SAG/DynCFG：插在 `if (guided.pred.empty()) return {};` 之后、`denoised = guided.pred * c_out...` 之前
-   - `generate_image` 配线：插在 `apply_circular_axes` 之后、`resolve_ref_image_params` 之前
+5. **pipeline/image.cpp**:
+   - IPAdapter 注入：`prepare_image_generation_embeds` 中 `ImageGenerationEmbeds embeds;` 之前
+   - 参数配线：`generate_image` 中 `apply_circular_axes` 之后、`resolve_ref_image_params` 之前
+
+> **重构历史**：`7f410a3` 起生成管线从 `stable-diffusion.cpp` 拆到 `src/pipeline/`。若上游再次移动这些函数，用 `grep -rn 'run_condition\|prepare_image_generation_embeds\|apply_circular_axes' src/` 重新定位。
 
 **如果官方已经合入了 FreeU/SAG：** 删除 patch 中对应部分，只保留未合入的部分。
 **如果官方 API 大变：** 对照 patch 的修改意图，在新代码的对应位置重新实现。
@@ -242,7 +260,7 @@ git apply --reject /opt/static_comfyui/cpp/sd/patches/sdcpp-freeu-sag-v2.patch 2
 ### 5.4 第二步：检查 sd.cpp C API 变化
 
 ```bash
-git diff 5e4e03c..<new> -- include/stable-diffusion.h
+git diff 7f410a3..<new> -- include/stable-diffusion.h
 ```
 
 逐项检查以下内容：
