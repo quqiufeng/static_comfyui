@@ -163,6 +163,7 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 | `LoadImage` / `LoadImageMask` | `IMAGE`, `MASK` | 从文件加载图片/掩码 |
 | `ImageScale` / `ImageScaleBy` | `IMAGE` | 缩放（OpenCV） |
 | `ImageInvert` | `IMAGE` | 反色 |
+| `ImagePadForOutpaint` | `IMAGE`, `MASK` | 外扩 padding（OpenCV） |
 | `VAEDecode` / `VAEDecodeTiled` | `IMAGE` | 兼容节点（后端已完成 decode） |
 | `VAEEncode` | `LATENT` | img2img：参考图编码 |
 | `VAEEncodeForInpaint` | `LATENT` | inpainting：参考图 + 掩码 |

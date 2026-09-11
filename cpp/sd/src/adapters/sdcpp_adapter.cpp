@@ -1077,6 +1077,26 @@ int sd_make_solid_image(const char* output_path, int width, int height,
     return 0;
 }
 
+int sd_pad_image(const char* input_path, const char* output_path,
+                 int left, int top, int right, int bottom,
+                 int r, int g, int b) {
+    if (!input_path || !output_path || left < 0 || top < 0 || right < 0 || bottom < 0) return -1;
+    cv::Mat img = cv::imread(input_path, cv::IMREAD_COLOR);
+    if (img.empty()) {
+        std::fprintf(stderr, "[C API] sd_pad_image: failed to read %s\n", input_path);
+        return -2;
+    }
+    cv::Mat out, rgb;
+    cv::copyMakeBorder(img, out, top, bottom, left, right,
+                       cv::BORDER_CONSTANT, cv::Scalar(b, g, r));
+    cv::cvtColor(out, rgb, cv::COLOR_BGR2RGB);
+    if (!save_png(output_path, rgb.data, rgb.cols, rgb.rows, rgb.channels())) {
+        std::fprintf(stderr, "[C API] sd_pad_image: failed to write %s\n", output_path);
+        return -3;
+    }
+    return 0;
+}
+
 int sd_invert_image(const char* input_path, const char* output_path) {
     if (!input_path || !output_path) return -1;
     cv::Mat img = cv::imread(input_path, cv::IMREAD_COLOR);

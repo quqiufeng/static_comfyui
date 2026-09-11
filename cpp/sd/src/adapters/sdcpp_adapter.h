@@ -436,6 +436,11 @@ int sd_invert_image(const char* input_path, const char* output_path);
 int sd_make_solid_image(const char* output_path, int width, int height,
                         int r, int g, int b);
 
+/** Pad an image (constant color) and save as PNG. Returns 0 on success. */
+int sd_pad_image(const char* input_path, const char* output_path,
+                 int left, int top, int right, int bottom,
+                 int r, int g, int b);
+
 #ifdef __cplusplus
 }
 #endif

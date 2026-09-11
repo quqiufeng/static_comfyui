@@ -705,6 +705,27 @@ register_node("EmptyImage", "Empty Image",
               "empty_image", ("IMAGE",), False)
 
 
+def image_pad_for_outpaint(inputs):
+    image_path = dict_get(inputs, "image")
+    if image_path is None:
+        print("ImagePadForOutpaint: no image received")
+        return (None,)
+    left = get_int(inputs, "left", 0)
+    top = get_int(inputs, "top", 0)
+    right = get_int(inputs, "right", 0)
+    bottom = get_int(inputs, "bottom", 0)
+    out = "/tmp/comfycli_padded.png"
+    rc = sd_pad_image(image_path, out, left, top, right, bottom, 0, 0, 0)
+    if rc != 0:
+        print("ImagePadForOutpaint: failed, rc=" + string_of_int(rc))
+        return (None,)
+    return (out,)
+
+
+register_node("ImagePadForOutpaint", "Pad Image for Outpainting",
+              "image_pad_for_outpaint", ("IMAGE", "MASK"), False)
+
+
 def preview_image(inputs):
     image_path = dict_get(inputs, "images")
     if image_path is None:
@@ -990,6 +1011,8 @@ def call_node(class_type: str, inputs):
         return image_invert(inputs)
     elif class_type == "EmptyImage":
         return empty_image(inputs)
+    elif class_type == "ImagePadForOutpaint":
+        return image_pad_for_outpaint(inputs)
     elif class_type == "PreviewImage":
         return preview_image(inputs)
     elif class_type == "Reroute":

@@ -158,6 +158,7 @@ extern fn sd_resize_image(input_path: str, output_path: str, width: int, height:
 extern fn sd_scale_image(input_path: str, output_path: str, scale_by: float) -> int from "sdcpp_adapter"
 extern fn sd_invert_image(input_path: str, output_path: str) -> int from "sdcpp_adapter"
 extern fn sd_make_solid_image(output_path: str, width: int, height: int, r: int, g: int, b: int) -> int from "sdcpp_adapter"
+extern fn sd_pad_image(input_path: str, output_path: str, left: int, top: int, right: int, bottom: int, r: int, g: int, b: int) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_generate_adetailer(pipeline: ptr, prompt: str, negative_prompt: str, width: int, height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires: int, hires_width: int, hires_height: int, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, ad_model_path: str, ad_prompt: str, ad_negative_prompt: str, output_path: str) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_generate_full(pipeline: ptr, prompt: str, negative_prompt: str, width: int, height: int, hires_width: int, hires_height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, clarity: float, sharpen_amount: float, sharpen_radius: int, smart_sharpen_strength: float, smart_sharpen_radius: int, edge_sharpen_amount: float, edge_sharpen_radius: int, edge_sharpen_threshold: float, ad_model_path: str, ad_prompt: str, ad_negative_prompt: str, output_path: str) -> int from "sdcpp_adapter"
 extern fn sd_ensure_dir(path: str) -> int from "sdcpp_adapter"
@@ -1032,6 +1033,27 @@ register_node("EmptyImage", "Empty Image",
               "empty_image", ("IMAGE",), False)
 
 
+def image_pad_for_outpaint(inputs):
+    image_path = dict_get(inputs, "image")
+    if image_path is None:
+        print("ImagePadForOutpaint: no image received")
+        return (None,)
+    left = get_int(inputs, "left", 0)
+    top = get_int(inputs, "top", 0)
+    right = get_int(inputs, "right", 0)
+    bottom = get_int(inputs, "bottom", 0)
+    out = "/tmp/comfycli_padded.png"
+    rc = sd_pad_image(image_path, out, left, top, right, bottom, 0, 0, 0)
+    if rc != 0:
+        print("ImagePadForOutpaint: failed, rc=" + string_of_int(rc))
+        return (None,)
+    return (out,)
+
+
+register_node("ImagePadForOutpaint", "Pad Image for Outpainting",
+              "image_pad_for_outpaint", ("IMAGE", "MASK"), False)
+
+
 def preview_image(inputs):
     image_path = dict_get(inputs, "images")
     if image_path is None:
@@ -1317,6 +1339,8 @@ def call_node(class_type: str, inputs):
         return image_invert(inputs)
     elif class_type == "EmptyImage":
         return empty_image(inputs)
+    elif class_type == "ImagePadForOutpaint":
+        return image_pad_for_outpaint(inputs)
     elif class_type == "PreviewImage":
         return preview_image(inputs)
     elif class_type == "Reroute":
