@@ -122,6 +122,10 @@ struct ImageGenerationParams {
     int ad_inpaint_width = 512;
     int ad_inpaint_height = 512;
     float ad_denoising_strength = 0.4f;
+
+    // img2img: init image path + denoising strength (ignored when empty)
+    std::string init_image_path;
+    float strength = 1.0f;
 };
 
 /**
@@ -158,6 +162,10 @@ public:
                        const std::string& image_path,
                        float weight);
     void set_ipadapter_enabled(bool enabled, float weight);
+
+    // img2img: load the init image once; used by subsequent generate() calls.
+    // Pass an empty path to clear.
+    void set_init_image(const std::string& image_path, float strength);
 
 private:
     class Impl;
@@ -339,6 +347,15 @@ int sd_pipeline_set_ipadapter(sd_pipeline_t pipeline,
 int sd_pipeline_set_ipadapter_enabled(sd_pipeline_t pipeline,
                                        int enabled,
                                        float weight);
+
+/**
+ * Load an img2img init image and associate it with the pipeline.
+ * Subsequent generate() calls run img2img with the given denoising strength.
+ * Pass an empty path to clear. Returns 0 on success.
+ */
+int sd_pipeline_set_init_image(sd_pipeline_t pipeline,
+                               const char* image_path,
+                               float strength);
 
 /**
  * Generate image with ADetailer face restoration post-processing.

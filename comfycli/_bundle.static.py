@@ -150,6 +150,7 @@ extern fn sd_pipeline_generate_hires(pipeline: ptr, prompt: str, negative_prompt
 extern fn sd_pipeline_load_lora(pipeline: ptr, lora_path: str, multiplier: float) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_ipadapter(pipeline: ptr, model_path: str, clip_vision_path: str, image_path: str, weight: float) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_ipadapter_enabled(pipeline: ptr, enabled: int, weight: float) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_set_init_image(pipeline: ptr, image_path: str, strength: float) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_generate_adetailer(pipeline: ptr, prompt: str, negative_prompt: str, width: int, height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires: int, hires_width: int, hires_height: int, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, ad_model_path: str, ad_prompt: str, ad_negative_prompt: str, output_path: str) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_generate_full(pipeline: ptr, prompt: str, negative_prompt: str, width: int, height: int, hires_width: int, hires_height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, clarity: float, sharpen_amount: float, sharpen_radius: int, smart_sharpen_strength: float, smart_sharpen_radius: int, edge_sharpen_amount: float, edge_sharpen_radius: int, edge_sharpen_threshold: float, ad_model_path: str, ad_prompt: str, ad_negative_prompt: str, output_path: str) -> int from "sdcpp_adapter"
 extern fn sd_ensure_dir(path: str) -> int from "sdcpp_adapter"
@@ -241,6 +242,10 @@ def sd_set_ipadapter_enabled(pipeline: ptr, enabled: int, weight: float) -> int:
     return sd_pipeline_set_ipadapter_enabled(pipeline, enabled, weight)
 
 
+def sd_set_init_image(pipeline: ptr, image_path: str, strength: float) -> int:
+    return sd_pipeline_set_init_image(pipeline, image_path, strength)
+
+
 def sd_ensure_directory(path: str) -> int:
     return sd_ensure_dir(path)
 
@@ -323,6 +328,7 @@ class LatentImage:
     width: int
     height: int
     batch_size: int
+    image_path: str
 
 
 @dataclass
@@ -527,7 +533,7 @@ def empty_latent_image(inputs):
     width = get_int(inputs, "width", 1024)
     height = get_int(inputs, "height", 1024)
     batch_size = get_int(inputs, "batch_size", 1)
-    return (LatentImage(width, height, batch_size),)
+    return (LatentImage(width, height, batch_size, ""),)
 
 
 register_node("EmptyLatentImage", "Empty Latent Image",
@@ -550,6 +556,10 @@ def ksampler(inputs):
     else:
         width = latent.width
         height = latent.height
+
+    denoise = get_float(inputs, "denoise", 1.0)
+    if latent is not None and latent.image_path != "":
+        sd_set_init_image(model.pipeline, latent.image_path, denoise)
 
     opts = parse_sampler_opts(inputs)
     out = sampler_output(inputs)
@@ -578,6 +588,21 @@ def vae_decode(inputs):
 
 register_node("VAEDecode", "VAE Decode",
               "vae_decode", ("IMAGE",), False)
+
+
+def vae_encode(inputs):
+    # img2img：把参考图路径编码为 LATENT（sd.cpp 在采样时做 VAE encode）
+    image_path = dict_get(inputs, "pixels")
+    if image_path is None:
+        image_path = get_str(inputs, "image", "")
+    if image_path == "":
+        print("VAEEncode: no image received")
+        return (None,)
+    return (LatentImage(0, 0, 1, image_path),)
+
+
+register_node("VAEEncode", "VAE Encode",
+              "vae_encode", ("LATENT",), False)
 
 
 def diffusion_model_loader(inputs):
@@ -882,7 +907,7 @@ def latent_upscale(inputs):
     width = get_int(inputs, "width", latent.width)
     height = get_int(inputs, "height", latent.height)
     batch_size = latent.batch_size
-    return (LatentImage(width, height, batch_size),)
+    return (LatentImage(width, height, batch_size, latent.image_path),)
 
 
 register_node("LatentUpscale", "Latent Upscale",
@@ -897,7 +922,7 @@ def latent_crop(inputs):
     width = get_int(inputs, "width", latent.width)
     height = get_int(inputs, "height", latent.height)
     batch_size = latent.batch_size
-    return (LatentImage(width, height, batch_size),)
+    return (LatentImage(width, height, batch_size, latent.image_path),)
 
 
 register_node("LatentCrop", "Latent Crop",
@@ -1002,6 +1027,8 @@ def call_node(class_type: str, inputs):
         return ipadapter_model_loader(inputs)
     elif class_type == "VAEDecode":
         return vae_decode(inputs)
+    elif class_type == "VAEEncode":
+        return vae_encode(inputs)
     elif class_type == "LoadImage":
         return load_image(inputs)
     elif class_type == "PreviewImage":

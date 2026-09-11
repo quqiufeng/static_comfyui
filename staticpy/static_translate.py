@@ -44,7 +44,9 @@ def scheme_name(name):
 # ====== C 类型映射 ======
 TYPE_MAP = {
     "int": "int",
-    "float": "double",
+    # comfycli 的 C API（sdcpp_adapter）用 32 位 float；上游默认 double 会导致
+    # foreign-procedure ABI 不匹配（float 参数变成垃圾值）。
+    "float": "float",
     "double": "double",
     "bool": "boolean",
     "str": "string",

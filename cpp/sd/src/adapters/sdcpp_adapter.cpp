@@ -4,6 +4,10 @@
 
 #include <stable-diffusion.h>
 
+#include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/imgcodecs.hpp>
+
 #include <cstddef>
 #include <cstdint>
 #include <utility>
@@ -26,6 +30,12 @@ public:
     std::unique_ptr<IPAdapter> ipadapter;
     bool ipadapter_enabled = false;
     float ipadapter_weight = 1.0f;
+
+    // img2img init image (owns the RGB pixel buffer)
+    std::vector<uint8_t> init_image_data;
+    sd_image_t init_image{};
+    bool has_init_image = false;
+    float init_strength = 1.0f;
 
     ~Impl() {
         if (ctx) {
@@ -157,6 +167,33 @@ void SDPipeline::set_ipadapter_enabled(bool enabled, float weight) {
     }
 }
 
+void SDPipeline::set_init_image(const std::string& image_path, float strength) {
+    if (!impl_) return;
+    if (image_path.empty()) {
+        impl_->has_init_image = false;
+        impl_->init_image_data.clear();
+        impl_->init_image = sd_image_t{};
+        return;
+    }
+    cv::Mat img = cv::imread(image_path, cv::IMREAD_COLOR);
+    if (img.empty()) {
+        std::fprintf(stderr, "[C++ gen] set_init_image: failed to read %s\n", image_path.c_str());
+        impl_->has_init_image = false;
+        return;
+    }
+    cv::Mat rgb;
+    cv::cvtColor(img, rgb, cv::COLOR_BGR2RGB);
+    impl_->init_image_data.assign(rgb.data, rgb.data + rgb.total() * rgb.channels());
+    impl_->init_image.width   = rgb.cols;
+    impl_->init_image.height  = rgb.rows;
+    impl_->init_image.channel = rgb.channels();
+    impl_->init_image.data    = impl_->init_image_data.data();
+    impl_->has_init_image     = true;
+    impl_->init_strength      = strength;
+    std::fprintf(stderr, "[C++ gen] set_init_image: %s (%dx%d) strength=%.2f\n",
+                 image_path.c_str(), rgb.cols, rgb.rows, strength);
+}
+
 Image SDPipeline::generate(const ImageGenerationParams& params) {
     Image result;
     if (!impl_ || !impl_->ctx) {
@@ -170,10 +207,20 @@ Image SDPipeline::generate(const ImageGenerationParams& params) {
     img_params.ipadapter.token_dim  = 0;
     img_params.ipadapter.weight     = 0.0f;
 
+    // img2img 时若未指定宽高，则用 init image 的尺寸
+    int eff_w = params.width;
+    int eff_h = params.height;
+    if (impl_->has_init_image) {
+        if (eff_w <= 0) eff_w = impl_->init_image.width;
+        if (eff_h <= 0) eff_h = impl_->init_image.height;
+    }
+    if (eff_w <= 0) eff_w = 1024;
+    if (eff_h <= 0) eff_h = 1024;
+
     img_params.prompt          = params.prompt.c_str();
     img_params.negative_prompt = params.negative_prompt.c_str();
-    img_params.width           = params.width;
-    img_params.height          = params.height;
+    img_params.width           = eff_w;
+    img_params.height          = eff_h;
     img_params.clip_skip       = params.clip_skip;
     img_params.seed            = params.seed;
     img_params.batch_count     = params.batch_count;
@@ -279,6 +326,12 @@ Image SDPipeline::generate(const ImageGenerationParams& params) {
             img_params.ipadapter.token_dim  = impl_->ipadapter->get_token_dim();
             img_params.ipadapter.weight     = impl_->ipadapter_weight;
         }
+    }
+
+    // img2img init image
+    if (impl_->has_init_image) {
+        img_params.init_image = impl_->init_image;
+        img_params.strength   = impl_->init_strength;
     }
 
     sd_image_t* images = nullptr;
@@ -803,6 +856,17 @@ int sd_pipeline_set_ipadapter_enabled(sd_pipeline_t pipeline,
     std::fprintf(stderr, "[C API] sd_pipeline_set_ipadapter_enabled: enabled=%d weight=%.2f\n",
                  enabled, weight);
     p->set_ipadapter_enabled(enabled != 0, weight);
+    return 0;
+}
+
+int sd_pipeline_set_init_image(sd_pipeline_t pipeline,
+                               const char* image_path,
+                               float strength) {
+    if (!pipeline) return -1;
+    sd::SDPipeline* p = static_cast<sd::SDPipeline*>(pipeline);
+    std::fprintf(stderr, "[C API] sd_pipeline_set_init_image: path=%s strength=%.2f\n",
+                 image_path ? image_path : "(null)", strength);
+    p->set_init_image(image_path ? image_path : "", strength);
     return 0;
 }
 
