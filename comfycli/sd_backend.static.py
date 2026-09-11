@@ -15,6 +15,7 @@ extern fn sd_pipeline_set_ipadapter_enabled(pipeline: ptr, enabled: int, weight:
 extern fn sd_pipeline_set_init_image(pipeline: ptr, image_path: str, strength: float) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_load_control_net(pipeline: ptr, path: str) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_control_image(pipeline: ptr, image_path: str, strength: float) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_set_mask(pipeline: ptr, mask_path: str) -> int from "sdcpp_adapter"
 extern fn sd_resize_image(input_path: str, output_path: str, width: int, height: int) -> int from "sdcpp_adapter"
 extern fn sd_scale_image(input_path: str, output_path: str, scale_by: float) -> int from "sdcpp_adapter"
 extern fn sd_invert_image(input_path: str, output_path: str) -> int from "sdcpp_adapter"
@@ -119,6 +120,10 @@ def sd_load_control_net(pipeline: ptr, path: str) -> int:
 
 def sd_set_control_image(pipeline: ptr, image_path: str, strength: float) -> int:
     return sd_pipeline_set_control_image(pipeline, image_path, strength)
+
+
+def sd_set_mask(pipeline: ptr, mask_path: str) -> int:
+    return sd_pipeline_set_mask(pipeline, mask_path)
 
 
 def sd_ensure_directory(path: str) -> int:

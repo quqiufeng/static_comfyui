@@ -43,6 +43,11 @@ public:
     bool has_control_image = false;
     float control_strength = 1.0f;
 
+    // Inpainting mask (grayscale)
+    std::vector<uint8_t> mask_image_data;
+    sd_image_t mask_image{};
+    bool has_mask_image = false;
+
     ~Impl() {
         if (ctx) {
             free_sd_ctx(ctx);
@@ -237,6 +242,29 @@ void SDPipeline::set_control_image(const std::string& image_path, float strength
                  image_path.c_str(), rgb.cols, rgb.rows, strength);
 }
 
+void SDPipeline::set_mask(const std::string& mask_path) {
+    if (!impl_) return;
+    if (mask_path.empty()) {
+        impl_->has_mask_image = false;
+        impl_->mask_image_data.clear();
+        impl_->mask_image = sd_image_t{};
+        return;
+    }
+    cv::Mat img = cv::imread(mask_path, cv::IMREAD_GRAYSCALE);
+    if (img.empty()) {
+        std::fprintf(stderr, "[C++ gen] set_mask: failed to read %s\n", mask_path.c_str());
+        impl_->has_mask_image = false;
+        return;
+    }
+    impl_->mask_image_data.assign(img.data, img.data + img.total() * img.channels());
+    impl_->mask_image.width   = img.cols;
+    impl_->mask_image.height  = img.rows;
+    impl_->mask_image.channel = img.channels();
+    impl_->mask_image.data    = impl_->mask_image_data.data();
+    impl_->has_mask_image     = true;
+    std::fprintf(stderr, "[C++ gen] set_mask: %s (%dx%d)\n", mask_path.c_str(), img.cols, img.rows);
+}
+
 Image SDPipeline::generate(const ImageGenerationParams& params) {
     Image result;
     if (!impl_ || !impl_->ctx) {
@@ -381,6 +409,11 @@ Image SDPipeline::generate(const ImageGenerationParams& params) {
     if (impl_->has_control_image) {
         img_params.control_image    = impl_->control_image;
         img_params.control_strength = impl_->control_strength;
+    }
+
+    // inpainting mask
+    if (impl_->has_mask_image) {
+        img_params.mask_image = impl_->mask_image;
     }
 
     sd_image_t* images = nullptr;
@@ -934,6 +967,14 @@ int sd_pipeline_set_control_image(sd_pipeline_t pipeline,
     std::fprintf(stderr, "[C API] sd_pipeline_set_control_image: path=%s strength=%.2f\n",
                  image_path ? image_path : "(null)", strength);
     p->set_control_image(image_path ? image_path : "", strength);
+    return 0;
+}
+
+int sd_pipeline_set_mask(sd_pipeline_t pipeline, const char* mask_path) {
+    if (!pipeline) return -1;
+    sd::SDPipeline* p = static_cast<sd::SDPipeline*>(pipeline);
+    std::fprintf(stderr, "[C API] sd_pipeline_set_mask: path=%s\n", mask_path ? mask_path : "(null)");
+    p->set_mask(mask_path ? mask_path : "");
     return 0;
 }
 

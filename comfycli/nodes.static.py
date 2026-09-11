@@ -29,6 +29,7 @@ class LatentImage:
     height: int
     batch_size: int
     image_path: str
+    mask_path: str
 
 
 @dataclass
@@ -278,7 +279,7 @@ def empty_latent_image(inputs):
     width = get_int(inputs, "width", 1024)
     height = get_int(inputs, "height", 1024)
     batch_size = get_int(inputs, "batch_size", 1)
-    return (LatentImage(width, height, batch_size, ""),)
+    return (LatentImage(width, height, batch_size, "", ""),)
 
 
 register_node("EmptyLatentImage", "Empty Latent Image",
@@ -305,6 +306,8 @@ def ksampler(inputs):
     denoise = get_float(inputs, "denoise", 1.0)
     if latent is not None and latent.image_path != "":
         sd_set_init_image(model.pipeline, latent.image_path, denoise)
+    if latent is not None and latent.mask_path != "":
+        sd_set_mask(model.pipeline, latent.mask_path)
 
     pos_c: Conditioning = dict_get(inputs, "positive")
     neg_c: Conditioning = dict_get(inputs, "negative")
@@ -360,11 +363,42 @@ def vae_encode(inputs):
     if image_path == "":
         print("VAEEncode: no image received")
         return (None,)
-    return (LatentImage(0, 0, 1, image_path),)
+    return (LatentImage(0, 0, 1, image_path, ""),)
 
 
 register_node("VAEEncode", "VAE Encode",
               "vae_encode", ("LATENT",), False)
+
+
+def load_image_mask(inputs):
+    # ComfyUI 的 LoadImageMask：从图像提取通道作为 mask。
+    # 本后端简化为返回图像路径，C++ 侧按灰度读取。
+    image_path = get_str(inputs, "image", "")
+    if image_path == "":
+        print("LoadImageMask: no image provided")
+        return (None,)
+    return (image_path,)
+
+
+register_node("LoadImageMask", "Load Image (as Mask)",
+              "load_image_mask", ("MASK",), False)
+
+
+def vae_encode_for_inpaint(inputs):
+    image_path = dict_get(inputs, "pixels")
+    if image_path is None:
+        image_path = get_str(inputs, "image", "")
+    mask_path = dict_get(inputs, "mask")
+    if mask_path is None:
+        mask_path = ""
+    if image_path == "":
+        print("VAEEncodeForInpaint: no image received")
+        return (None,)
+    return (LatentImage(0, 0, 1, image_path, mask_path),)
+
+
+register_node("VAEEncodeForInpaint", "VAE Encode (for Inpainting)",
+              "vae_encode_for_inpaint", ("LATENT",), False)
 
 
 def diffusion_model_loader(inputs):
@@ -723,7 +757,7 @@ def latent_upscale(inputs):
     width = get_int(inputs, "width", latent.width)
     height = get_int(inputs, "height", latent.height)
     batch_size = latent.batch_size
-    return (LatentImage(width, height, batch_size, latent.image_path),)
+    return (LatentImage(width, height, batch_size, latent.image_path, latent.mask_path),)
 
 
 register_node("LatentUpscale", "Latent Upscale",
@@ -738,7 +772,7 @@ def latent_crop(inputs):
     width = get_int(inputs, "width", latent.width)
     height = get_int(inputs, "height", latent.height)
     batch_size = latent.batch_size
-    return (LatentImage(width, height, batch_size, latent.image_path),)
+    return (LatentImage(width, height, batch_size, latent.image_path, latent.mask_path),)
 
 
 register_node("LatentCrop", "Latent Crop",
@@ -923,6 +957,10 @@ def call_node(class_type: str, inputs):
         return vae_decode(inputs)
     elif class_type == "VAEEncode":
         return vae_encode(inputs)
+    elif class_type == "LoadImageMask":
+        return load_image_mask(inputs)
+    elif class_type == "VAEEncodeForInpaint":
+        return vae_encode_for_inpaint(inputs)
     elif class_type == "LoadImage":
         return load_image(inputs)
     elif class_type == "ImageScale":

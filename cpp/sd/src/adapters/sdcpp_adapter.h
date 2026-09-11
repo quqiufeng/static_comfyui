@@ -171,6 +171,9 @@ public:
     bool load_control_net(const std::string& path);
     void set_control_image(const std::string& image_path, float strength);
 
+    // Inpainting: set the mask image (used together with set_init_image).
+    void set_mask(const std::string& mask_path);
+
 private:
     class Impl;
     std::unique_ptr<Impl> impl_;
@@ -374,6 +377,12 @@ int sd_pipeline_load_control_net(sd_pipeline_t pipeline, const char* path);
 int sd_pipeline_set_control_image(sd_pipeline_t pipeline,
                                   const char* image_path,
                                   float strength);
+
+/**
+ * Set the inpainting mask image (grayscale). Used with sd_pipeline_set_init_image.
+ * Pass an empty path to clear. Returns 0 on success.
+ */
+int sd_pipeline_set_mask(sd_pipeline_t pipeline, const char* mask_path);
 
 /**
  * Generate image with ADetailer face restoration post-processing.
