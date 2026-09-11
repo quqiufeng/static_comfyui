@@ -930,6 +930,23 @@ register_node("KSamplerAdvanced", "KSampler Advanced",
               "ksampler_advanced", ("LATENT", "IMAGE"), False)
 
 
+def conditioning_zero_out(inputs):
+    # 空条件（ComfyUI ConditioningZeroOut）
+    return (Conditioning(""),)
+
+
+register_node("ConditioningZeroOut", "Conditioning Zero Out",
+              "conditioning_zero_out", ("CONDITIONING",), False)
+register_node("CheckpointLoader", "Load Checkpoint",
+              "checkpoint_loader_simple", ("MODEL", "CLIP", "VAE"), False)
+register_node("LoraLoader", "Load LoRA",
+              "lora_loader", ("MODEL", "CLIP"), False)
+register_node("LoraLoaderModelOnly", "Load LoRA (Model Only)",
+              "lora_loader", ("MODEL",), False)
+register_node("VAEDecodeTiled", "VAE Decode (Tiled)",
+              "vae_decode", ("IMAGE",), False)
+
+
 def call_node(class_type: str, inputs):
     if class_type == "CheckpointLoaderSimple":
         return checkpoint_loader_simple(inputs)
@@ -979,6 +996,14 @@ def call_node(class_type: str, inputs):
         return reroute(inputs)
     elif class_type == "SaveImage":
         return save_image(inputs)
+    elif class_type == "CheckpointLoader":
+        return checkpoint_loader_simple(inputs)
+    elif class_type == "LoraLoader" or class_type == "LoraLoaderModelOnly":
+        return lora_loader(inputs)
+    elif class_type == "VAEDecodeTiled":
+        return vae_decode(inputs)
+    elif class_type == "ConditioningZeroOut":
+        return conditioning_zero_out(inputs)
     else:
         return (None,)
 # === execution.static.py ===
