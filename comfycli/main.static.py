@@ -71,6 +71,10 @@ def main():
     if show_help:
         print_help()
         exit_program(0)
+    list_nodes: bool = dict_get(args, "list_nodes")
+    if list_nodes:
+        print_node_list()
+        exit_program(0)
     output_dir = dict_get(args, "output_dir")
     if output_dir is None:
         output_dir = "./output"

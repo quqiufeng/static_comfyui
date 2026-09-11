@@ -8,6 +8,7 @@ def parse_cli_args() -> dict:
     output_dir: str = ""
     workflow: str = ""
     show_help: bool = False
+    list_nodes: bool = False
     cpu: bool = False
     cuda_device: str = "0"
     highvram: bool = False
@@ -27,6 +28,8 @@ def parse_cli_args() -> dict:
             show_help = True
             i = i + 1
             continue
+        elif arg == "--list-nodes":
+            list_nodes = True
         elif arg == "--checkpoint" or arg == "--ckpt":
             i = i + 1
             if i < argc:
@@ -93,6 +96,7 @@ def parse_cli_args() -> dict:
     dict_set(result, "output_dir", output_dir)
     dict_set(result, "workflow", workflow)
     dict_set(result, "show_help", show_help)
+    dict_set(result, "list_nodes", list_nodes)
     dict_set(result, "cpu", cpu)
     dict_set(result, "cuda_device", cuda_device)
     dict_set(result, "highvram", highvram)
@@ -131,6 +135,7 @@ def print_help():
     print("  --cuda-device <id>              CUDA device ID (default: 0)")
     print("  --highvram, --gpu-only          Keep all models on GPU")
     print("  --lowvram                       Offload models to CPU")
+    print("  --list-nodes                    List all registered node types")
     print("  --help, -h                      Show this help")
 
 

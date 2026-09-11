@@ -1138,6 +1138,15 @@ register_node("GLIGENTextBoxApply", "GLIGEN Textbox Apply",
               "gligen_textbox_apply", ("CONDITIONING",), False)
 
 
+def print_node_list():
+    keys = dict_keys(NODE_CLASS_MAPPINGS)
+    i = 0
+    n = len(keys)
+    while i < n:
+        print(keys[i])
+        i = i + 1
+
+
 def call_node(class_type: str, inputs):
     if class_type == "CheckpointLoaderSimple":
         return checkpoint_loader_simple(inputs)

@@ -11,6 +11,7 @@ def parse_cli_args() -> dict:
     output_dir: str = ""
     workflow: str = ""
     show_help: bool = False
+    list_nodes: bool = False
     cpu: bool = False
     cuda_device: str = "0"
     highvram: bool = False
@@ -30,6 +31,8 @@ def parse_cli_args() -> dict:
             show_help = True
             i = i + 1
             continue
+        elif arg == "--list-nodes":
+            list_nodes = True
         elif arg == "--checkpoint" or arg == "--ckpt":
             i = i + 1
             if i < argc:
@@ -96,6 +99,7 @@ def parse_cli_args() -> dict:
     dict_set(result, "output_dir", output_dir)
     dict_set(result, "workflow", workflow)
     dict_set(result, "show_help", show_help)
+    dict_set(result, "list_nodes", list_nodes)
     dict_set(result, "cpu", cpu)
     dict_set(result, "cuda_device", cuda_device)
     dict_set(result, "highvram", highvram)
@@ -134,6 +138,7 @@ def print_help():
     print("  --cuda-device <id>              CUDA device ID (default: 0)")
     print("  --highvram, --gpu-only          Keep all models on GPU")
     print("  --lowvram                       Offload models to CPU")
+    print("  --list-nodes                    List all registered node types")
     print("  --help, -h                      Show this help")
 # === sd_backend.static.py ===
 # SD.cpp (stable-diffusion.cpp) backend FFI wrapper.
@@ -1475,6 +1480,15 @@ register_node("GLIGENTextBoxApply", "GLIGEN Textbox Apply",
               "gligen_textbox_apply", ("CONDITIONING",), False)
 
 
+def print_node_list():
+    keys = dict_keys(NODE_CLASS_MAPPINGS)
+    i = 0
+    n = len(keys)
+    while i < n:
+        print(keys[i])
+        i = i + 1
+
+
 def call_node(class_type: str, inputs):
     if class_type == "CheckpointLoaderSimple":
         return checkpoint_loader_simple(inputs)
@@ -1797,6 +1811,10 @@ def main():
     show_help: bool = dict_get(args, "show_help")
     if show_help:
         print_help()
+        exit_program(0)
+    list_nodes: bool = dict_get(args, "list_nodes")
+    if list_nodes:
+        print_node_list()
         exit_program(0)
     output_dir = dict_get(args, "output_dir")
     if output_dir is None:
