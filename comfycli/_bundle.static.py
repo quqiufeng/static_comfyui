@@ -616,6 +616,30 @@ register_node("EmptyLatentImage", "Empty Latent Image",
               "empty_latent_image", ("LATENT",), False)
 
 
+def apply_latent_extras(model: SDPipelineHandle, inputs, latent: LatentImage):
+    # 采样前的通用设置：img2img / inpainting / ControlNet
+    if latent is not None and latent.image_path != "":
+        sd_set_init_image(model.pipeline, latent.image_path, get_float(inputs, "denoise", 1.0))
+    if latent is not None and latent.mask_path != "":
+        sd_set_mask(model.pipeline, latent.mask_path)
+    pos_c: Conditioning = dict_get(inputs, "positive")
+    neg_c: Conditioning = dict_get(inputs, "negative")
+    cn_image = ""
+    cn_path = ""
+    cn_strength = 0.0
+    if pos_c is not None and pos_c.control_image_path != "":
+        cn_image = pos_c.control_image_path
+        cn_path = pos_c.control_net_path
+        cn_strength = pos_c.control_strength
+    elif neg_c is not None and neg_c.control_image_path != "":
+        cn_image = neg_c.control_image_path
+        cn_path = neg_c.control_net_path
+        cn_strength = neg_c.control_strength
+    if cn_image != "":
+        sd_load_control_net(model.pipeline, cn_path)
+        sd_set_control_image(model.pipeline, cn_image, cn_strength)
+
+
 def ksampler(inputs):
     model: SDPipelineHandle = dict_get(inputs, "model")
     if model is None:
@@ -633,28 +657,7 @@ def ksampler(inputs):
         width = latent.width
         height = latent.height
 
-    denoise = get_float(inputs, "denoise", 1.0)
-    if latent is not None and latent.image_path != "":
-        sd_set_init_image(model.pipeline, latent.image_path, denoise)
-    if latent is not None and latent.mask_path != "":
-        sd_set_mask(model.pipeline, latent.mask_path)
-
-    pos_c: Conditioning = dict_get(inputs, "positive")
-    neg_c: Conditioning = dict_get(inputs, "negative")
-    cn_image = ""
-    cn_path = ""
-    cn_strength = 0.0
-    if pos_c is not None and pos_c.control_image_path != "":
-        cn_image = pos_c.control_image_path
-        cn_path = pos_c.control_net_path
-        cn_strength = pos_c.control_strength
-    elif neg_c is not None and neg_c.control_image_path != "":
-        cn_image = neg_c.control_image_path
-        cn_path = neg_c.control_net_path
-        cn_strength = neg_c.control_strength
-    if cn_image != "":
-        sd_load_control_net(model.pipeline, cn_path)
-        sd_set_control_image(model.pipeline, cn_image, cn_strength)
+    apply_latent_extras(model, inputs, latent)
 
     opts = parse_sampler_opts(inputs)
     out = sampler_output(inputs)
@@ -1247,6 +1250,8 @@ def ksampler_advanced(inputs):
     else:
         width = latent.width
         height = latent.height
+
+    apply_latent_extras(model, inputs, latent)
 
     opts = parse_sampler_opts(inputs)
     out = sampler_output(inputs)
