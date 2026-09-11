@@ -1064,6 +1064,19 @@ int sd_scale_image(const char* input_path, const char* output_path, float scale_
     return sd_resize_image(input_path, output_path, w, h);
 }
 
+int sd_make_solid_image(const char* output_path, int width, int height,
+                        int r, int g, int b) {
+    if (!output_path || width <= 0 || height <= 0) return -1;
+    cv::Mat img(height, width, CV_8UC3, cv::Scalar(b, g, r));  // OpenCV is BGR
+    cv::Mat rgb;
+    cv::cvtColor(img, rgb, cv::COLOR_BGR2RGB);
+    if (!save_png(output_path, rgb.data, rgb.cols, rgb.rows, rgb.channels())) {
+        std::fprintf(stderr, "[C API] sd_make_solid_image: failed to write %s\n", output_path);
+        return -3;
+    }
+    return 0;
+}
+
 int sd_invert_image(const char* input_path, const char* output_path) {
     if (!input_path || !output_path) return -1;
     cv::Mat img = cv::imread(input_path, cv::IMREAD_COLOR);

@@ -686,6 +686,25 @@ register_node("ImageInvert", "Invert Image",
               "image_invert", ("IMAGE",), False)
 
 
+def empty_image(inputs):
+    width = get_int(inputs, "width", 512)
+    height = get_int(inputs, "height", 512)
+    color = get_int(inputs, "color", 0)
+    r = color // 65536
+    g = (color // 256) % 256
+    b = color % 256
+    out = "/tmp/comfycli_empty_" + string_of_int(width) + "x" + string_of_int(height) + ".png"
+    rc = sd_make_solid_image(out, width, height, r, g, b)
+    if rc != 0:
+        print("EmptyImage: failed, rc=" + string_of_int(rc))
+        return (None,)
+    return (out,)
+
+
+register_node("EmptyImage", "Empty Image",
+              "empty_image", ("IMAGE",), False)
+
+
 def preview_image(inputs):
     image_path = dict_get(inputs, "images")
     if image_path is None:
@@ -969,6 +988,8 @@ def call_node(class_type: str, inputs):
         return image_scale_by(inputs)
     elif class_type == "ImageInvert":
         return image_invert(inputs)
+    elif class_type == "EmptyImage":
+        return empty_image(inputs)
     elif class_type == "PreviewImage":
         return preview_image(inputs)
     elif class_type == "Reroute":

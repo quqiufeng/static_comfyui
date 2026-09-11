@@ -432,6 +432,10 @@ int sd_scale_image(const char* input_path, const char* output_path, float scale_
 /** Invert an image file and save as PNG. Returns 0 on success. */
 int sd_invert_image(const char* input_path, const char* output_path);
 
+/** Create a solid-color image and save as PNG. Returns 0 on success. */
+int sd_make_solid_image(const char* output_path, int width, int height,
+                        int r, int g, int b);
+
 #ifdef __cplusplus
 }
 #endif

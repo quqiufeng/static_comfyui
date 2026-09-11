@@ -157,6 +157,7 @@ extern fn sd_pipeline_set_mask(pipeline: ptr, mask_path: str) -> int from "sdcpp
 extern fn sd_resize_image(input_path: str, output_path: str, width: int, height: int) -> int from "sdcpp_adapter"
 extern fn sd_scale_image(input_path: str, output_path: str, scale_by: float) -> int from "sdcpp_adapter"
 extern fn sd_invert_image(input_path: str, output_path: str) -> int from "sdcpp_adapter"
+extern fn sd_make_solid_image(output_path: str, width: int, height: int, r: int, g: int, b: int) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_generate_adetailer(pipeline: ptr, prompt: str, negative_prompt: str, width: int, height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires: int, hires_width: int, hires_height: int, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, ad_model_path: str, ad_prompt: str, ad_negative_prompt: str, output_path: str) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_generate_full(pipeline: ptr, prompt: str, negative_prompt: str, width: int, height: int, hires_width: int, hires_height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, clarity: float, sharpen_amount: float, sharpen_radius: int, smart_sharpen_strength: float, smart_sharpen_radius: int, edge_sharpen_amount: float, edge_sharpen_radius: int, edge_sharpen_threshold: float, ad_model_path: str, ad_prompt: str, ad_negative_prompt: str, output_path: str) -> int from "sdcpp_adapter"
 extern fn sd_ensure_dir(path: str) -> int from "sdcpp_adapter"
@@ -1012,6 +1013,25 @@ register_node("ImageInvert", "Invert Image",
               "image_invert", ("IMAGE",), False)
 
 
+def empty_image(inputs):
+    width = get_int(inputs, "width", 512)
+    height = get_int(inputs, "height", 512)
+    color = get_int(inputs, "color", 0)
+    r = color // 65536
+    g = (color // 256) % 256
+    b = color % 256
+    out = "/tmp/comfycli_empty_" + string_of_int(width) + "x" + string_of_int(height) + ".png"
+    rc = sd_make_solid_image(out, width, height, r, g, b)
+    if rc != 0:
+        print("EmptyImage: failed, rc=" + string_of_int(rc))
+        return (None,)
+    return (out,)
+
+
+register_node("EmptyImage", "Empty Image",
+              "empty_image", ("IMAGE",), False)
+
+
 def preview_image(inputs):
     image_path = dict_get(inputs, "images")
     if image_path is None:
@@ -1295,6 +1315,8 @@ def call_node(class_type: str, inputs):
         return image_scale_by(inputs)
     elif class_type == "ImageInvert":
         return image_invert(inputs)
+    elif class_type == "EmptyImage":
+        return empty_image(inputs)
     elif class_type == "PreviewImage":
         return preview_image(inputs)
     elif class_type == "Reroute":
