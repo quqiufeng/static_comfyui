@@ -371,6 +371,8 @@ def vae_encode(inputs):
 
 register_node("VAEEncode", "VAE Encode",
               "vae_encode", ("LATENT",), False)
+register_node("VAEEncodeTiled", "VAE Encode (Tiled)",
+              "vae_encode", ("LATENT",), False)
 
 
 def load_image_mask(inputs):
@@ -1000,6 +1002,8 @@ def controlnet_loader(inputs):
 
 register_node("ControlNetLoader", "Load ControlNet",
               "controlnet_loader", ("CONTROL_NET",), False)
+register_node("DiffControlNetLoader", "Load Diff ControlNet",
+              "controlnet_loader", ("CONTROL_NET",), False)
 
 
 def controlnet_apply(inputs):
@@ -1117,7 +1121,7 @@ def call_node(class_type: str, inputs):
         return ipadapter_model_loader(inputs)
     elif class_type == "VAEDecode":
         return vae_decode(inputs)
-    elif class_type == "VAEEncode":
+    elif class_type == "VAEEncode" or class_type == "VAEEncodeTiled":
         return vae_encode(inputs)
     elif class_type == "LoadImageMask":
         return load_image_mask(inputs)
@@ -1169,7 +1173,7 @@ def call_node(class_type: str, inputs):
         return vae_decode(inputs)
     elif class_type == "ConditioningZeroOut":
         return conditioning_zero_out(inputs)
-    elif class_type == "ControlNetLoader":
+    elif class_type == "ControlNetLoader" or class_type == "DiffControlNetLoader":
         return controlnet_loader(inputs)
     elif class_type == "ControlNetApply":
         return controlnet_apply(inputs)
