@@ -441,6 +441,12 @@ int sd_pad_image(const char* input_path, const char* output_path,
                  int left, int top, int right, int bottom,
                  int r, int g, int b);
 
+/** Gaussian blur an image and save as PNG. Returns 0 on success. */
+int sd_blur_image(const char* input_path, const char* output_path, float sigma);
+
+/** Stack two images vertically (second resized to first's width) and save as PNG. */
+int sd_batch_images(const char* path1, const char* path2, const char* output_path);
+
 #ifdef __cplusplus
 }
 #endif

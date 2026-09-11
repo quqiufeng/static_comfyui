@@ -1097,6 +1097,42 @@ int sd_pad_image(const char* input_path, const char* output_path,
     return 0;
 }
 
+int sd_blur_image(const char* input_path, const char* output_path, float sigma) {
+    if (!input_path || !output_path || sigma <= 0.0f) return -1;
+    cv::Mat img = cv::imread(input_path, cv::IMREAD_COLOR);
+    if (img.empty()) {
+        std::fprintf(stderr, "[C API] sd_blur_image: failed to read %s\n", input_path);
+        return -2;
+    }
+    cv::Mat out, rgb;
+    cv::GaussianBlur(img, out, cv::Size(0, 0), (double)sigma);
+    cv::cvtColor(out, rgb, cv::COLOR_BGR2RGB);
+    if (!save_png(output_path, rgb.data, rgb.cols, rgb.rows, rgb.channels())) {
+        std::fprintf(stderr, "[C API] sd_blur_image: failed to write %s\n", output_path);
+        return -3;
+    }
+    return 0;
+}
+
+int sd_batch_images(const char* path1, const char* path2, const char* output_path) {
+    if (!path1 || !path2 || !output_path) return -1;
+    cv::Mat a = cv::imread(path1, cv::IMREAD_COLOR);
+    cv::Mat b = cv::imread(path2, cv::IMREAD_COLOR);
+    if (a.empty() || b.empty()) {
+        std::fprintf(stderr, "[C API] sd_batch_images: failed to read inputs\n");
+        return -2;
+    }
+    cv::Mat b2, out, rgb;
+    cv::resize(b, b2, a.size());
+    cv::vconcat(a, b2, out);
+    cv::cvtColor(out, rgb, cv::COLOR_BGR2RGB);
+    if (!save_png(output_path, rgb.data, rgb.cols, rgb.rows, rgb.channels())) {
+        std::fprintf(stderr, "[C API] sd_batch_images: failed to write %s\n", output_path);
+        return -3;
+    }
+    return 0;
+}
+
 int sd_invert_image(const char* input_path, const char* output_path) {
     if (!input_path || !output_path) return -1;
     cv::Mat img = cv::imread(input_path, cv::IMREAD_COLOR);

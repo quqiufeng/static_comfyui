@@ -159,6 +159,8 @@ extern fn sd_scale_image(input_path: str, output_path: str, scale_by: float) -> 
 extern fn sd_invert_image(input_path: str, output_path: str) -> int from "sdcpp_adapter"
 extern fn sd_make_solid_image(output_path: str, width: int, height: int, r: int, g: int, b: int) -> int from "sdcpp_adapter"
 extern fn sd_pad_image(input_path: str, output_path: str, left: int, top: int, right: int, bottom: int, r: int, g: int, b: int) -> int from "sdcpp_adapter"
+extern fn sd_blur_image(input_path: str, output_path: str, sigma: float) -> int from "sdcpp_adapter"
+extern fn sd_batch_images(path1: str, path2: str, output_path: str) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_generate_adetailer(pipeline: ptr, prompt: str, negative_prompt: str, width: int, height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires: int, hires_width: int, hires_height: int, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, ad_model_path: str, ad_prompt: str, ad_negative_prompt: str, output_path: str) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_generate_full(pipeline: ptr, prompt: str, negative_prompt: str, width: int, height: int, hires_width: int, hires_height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, clarity: float, sharpen_amount: float, sharpen_radius: int, smart_sharpen_strength: float, smart_sharpen_radius: int, edge_sharpen_amount: float, edge_sharpen_radius: int, edge_sharpen_threshold: float, ad_model_path: str, ad_prompt: str, ad_negative_prompt: str, output_path: str) -> int from "sdcpp_adapter"
 extern fn sd_ensure_dir(path: str) -> int from "sdcpp_adapter"
@@ -1054,6 +1056,79 @@ register_node("ImagePadForOutpaint", "Pad Image for Outpainting",
               "image_pad_for_outpaint", ("IMAGE", "MASK"), False)
 
 
+def image_blur(inputs):
+    image = dict_get(inputs, "image")
+    if image is None:
+        print("ImageBlur: no image received")
+        return (None,)
+    sigma = get_float(inputs, "sigma", 1.0)
+    out = "/tmp/comfycli_blur.png"
+    rc = sd_blur_image(image, out, sigma)
+    if rc != 0:
+        print("ImageBlur: failed, rc=" + string_of_int(rc))
+        return (None,)
+    return (out,)
+
+
+register_node("ImageBlur", "Blur Image",
+              "image_blur", ("IMAGE",), False)
+
+
+def image_batch(inputs):
+    i1 = dict_get(inputs, "image1")
+    i2 = dict_get(inputs, "image2")
+    if i1 is None or i2 is None:
+        print("ImageBatch: need image1 and image2")
+        return (None,)
+    out = "/tmp/comfycli_batch.png"
+    rc = sd_batch_images(i1, i2, out)
+    if rc != 0:
+        print("ImageBatch: failed, rc=" + string_of_int(rc))
+        return (None,)
+    return (out,)
+
+
+register_node("ImageBatch", "Batch Images",
+              "image_batch", ("IMAGE",), False)
+
+
+def image_to_mask(inputs):
+    image = dict_get(inputs, "image")
+    if image is None:
+        print("ImageToMask: no image received")
+        return (None,)
+    return (image,)
+
+
+register_node("ImageToMask", "Convert Image to Mask",
+              "image_to_mask", ("MASK",), False)
+
+
+def mask_to_image(inputs):
+    mask = dict_get(inputs, "mask")
+    if mask is None:
+        print("MaskToImage: no mask received")
+        return (None,)
+    return (mask,)
+
+
+register_node("MaskToImage", "Convert Mask to Image",
+              "mask_to_image", ("IMAGE",), False)
+
+
+def clip_vision_encode(inputs):
+    # IPAdapter 后端直接吃图片路径，此节点透传 image
+    image = dict_get(inputs, "image")
+    if image is None:
+        print("CLIPVisionEncode: no image received")
+        return (None,)
+    return (image,)
+
+
+register_node("CLIPVisionEncode", "CLIP Vision Encode",
+              "clip_vision_encode", ("CLIP_VISION_OUTPUT",), False)
+
+
 def preview_image(inputs):
     image_path = dict_get(inputs, "images")
     if image_path is None:
@@ -1341,6 +1416,16 @@ def call_node(class_type: str, inputs):
         return empty_image(inputs)
     elif class_type == "ImagePadForOutpaint":
         return image_pad_for_outpaint(inputs)
+    elif class_type == "ImageBlur":
+        return image_blur(inputs)
+    elif class_type == "ImageBatch":
+        return image_batch(inputs)
+    elif class_type == "ImageToMask":
+        return image_to_mask(inputs)
+    elif class_type == "MaskToImage":
+        return mask_to_image(inputs)
+    elif class_type == "CLIPVisionEncode":
+        return clip_vision_encode(inputs)
     elif class_type == "PreviewImage":
         return preview_image(inputs)
     elif class_type == "Reroute":
