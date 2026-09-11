@@ -33,7 +33,7 @@ def build_deps(prompt):
     return deps, inputs_cache
 
 
-def resolve_all(inputs, node_outputs):
+def resolve_all(inputs, node_outputs, default_output_dir: str):
     resolved = make_dict()
     keys = dict_keys(inputs)
     k = 0
@@ -50,6 +50,9 @@ def resolve_all(inputs, node_outputs):
             resolved_val = val
         dict_set(resolved, key, resolved_val)
         k = k + 1
+    # 节点未显式指定 output_dir 时，用 CLI --output-dir 作为默认
+    if dict_get(resolved, "output_dir") is None:
+        dict_set(resolved, "output_dir", default_output_dir)
     return resolved
 
 
@@ -120,7 +123,7 @@ def execute_prompt(prompt_json: str, output_dir: str):
                     node = dict_get(prompt, nid)
                     class_type = dict_get(node, "class_type")
                     inputs = dict_get(inputs_cache, nid)
-                    resolved = resolve_all(inputs, node_outputs)
+                    resolved = resolve_all(inputs, node_outputs, output_dir)
                     outputs = call_node(class_type, resolved)
                     dict_set(node_outputs, nid, outputs)
                     dict_set(executed, nid, 1)
