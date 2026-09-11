@@ -635,6 +635,23 @@ register_node("ImageScaleBy", "Image Scale By",
               "image_scale_by", ("IMAGE",), False)
 
 
+def image_invert(inputs):
+    image_path = dict_get(inputs, "image")
+    if image_path is None:
+        print("ImageInvert: no image received")
+        return (None,)
+    out = "/tmp/comfycli_inverted.png"
+    rc = sd_invert_image(image_path, out)
+    if rc != 0:
+        print("ImageInvert: invert failed, rc=" + string_of_int(rc))
+        return (None,)
+    return (out,)
+
+
+register_node("ImageInvert", "Invert Image",
+              "image_invert", ("IMAGE",), False)
+
+
 def preview_image(inputs):
     image_path = dict_get(inputs, "images")
     if image_path is None:
@@ -815,6 +832,54 @@ register_node("VAEDecodeTiled", "VAE Decode (Tiled)",
               "vae_decode", ("IMAGE",), False)
 
 
+def conditioning_passthrough(inputs):
+    # area/mask/timestep 等条件修饰在 sd.cpp 后端无对应能力，透传原条件
+    c: Conditioning = dict_get(inputs, "conditioning")
+    if c is None:
+        return (None,)
+    return (c,)
+
+
+register_node("ConditioningSetArea", "ConditioningSetArea",
+              "conditioning_passthrough", ("CONDITIONING",), False)
+register_node("ConditioningSetAreaPercentage", "ConditioningSetAreaPercentage",
+              "conditioning_passthrough", ("CONDITIONING",), False)
+register_node("ConditioningSetAreaStrength", "ConditioningSetAreaStrength",
+              "conditioning_passthrough", ("CONDITIONING",), False)
+register_node("ConditioningSetMask", "ConditioningSetMask",
+              "conditioning_passthrough", ("CONDITIONING",), False)
+register_node("ConditioningMultiply", "ConditioningMultiply",
+              "conditioning_passthrough", ("CONDITIONING",), False)
+register_node("ConditioningSetTimestepRange", "ConditioningSetTimestepRange",
+              "conditioning_passthrough", ("CONDITIONING",), False)
+
+
+def latent_passthrough(inputs):
+    # 潜空间变换在 sd.cpp 后端无对应能力，透传原 latent
+    l: LatentImage = dict_get(inputs, "samples")
+    if l is None:
+        l = dict_get(inputs, "samples1")
+    if l is None:
+        return (None,)
+    return (l,)
+
+
+register_node("LatentRotate", "LatentRotate",
+              "latent_passthrough", ("LATENT",), False)
+register_node("LatentFlip", "LatentFlip",
+              "latent_passthrough", ("LATENT",), False)
+register_node("LatentComposite", "LatentComposite",
+              "latent_passthrough", ("LATENT",), False)
+register_node("LatentBlend", "LatentBlend",
+              "latent_passthrough", ("LATENT",), False)
+register_node("RepeatLatentBatch", "RepeatLatentBatch",
+              "latent_passthrough", ("LATENT",), False)
+register_node("LatentFromBatch", "LatentFromBatch",
+              "latent_passthrough", ("LATENT",), False)
+register_node("SetLatentNoiseMask", "SetLatentNoiseMask",
+              "latent_passthrough", ("LATENT",), False)
+
+
 def call_node(class_type: str, inputs):
     if class_type == "CheckpointLoaderSimple":
         return checkpoint_loader_simple(inputs)
@@ -864,6 +929,8 @@ def call_node(class_type: str, inputs):
         return image_scale(inputs)
     elif class_type == "ImageScaleBy":
         return image_scale_by(inputs)
+    elif class_type == "ImageInvert":
+        return image_invert(inputs)
     elif class_type == "PreviewImage":
         return preview_image(inputs)
     elif class_type == "Reroute":
@@ -888,6 +955,10 @@ def call_node(class_type: str, inputs):
         return controlnet_loader(inputs)
     elif class_type == "ControlNetApply":
         return controlnet_apply(inputs)
+    elif class_type == "ConditioningSetArea" or class_type == "ConditioningSetAreaPercentage" or class_type == "ConditioningSetAreaStrength" or class_type == "ConditioningSetMask" or class_type == "ConditioningMultiply" or class_type == "ConditioningSetTimestepRange":
+        return conditioning_passthrough(inputs)
+    elif class_type == "LatentRotate" or class_type == "LatentFlip" or class_type == "LatentComposite" or class_type == "LatentBlend" or class_type == "RepeatLatentBatch" or class_type == "LatentFromBatch" or class_type == "SetLatentNoiseMask":
+        return latent_passthrough(inputs)
     else:
         return (None,)
 

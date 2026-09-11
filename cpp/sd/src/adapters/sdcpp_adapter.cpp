@@ -1023,4 +1023,21 @@ int sd_scale_image(const char* input_path, const char* output_path, float scale_
     return sd_resize_image(input_path, output_path, w, h);
 }
 
+int sd_invert_image(const char* input_path, const char* output_path) {
+    if (!input_path || !output_path) return -1;
+    cv::Mat img = cv::imread(input_path, cv::IMREAD_COLOR);
+    if (img.empty()) {
+        std::fprintf(stderr, "[C API] sd_invert_image: failed to read %s\n", input_path);
+        return -2;
+    }
+    cv::Mat inv, rgb;
+    cv::bitwise_not(img, inv);
+    cv::cvtColor(inv, rgb, cv::COLOR_BGR2RGB);
+    if (!save_png(output_path, rgb.data, rgb.cols, rgb.rows, rgb.channels())) {
+        std::fprintf(stderr, "[C API] sd_invert_image: failed to write %s\n", output_path);
+        return -3;
+    }
+    return 0;
+}
+
 } // extern "C"

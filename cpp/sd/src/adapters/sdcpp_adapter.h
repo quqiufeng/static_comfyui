@@ -420,6 +420,9 @@ int sd_resize_image(const char* input_path, const char* output_path,
 /** Scale an image file by a factor (dims * scale_by) and save as PNG. Returns 0 on success. */
 int sd_scale_image(const char* input_path, const char* output_path, float scale_by);
 
+/** Invert an image file and save as PNG. Returns 0 on success. */
+int sd_invert_image(const char* input_path, const char* output_path);
+
 #ifdef __cplusplus
 }
 #endif
