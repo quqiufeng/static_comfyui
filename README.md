@@ -128,61 +128,70 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 
 ## 已实现节点
 
-以下 ComfyUI 节点已在 `comfycli/nodes.static.py` 中实现，可直接在工作流 JSON 中使用。节点数量持续按需求扩展。
+以下 ComfyUI 节点已在 `comfycli/nodes.static.py` 中实现（共 **54 个**），可直接在工作流 JSON 中使用。节点数量持续按需求扩展。
 
 ### 模型加载
 
 | 节点 | 输出 | 说明 |
 |------|------|------|
-| `CheckpointLoaderSimple` | `MODEL`, `CLIP`, `VAE` | 加载 SDXL/SD1.5 等 checkpoint（safetensors），sd.cpp 后端自动识别 |
-| `DiffusionModelLoader` | `MODEL`, `CLIP`, `VAE` | 加载 GGUF 格式的 diffusion 模型 + LLM 文本编码器（Flux 风格） |
-| `DualCLIPLoader` | `CLIP` | 兼容 ComfyUI 拓扑的占位节点（后端 pipeline 已内含 CLIP） |
+| `CheckpointLoaderSimple` / `CheckpointLoader` | `MODEL`, `CLIP`, `VAE` | 加载 SDXL/SD1.5 等 checkpoint（safetensors） |
+| `UNETLoader` | `MODEL` | 加载单个 diffusion/unet 文件 |
+| `VAELoader` / `CLIPLoader` | `VAE` / `CLIP` | 分离组件（透传，sd.cpp 单 context） |
+| `DiffusionModelLoader` | `MODEL`, `CLIP`, `VAE` | GGUF diffusion 模型 + LLM 文本编码器（Flux/Z-Image） |
+| `DualCLIPLoader` | `CLIP` | 兼容占位（pipeline 内含 CLIP） |
 
 ### 条件 / 文本编码
 
 | 节点 | 输出 | 说明 |
 |------|------|------|
-| `CLIPTextEncode` | `CONDITIONING` | 文本编码，后端 CLIP 内部处理 |
-| `CLIPSetLastLayer` | `CLIP` | 设置 CLIP 输出层（当前为兼容占位，后端使用默认层） |
-| `ConditioningCombine` | `CONDITIONING` | 拼接两个条件文本，用逗号连接 |
-| `ConditioningConcat` | `CONDITIONING` | 同 `ConditioningCombine`，兼容标准 ComfyUI 命名 |
-| `ConditioningAverage` | `CONDITIONING` | 按 `conditioning_to_strength` 决定文本拼接顺序 |
+| `CLIPTextEncode` | `CONDITIONING` | 文本编码（后端 CLIP 内部处理） |
+| `CLIPSetLastLayer` | `CLIP` | 兼容占位 |
+| `ConditioningCombine` / `ConditioningConcat` | `CONDITIONING` | 文本拼接 |
+| `ConditioningAverage` | `CONDITIONING` | 按强度决定拼接顺序 |
+| `ConditioningZeroOut` | `CONDITIONING` | 空条件 |
+| `ConditioningSetArea` / `SetAreaPercentage` / `SetAreaStrength` / `SetMask` / `Multiply` / `SetTimestepRange` | `CONDITIONING` | 透传（后端无区域/掩码条件能力） |
+| `ControlNetApply` | `CONDITIONING` | 应用 ControlNet（控制图 + 强度） |
 
 ### 图像 / 潜空间
 
 | 节点 | 输出 | 说明 |
 |------|------|------|
-| `EmptyLatentImage` | `LATENT` | 创建指定尺寸的空白潜空间 |
-| `LatentUpscale` | `LATENT` | 直接修改 `LATENT` 的 width/height（后端采样时使用目标尺寸） |
-| `LatentCrop` | `LATENT` | 同 `LatentUpscale`，裁剪到目标尺寸 |
-| `LoadImage` | `IMAGE`, `MASK` | 从文件路径加载图片，返回图片路径（当前 MASK 为占位） |
-| `PreviewImage` | `IMAGE` | 透传图片路径，用于工作流可视化 |
-| `VAEDecode` | `IMAGE` | 兼容节点，后端采样已完成 VAE decode |
-| `SaveImage` | - | 输出节点，保存图片到指定目录 |
+| `EmptyLatentImage` | `LATENT` | 空白潜空间 |
+| `EmptyImage` | `IMAGE` | 纯色图（OpenCV 生成） |
+| `LatentUpscale` / `LatentCrop` | `LATENT` | 修改潜空间尺寸 |
+| `LatentRotate` / `LatentFlip` / `LatentComposite` / `LatentBlend` / `RepeatLatentBatch` / `LatentFromBatch` / `SetLatentNoiseMask` | `LATENT` | 透传 |
+| `LoadImage` / `LoadImageMask` | `IMAGE`, `MASK` | 从文件加载图片/掩码 |
+| `ImageScale` / `ImageScaleBy` | `IMAGE` | 缩放（OpenCV） |
+| `ImageInvert` | `IMAGE` | 反色 |
+| `VAEDecode` / `VAEDecodeTiled` | `IMAGE` | 兼容节点（后端已完成 decode） |
+| `VAEEncode` | `LATENT` | img2img：参考图编码 |
+| `VAEEncodeForInpaint` | `LATENT` | inpainting：参考图 + 掩码 |
+| `PreviewImage` / `SaveImage` | `IMAGE` / - | 预览 / 保存 |
 
 ### 采样与优化
 
 | 节点 | 输出 | 说明 |
 |------|------|------|
-| `KSampler` | `LATENT` | 核心采样节点，支持 sampler/scheduler/seed/cfg/steps |
-| `KSamplerAdvanced` | `LATENT`, `IMAGE` | 扩展参数（start_at_step / end_at_step / return_noise 等占位） |
-| `HiResFix` | `LATENT` | 原生高清修复节点，支持 hires_steps/hires_strength、FreeU、SAG、VAE Tiling 及后处理 |
-| `ADetailer` | `IMAGE` | 对生成结果进行局部重绘修复 |
+| `KSampler` | `LATENT` | 核心采样（sampler/scheduler/seed/cfg/steps/denoise） |
+| `KSamplerAdvanced` | `LATENT`, `IMAGE` | 扩展参数 |
+| `HiResFix` | `LATENT` | 高清修复（hires + FreeU/SAG/VAE Tiling + 后处理） |
+| `ADetailer` | `IMAGE` | 局部重绘修复 |
 
 ### 模型增强 / 风格注入
 
 | 节点 | 输出 | 说明 |
 |------|------|------|
-| `LORALoader` | `MODEL` | 加载 LoRA 并合并到当前 pipeline |
-| `IPAdapterApply` | `MODEL` | 应用 IPAdapter 风格/人脸参考 |
-| `CLIPVisionLoader` | `CLIP_VISION` | 加载 CLIP Vision ONNX 模型 |
-| `IPAdapterModelLoader` | `IPADAPTER` | 加载 IPAdapter ONNX 模型 |
+| `LORALoader` / `LoraLoader` / `LoraLoaderModelOnly` | `MODEL` | 加载 LoRA |
+| `IPAdapterApply` | `MODEL` | IPAdapter 风格/人脸参考 |
+| `CLIPVisionLoader` | `CLIP_VISION` | CLIP Vision ONNX |
+| `IPAdapterModelLoader` | `IPADAPTER` | IPAdapter ONNX |
+| `ControlNetLoader` | `CONTROL_NET` | ControlNet 模型 |
 
 ### 工具
 
 | 节点 | 输出 | 说明 |
 |------|------|------|
-| `Reroute` | `*` | 透传任意输入，仅用于整理连线 |
+| `Reroute` | `*` | 透传任意输入 |
 
 > **注意**：StaticPy 无运行期自定义节点加载能力。新增节点需在 `comfycli/nodes.static.py` 中注册并重新编译。
 
@@ -361,7 +370,7 @@ ComfyUI 是 Python ML 生态中最复杂的纯推理项目之一：
 ```
 [x] cli_args.static.py        CLI 参数解析
 [x] sd_backend.static.py      stable-diffusion.cpp C API FFI 封装（extern fn）
-[x] nodes.static.py           24 个节点定义
+[x] nodes.static.py           54 个节点定义
 [x] execution.static.py       DAG 拓扑排序 + 输入链接解析
 [x] main.static.py            CLI 入口（workflow JSON / --checkpoint --prompt）
 [x] comfycli_ffi.scm          共享库加载 + 上游缺失内置
@@ -382,6 +391,9 @@ ComfyUI 是 Python ML 生态中最复杂的纯推理项目之一：
 [x] workflow SDXL → 图片（1024×1024，sd_xl_base_1.0 + clip_l/clip_g）
 [x] --prompt 命令行模式
 [x] HiResFix 2560×1440 / GGUF（Z-Image + Qwen LLM）/ IPAdapter / LoRA / ADetailer
+[x] img2img（VAEEncode + denoise）/ inpainting（VAEEncodeForInpaint + mask）
+[x] ControlNet 流程 / ImageScale / ImageInvert / EmptyImage
+[x] 执行引擎 validate（未知节点/非法链接/环检测）
 [x] 部署包 GPU 79MB / CPU 35MB（零 Python、零 pip）
 ```
 
@@ -392,7 +404,7 @@ ComfyUI 是 Python ML 生态中最复杂的纯推理项目之一：
 - 无自定义节点动态加载——自定义节点需编译期注册
 - CLI 先行，无 WebSocket/HTTP UI
 - 同步执行，无 asyncio
-- 已实现 24 个核心节点，完整 ComfyUI 节点集仍在按需扩展中
+- 已实现 54 个核心节点，完整 ComfyUI 节点集仍在按需扩展中
 
 ## 项目文件
 
