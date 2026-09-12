@@ -526,6 +526,8 @@ def get_str(inputs, key: str, default: str) -> str:
 
 def checkpoint_loader_simple(inputs):
     ckpt_name = dict_get(inputs, "ckpt_name")
+    if ckpt_name is None:
+        ckpt_name = dict_get(inputs, "model_path")
     clip_l_name = dict_get(inputs, "clip_l_name")
     clip_g_name = dict_get(inputs, "clip_g_name")
 
@@ -1682,6 +1684,54 @@ register_node("ModelMergeKrea2", "ModelMergeKrea2", "model_merge_passthrough", (
 register_node("ModelMergeWAN2_1", "ModelMergeWAN2_1", "model_merge_passthrough", ("MODEL",), False)
 
 
+def svd_img2vid_conditioning(inputs):
+    return (dict_get(inputs, "positive"), dict_get(inputs, "negative"),
+            LatentImage(0, 0, 1, "", ""))
+
+
+register_node("SVD_img2vid_Conditioning", "SVD_img2vid_Conditioning",
+              "svd_img2vid_conditioning", ("CONDITIONING", "CONDITIONING", "LATENT"), False)
+
+
+def model_patch_loader(inputs):
+    n = dict_get(inputs, "model_name")
+    if n is None:
+        n = get_str(inputs, "model_name", "")
+    return (n,)
+
+
+register_node("ModelPatchLoader", "Load Model Patch",
+              "model_patch_loader", ("MODEL_PATCH",), False)
+register_node("DiffusersLoader", "Load Diffusers",
+              "checkpoint_loader_simple", ("MODEL", "CLIP", "VAE"), False)
+register_node("unCLIPCheckpointLoader", "Load unCLIP Checkpoint",
+              "checkpoint_loader_simple", ("MODEL", "CLIP", "VAE", "CLIP_VISION"), False)
+register_node("ImageOnlyCheckpointLoader", "Load Image-Only Checkpoint",
+              "checkpoint_loader_simple", ("MODEL", "CLIP_VISION", "VAE"), False)
+register_node("ImageOnlyCheckpointSave", "ImageOnlyCheckpointSave",
+              "save_noop", ("*",), True)
+register_node("WebcamCapture", "WebcamCapture",
+              "save_noop", ("IMAGE",), False)
+register_node("ConditioningSetAreaPercentageVideo", "ConditioningSetAreaPercentageVideo",
+              "conditioning_passthrough", ("CONDITIONING",), False)
+register_node("AnimaLLLiteApply", "AnimaLLLiteApply",
+              "conditioning_passthrough", ("CONDITIONING",), False)
+register_node("QwenImageDiffsynthControlnet", "QwenImageDiffsynthControlnet",
+              "conditioning_passthrough", ("CONDITIONING",), False)
+register_node("ZImageFunControlnet", "ZImageFunControlnet",
+              "conditioning_passthrough", ("CONDITIONING",), False)
+register_node("WanUni3CControlnetApply", "WanUni3CControlnetApply",
+              "conditioning_passthrough", ("CONDITIONING",), False)
+register_node("SUPIRApply", "SUPIRApply",
+              "conditioning_passthrough", ("CONDITIONING",), False)
+register_node("USOStyleReference", "USOStyleReference",
+              "conditioning_passthrough", ("CONDITIONING",), False)
+register_node("VideoLinearCFGGuidance", "VideoLinearCFGGuidance",
+              "model_passthrough", ("MODEL",), False)
+register_node("VideoTriangleCFGGuidance", "VideoTriangleCFGGuidance",
+              "model_passthrough", ("MODEL",), False)
+
+
 def print_node_list():
     keys = dict_keys(NODE_CLASS_MAPPINGS)
     i = 0
@@ -1804,6 +1854,18 @@ def call_node(class_type: str, inputs):
         return save_noop(inputs)
     elif str_starts_with(class_type, "ModelMerge"):
         return model_merge_passthrough(inputs)
+    elif class_type == "DiffusersLoader" or class_type == "unCLIPCheckpointLoader" or class_type == "ImageOnlyCheckpointLoader":
+        return checkpoint_loader_simple(inputs)
+    elif class_type == "ImageOnlyCheckpointSave" or class_type == "WebcamCapture":
+        return save_noop(inputs)
+    elif class_type == "ModelPatchLoader":
+        return model_patch_loader(inputs)
+    elif class_type == "SVD_img2vid_Conditioning":
+        return svd_img2vid_conditioning(inputs)
+    elif class_type == "ConditioningSetAreaPercentageVideo" or class_type == "AnimaLLLiteApply" or class_type == "QwenImageDiffsynthControlnet" or class_type == "ZImageFunControlnet" or class_type == "WanUni3CControlnetApply" or class_type == "SUPIRApply" or class_type == "USOStyleReference":
+        return conditioning_passthrough(inputs)
+    elif class_type == "VideoLinearCFGGuidance" or class_type == "VideoTriangleCFGGuidance":
+        return model_passthrough(inputs)
     elif class_type == "VAEDecodeTiled":
         return vae_decode(inputs)
     elif class_type == "ConditioningZeroOut":
