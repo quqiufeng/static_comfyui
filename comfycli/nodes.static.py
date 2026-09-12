@@ -1035,6 +1035,10 @@ register_node("LoraLoader", "Load LoRA",
               "lora_loader", ("MODEL", "CLIP"), False)
 register_node("LoraLoaderModelOnly", "Load LoRA (Model Only)",
               "lora_loader", ("MODEL",), False)
+register_node("LoraLoaderBypass", "LoraLoaderBypass",
+              "lora_loader", ("MODEL", "CLIP"), False)
+register_node("LoraLoaderBypassModelOnly", "LoraLoaderBypassModelOnly",
+              "lora_loader", ("MODEL",), False)
 register_node("VAEDecodeTiled", "VAE Decode (Tiled)",
               "vae_decode", ("IMAGE",), False)
 
@@ -1198,6 +1202,22 @@ register_node("PreviewAny", "Preview Any",
               "preview_any", ("*",), True)
 
 
+def clip_merge_passthrough(inputs):
+    # sd.cpp 只加载一份 CLIP，CLIP 合并无法在后端实现 → 透传 clip1
+    c = dict_get(inputs, "clip1")
+    if c is None:
+        return (None,)
+    return (c,)
+
+
+register_node("CLIPMergeSimple", "Merge CLIP (Simple)",
+              "clip_merge_passthrough", ("CLIP",), False)
+register_node("CLIPMergeAdd", "Merge CLIP (Add)",
+              "clip_merge_passthrough", ("CLIP",), False)
+register_node("CLIPMergeSubtract", "Merge CLIP (Subtract)",
+              "clip_merge_passthrough", ("CLIP",), False)
+
+
 def print_node_list():
     keys = dict_keys(NODE_CLASS_MAPPINGS)
     i = 0
@@ -1306,8 +1326,10 @@ def call_node(class_type: str, inputs):
         return vae_loader(inputs)
     elif class_type == "CLIPLoader":
         return clip_loader(inputs)
-    elif class_type == "LoraLoader" or class_type == "LoraLoaderModelOnly":
+    elif class_type == "LoraLoader" or class_type == "LoraLoaderModelOnly" or class_type == "LoraLoaderBypass" or class_type == "LoraLoaderBypassModelOnly":
         return lora_loader(inputs)
+    elif class_type == "CLIPMergeSimple" or class_type == "CLIPMergeAdd" or class_type == "CLIPMergeSubtract":
+        return clip_merge_passthrough(inputs)
     elif class_type == "VAEDecodeTiled":
         return vae_decode(inputs)
     elif class_type == "ConditioningZeroOut":
