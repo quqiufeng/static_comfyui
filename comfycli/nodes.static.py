@@ -617,13 +617,13 @@ def hires_fix(inputs):
     dict_set(opts, "freeu_b2", get_float(inputs, "freeu_b2", 1.4))
     dict_set(opts, "sag", get_int(inputs, "sag", 0))
     dict_set(opts, "sag_scale", get_float(inputs, "sag_scale", 1.0))
-    # 后处理默认关闭（旧 backup.sh 不做后处理，避免过锐/振铃）
-    dict_set(opts, "clarity", get_float(inputs, "clarity", 0.0))
-    dict_set(opts, "sharpen", get_float(inputs, "sharpen", 0.0))
+    # 后处理：对齐 img_hires/backup.sh（clarity 0.2 / sharpen 0.3 / smart 0.5 / edge 1.5）
+    dict_set(opts, "clarity", get_float(inputs, "clarity", 0.2))
+    dict_set(opts, "sharpen", get_float(inputs, "sharpen", 0.3))
     dict_set(opts, "sharpen_radius", get_int(inputs, "sharpen_radius", 1))
-    dict_set(opts, "smart_sharpen", get_float(inputs, "smart_sharpen", 0.0))
+    dict_set(opts, "smart_sharpen", get_float(inputs, "smart_sharpen", 0.5))
     dict_set(opts, "smart_sharpen_radius", get_int(inputs, "smart_sharpen_radius", 2))
-    dict_set(opts, "edge_sharpen", get_float(inputs, "edge_sharpen", 0.0))
+    dict_set(opts, "edge_sharpen", get_float(inputs, "edge_sharpen", 1.5))
     dict_set(opts, "edge_sharpen_radius", get_int(inputs, "edge_sharpen_radius", 2))
     dict_set(opts, "edge_sharpen_threshold", get_float(inputs, "edge_sharpen_threshold", 0.3))
 
