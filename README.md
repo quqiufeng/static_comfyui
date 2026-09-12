@@ -133,8 +133,10 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 > **对齐度说明（重要）**：节点**名称**已 100% 对齐，但**行为**分三类：
 >
 > - **真实实现**（有实际语义）：模型加载、采样、VAE、LoRA、ControlNet、IPAdapter、图像算子、`LatentUpscaleBy`、`LoadLatent/SaveLatent`、`CLIPSetLastLayer`（clip_skip）、`ModelSamplingFlux/SD3/AuraFlow`（flow_shift）、`ModelComputeDtype`（wtype）、`ModelAttentionBackend`（flash_attn）、`LatentRotate/Flip/Composite/Blend`、`RepeatLatentBatch/LatentFromBatch/SetLatentNoiseMask`、`RescaleCFG`、`VideoLinearCFGGuidance/VideoTriangleCFGGuidance`、`ModelSamplingContinuousEDM/ContinuousV`（sigma 区间，改 sd.cpp patch）
-> - **libtorch helper 覆盖**（sd.cpp 无 C API，但可用权重级张量操作实现）：`ModelMerge*`（20 变体）、`CLIPMerge*`（3 变体，合并 CLIP 权重段）、`CheckpointSave`/`VAESave`/`CLIPSave`/`ModelSave`/`ImageOnlyCheckpointSave`（权重导出）—— 依赖可选库 `libcomfycli_torch.so`（缺失时相关节点不可用，其余功能不受影响）
-> - **后端能力边界内不可实现**（sd.cpp 无对应 C API，且非纯权重操作）：Conditioning 区域/掩码变体、`GLIGEN*`、`StyleModel*`、`ModelNoiseScale`、`SVD_img2vid_Conditioning` —— 这些仅保证工作流可加载运行，透传语义与 ComfyUI 不同
+> - **libtorch helper 覆盖**（sd.cpp 无 C API，改用 torch 张量操作/独立管线）：`ModelMerge*`（20 变体）、`CLIPMerge*`（3 变体，合并 CLIP 权重段）、`CheckpointSave`/`VAESave`/`CLIPSave`/`ModelSave`/`ImageOnlyCheckpointSave`（权重导出）、`ConditioningSetArea`/`SetAreaPercentage`/`SetAreaStrength`/`Multiply`（区域条件，走 torch SDXL 管线）—— 依赖可选库 `libcomfycli_torch.so`（缺失时相关节点不可用，其余功能不受影响）
+> - **后端能力边界内不可实现**（sd.cpp 无对应 C API，且非纯权重操作）：Conditioning 掩码/时间步变体（`SetMask`/`SetTimestepRange`）、`GLIGEN*`、`StyleModel*`、`ModelNoiseScale`、`SVD_img2vid_Conditioning` —— 这些仅保证工作流可加载运行，透传语义与 ComfyUI 不同
+>
+> **torch 管线**：`torch_std_sdxl_generate[_areas]` 实现 tokenize + SDXL dual CLIP(JIT) + UNet(safetensors) + Euler + VAE(JIT) + PNG；区域条件按 ComfyUI `calc_cond_batch` 逐区合成。KSampler 检测到带 area 的 conditioning 时自动切到 torch 路径。JIT 文件默认从 `COMFYCLI_TORCH_DIR`（缺省=模型目录）查找 `clip_l_jit.pt`/`clip_g_jit.pt`/`vae_jit.pt`/`clip_l_vocab.json`/`clip_l_merges.txt`。
 > - **部分映射**：`ModelAttentionBackend` 仅 `flash_attn` 有语义；`ModelSamplingContinuousEDM/ContinuousV` 仅对使用 sigma 区间的调度器（`exponential`/`karras` 等）生效，`discrete` 用模型内置 sigma 表、天然忽略区间
 >
 > 即"能跑通的工作流范围"取决于 sd.cpp 的能力边界；核心出图链路（txt2img / img2img / inpainting / ControlNet / HiRes / LoRA / IPAdapter）是真实可用的。
@@ -158,7 +160,8 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 | `ConditioningCombine` / `ConditioningConcat` | `CONDITIONING` | 文本拼接 |
 | `ConditioningAverage` | `CONDITIONING` | 按强度决定拼接顺序 |
 | `ConditioningZeroOut` | `CONDITIONING` | 空条件 |
-| `ConditioningSetArea` / `SetAreaPercentage` / `SetAreaStrength` / `SetMask` / `Multiply` / `SetTimestepRange` | `CONDITIONING` | 透传（后端无区域/掩码条件能力） |
+| `ConditioningSetArea` / `SetAreaPercentage` / `SetAreaStrength` / `Multiply` | `CONDITIONING` | 真实实现（区域条件，torch 管线按区合成） |
+| `ConditioningSetMask` / `SetTimestepRange` | `CONDITIONING` | 透传（掩码/时间步分段未实现） |
 | `ControlNetApply` | `CONDITIONING` | 应用 ControlNet（控制图 + 强度） |
 
 ### 图像 / 潜空间
