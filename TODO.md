@@ -31,6 +31,17 @@
 - `ModelMergeSimple/Blocks/Add/Subtract`：ratio / 逐块 ratio 行为
 - `CLIPMerge*`：不同 CLIP 合并
 
+## HiRes Fix 出图质量优化（待做）
+当前 `hires_fix` 节点：低分出图 → upscaler（默认 2x_ESRGAN.gguf）→ 二次采样（`hires_strength`）→ 后处理（clarity/sharpen/edge）。
+优化方向：
+- **二次采样参数**：`hires_strength`/`hires_steps`/`scheduler`/`cfg` 的默认值与自适应（强度过高丢细节、过低留伪影）
+- **upscaler 选择**：模型放大 vs latent 放大（bicubic/antialiased）对细节/纹理的影响
+- **FreeU 默认值**：当前 b1=1.3/b2=1.4，旧 sdxl_pipeline 曾记录 FreeU 导致过拟合，需重新标定
+- **后处理过冲**：clarity/sharpen/smart_sharpen/edge_sharpen 默认值可能过度锐化，需按分辨率自适应
+- **VAE tiling 接缝**：高分辨率 tile 边界可能出现接缝，检查 overlap/tile_size
+- **多步渐进放大**：一次大幅放大 → 分 1.5x 多轮，减少伪影
+- **对比基线**：与 ComfyUI 同工作流的 hires 输出做质量对照
+
 ## 已完成并验证
 - `ModelNoiseScale`：euler_a 下 noise_scale=8 与基线不同
 - `ModelSamplingDiscrete`：eps 与基线一致、v_prediction 不同
