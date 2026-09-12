@@ -1,8 +1,8 @@
 diff --git a/include/stable-diffusion.h b/include/stable-diffusion.h
-index cf69b48..c99e23e 100644
+index cf69b48..d5f1f88 100644
 --- a/include/stable-diffusion.h
 +++ b/include/stable-diffusion.h
-@@ -377,6 +377,33 @@ typedef struct {
+@@ -377,6 +377,26 @@ typedef struct {
      int custom_sigmas_count;
  } sd_hires_params_t;
  
@@ -26,24 +26,16 @@ index cf69b48..c99e23e 100644
 +    float threshold_percentile;
 +} sd_dynamic_cfg_params_t;
 +
-+typedef struct {
-+    const float* tokens;   // IPAdapter image tokens [num_tokens * token_dim], flat (read-only)
-+    int num_tokens;        // number of image tokens (e.g., 16 for SDXL Plus)
-+    int token_dim;         // dimension per token (e.g., 2048 for SDXL Plus)
-+    float weight;          // injection weight (0.0 = no effect, 1.0 = full)
-+} sd_ipadapter_params_t;
-+
  typedef struct {
      const sd_lora_t* loras;
      uint32_t lora_count;
-@@ -403,6 +430,10 @@ typedef struct {
+@@ -403,6 +423,9 @@ typedef struct {
      sd_tiling_params_t vae_tiling_params;
      sd_cache_params_t cache;
      sd_hires_params_t hires;
 +    sd_freeu_params_t freeu;
 +    sd_sag_params_t sag;
 +    sd_dynamic_cfg_params_t dynamic_cfg;
-+    sd_ipadapter_params_t ipadapter;
      int qwen_image_layers;
      bool circular_x;
      bool circular_y;
@@ -152,8 +144,22 @@ index 1c8ddf4..026d503 100644
          return compute(n_threads,
                         *diffusion_params.x,
                         *diffusion_params.timesteps,
+diff --git a/src/model_loader.cpp b/src/model_loader.cpp
+index 6ab370c..47eee9a 100644
+--- a/src/model_loader.cpp
++++ b/src/model_loader.cpp
+@@ -70,7 +70,8 @@ const char* unused_tensors[] = {
+     "text_encoders.llm.output.weight",
+     "text_encoders.llm.lm_head.",
+     "language_model.lm_head.",
+-    "vision_model.",
++    // 本项目 patch：移除 "vision_model." —— #1935(SenseNova) 加入后，会把独立
++    // CLIP vision 文件（键以 vision_model. 开头）全部过滤，导致 IP-Adapter 失败。
+ };
+ 
+ bool is_unused_tensor(const std::string& name) {
 diff --git a/src/pipeline/diffusion_engine.cpp b/src/pipeline/diffusion_engine.cpp
-index 5d51e24..1b878fd 100644
+index 5d51e24..bc3242a 100644
 --- a/src/pipeline/diffusion_engine.cpp
 +++ b/src/pipeline/diffusion_engine.cpp
 @@ -26,6 +26,7 @@
@@ -164,7 +170,19 @@ index 5d51e24..1b878fd 100644
  #include "stable-diffusion.h"
  
  #include "conditioning/conditioner.hpp"
-@@ -2358,6 +2359,18 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -737,7 +738,10 @@ bool StableDiffusionGGML::init_model_loader(ModelLoader& model_loader, ModelConf
+ 
+     if (strlen(SAFE_STR(sd_ctx_params->clip_vision_path)) > 0) {
+         LOG_INFO("loading clip_vision from '%s'", sd_ctx_params->clip_vision_path);
+-        if (!model_loader.init_from_file(sd_ctx_params->clip_vision_path, "clip_vision.")) {
++        // 本项目 patch：FrozenCLIPVisionEmbedder 期望 "cond_stage_model.transformer."
++        // 前缀；#1957 重构误改为 "clip_vision."，导致 IP-Adapter 的 CLIP Vision 加载失败。
++        std::string clip_vision_prefix = "cond_stage_model.transformer.";
++        if (!model_loader.init_from_file(sd_ctx_params->clip_vision_path, clip_vision_prefix)) {
+             LOG_WARN("loading clip_vision from '%s' failed", sd_ctx_params->clip_vision_path);
+         }
+     }
+@@ -2358,6 +2362,18 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
                  diffusion_params.extra = std::monostate{};
              }
  
@@ -183,7 +201,7 @@ index 5d51e24..1b878fd 100644
              sd::Tensor<float> cached_output;
              if (step_cache.before_condition(&condition, noised_input, &cached_output)) {
                  return std::move(cached_output);
-@@ -2455,6 +2468,23 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2455,6 +2471,23 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
              return {};
          }
  
@@ -236,58 +254,10 @@ index 13cb6e8..b1a25a4 100644
  
      enum class RunnerGroup { Core,
 diff --git a/src/pipeline/image.cpp b/src/pipeline/image.cpp
-index 294e5b0..748f48a 100644
+index 294e5b0..235d0bb 100644
 --- a/src/pipeline/image.cpp
 +++ b/src/pipeline/image.cpp
-@@ -503,6 +503,47 @@ namespace sd::pipeline {
-         int64_t t1 = ggml_time_ms();
-         LOG_INFO("get_learned_condition completed, taking %.2fs", (t1 - prepare_start_ms) * 1.0f / 1000);
- 
-+        // IPAdapter: inject image tokens into c_crossattn — 本项目 patch
-+        if (sd_img_gen_params->ipadapter.num_tokens > 0) {
-+            const auto& ipa = sd_img_gen_params->ipadapter;
-+            int n_ipa    = ipa.num_tokens;
-+            int ipa_dim  = ipa.token_dim;
-+            float weight = ipa.weight;
-+            auto inject  = [&](SDCondition& c) {
-+                if (c.c_crossattn.empty()) return;
-+                auto old_shape = c.c_crossattn.shape();
-+                int64_t ctx_dim = old_shape[0];
-+                int64_t n_text  = old_shape[1];
-+                int64_t batch   = 1;
-+                if (old_shape.size() >= 3) {
-+                    batch = old_shape[2];
-+                    for (size_t i = 3; i < old_shape.size(); i++) batch *= old_shape[i];
-+                }
-+                const int64_t token_stride     = n_text * batch;
-+                const int64_t ipa_token_stride = n_ipa * batch;
-+                std::vector<float> ipa_data(ctx_dim * ipa_token_stride, 0.0f);
-+                int copy_dim = std::min(ipa_dim, (int)ctx_dim);
-+                for (int b = 0; b < batch; b++) {
-+                    for (int t = 0; t < n_ipa; t++) {
-+                        for (int d = 0; d < copy_dim; d++) {
-+                            ipa_data[d * ipa_token_stride + t * batch + b] = ipa.tokens[t * ipa_dim + d] * weight;
-+                        }
-+                    }
-+                }
-+                const float* old_data = c.c_crossattn.data();
-+                std::vector<float> new_data(ctx_dim * (n_text + n_ipa) * batch);
-+                std::copy(old_data, old_data + ctx_dim * token_stride, new_data.begin());
-+                std::copy(ipa_data.begin(), ipa_data.end(), new_data.begin() + ctx_dim * token_stride);
-+                auto new_shape = old_shape;
-+                new_shape[1] = n_text + n_ipa;
-+                c.c_crossattn = sd::Tensor<float>(new_shape, std::move(new_data));
-+            };
-+            inject(cond);
-+            if (!uncond.empty()) {
-+                inject(uncond);
-+            }
-+        }
-+
-         ImageGenerationEmbeds embeds;
-         embeds.img_uncond = std::move(img_uncond);
-         embeds.cond       = std::move(cond);
-@@ -795,6 +836,25 @@ namespace sd::pipeline {
+@@ -795,6 +795,25 @@ namespace sd::pipeline {
              return false;
          sd->apply_circular_axes(sd_img_gen_params->circular_x, sd_img_gen_params->circular_y);
  

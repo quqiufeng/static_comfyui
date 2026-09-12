@@ -163,6 +163,7 @@ extern fn sd_pipeline_set_batch_count(pipeline: ptr, n: int) -> int from "sdcpp_
 extern fn sd_resize_image(input_path: str, output_path: str, width: int, height: int) -> int from "sdcpp_adapter"
 extern fn sd_scale_image(input_path: str, output_path: str, scale_by: float) -> int from "sdcpp_adapter"
 extern fn sd_invert_image(input_path: str, output_path: str) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_get_model_version_name(pipeline: ptr) -> str from "sdcpp_adapter"
 extern fn sd_make_solid_image(output_path: str, width: int, height: int, r: int, g: int, b: int) -> int from "sdcpp_adapter"
 extern fn sd_pad_image(input_path: str, output_path: str, left: int, top: int, right: int, bottom: int, r: int, g: int, b: int) -> int from "sdcpp_adapter"
 extern fn sd_blur_image(input_path: str, output_path: str, sigma: float) -> int from "sdcpp_adapter"
@@ -278,6 +279,10 @@ def sd_set_mask(pipeline: ptr, mask_path: str) -> int:
 
 def sd_set_batch_count(pipeline: ptr, n: int) -> int:
     return sd_pipeline_set_batch_count(pipeline, n)
+
+
+def sd_get_model_version_name(pipeline: ptr) -> str:
+    return sd_pipeline_get_model_version_name(pipeline)
 
 
 def sd_ensure_directory(path: str) -> int:
@@ -540,6 +545,7 @@ def checkpoint_loader_simple(inputs):
         print("SD checkpoint load failed, rc=" + string_of_int(rc))
         return (None, None, None)
 
+    print("Checkpoint loaded, model version: " + sd_get_model_version_name(pipeline))
     handle = make_sd_pipeline_handle(pipeline)
     return (handle, handle, handle)
 

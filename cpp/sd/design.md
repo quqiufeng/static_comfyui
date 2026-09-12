@@ -68,7 +68,8 @@ StaticPy extern fn ← sdcpp_adapter.h (C API) ← sdcpp_adapter.cpp ← stable-
 - `sd_freeu_params_t`：`{enabled, b1, b2, s1, s2}`
 - `sd_sag_params_t`：`{enabled, scale}`
 - `sd_dynamic_cfg_params_t`：`{enabled, percentile, mimic_scale, threshold_percentile}`
-- `sd_ipadapter_params_t`：`{tokens, num_tokens, token_dim, weight}`
+
+> IP-Adapter 现用 **sd.cpp 原生**（`sd_ctx_params_t.ip_adapter_path` + `sd_img_gen_params_t.ip_adapter_image/ip_adapter_strength`），不再自定义结构体/注入。
 
 ### 4.2 `src/model/diffusion/unet.hpp`
 两处独立改动：
@@ -111,11 +112,13 @@ if (sd_version_is_unet(version)) {
 - Dynamic CFG：找到 `pred` 最大绝对值，若 >1 则全张量除以该值
 
 ### 4.5 `src/pipeline/image.cpp`
-两处改动：
+一处改动：`generate_image()` 中从 `sd_img_gen_params_t` 读取 freeu/sag/dynamic_cfg 存入 `sd->*` 字段。
 
-**A. `generate_image()`**——从 `sd_img_gen_params_t` 读取 freeu/sag/dynamic_cfg 存入 `sd->*` 字段
+### 4.6 `src/model_loader.cpp`（修复上游回归）
+从 `unused_tensors` 移除 `"vision_model."`——`#1935`（SenseNova U1.5）加入后，`is_unused_tensor` 在**加前缀之前**检查，会把独立 CLIP vision 文件（键以 `vision_model.` 开头）全部过滤，导致 IP-Adapter 的 CLIP Vision 加载为 0 个张量。
 
-**B. `prepare_image_generation_embeds()`**——把 `sd_img_gen_params_t.ipadapter.tokens` 注入 `c_crossattn`（`[ctx_dim, n_text]` → `[ctx_dim, n_text+n_ipa]`）
+### 4.7 `src/pipeline/diffusion_engine.cpp`（clip vision 前缀，修复上游回归）
+clip vision 加载前缀从 `"clip_vision."` 改回 `"cond_stage_model.transformer."`。`#1957` 重构把旧版的 `cond_stage_model.transformer.` 误改成 `clip_vision.`，而 `FrozenCLIPVisionEmbedder` 仍按 `cond_stage_model.transformer.` 查找。
 
 ### 4.6 `src/model/vae/vae.hpp` — 不移除 ⚠️ 未修改
 VAE tile 大小上限已从 patch 中移除，改由 adapter 层在调用 `generate_image` 前自行 cap。详见 §4.7。
@@ -351,6 +354,10 @@ git diff -- include src > /opt/static_comfyui/cpp/sd/patches/sdcpp-freeu-sag-v2.
 | 3 | 缺 include | `UNetModelRunner does not name a type` | 新 `diffusion_engine.cpp` 未包含 `unet.hpp` | 加 `#include "model/diffusion/unet.hpp"` |
 | 4 | FreeU 静默失效 | 开关输出 hash 相同 | `nodes.parse_sampler_opts` 硬编码 `freeu=0`/`sag=0` | 改为 `get_int(inputs, "freeu", 0)` |
 | 5 | 适配层 | **零改动**（未报错） | `sd_*_params_init` + 按字段名赋值的抗性 | — |
+| 6 | 原生 IP-Adapter 的 CLIP Vision 加载为 0 张量 | `vision_model.* not in model metadata` | `#1935` 把 `"vision_model."` 加进 `unused_tensors`，而 `is_unused_tensor` 在加前缀前检查 | 从 `unused_tensors` 移除 `"vision_model."` |
+| 7 | 原生 IP-Adapter 前缀不匹配 | 同上 | `#1957` 把 clip vision 加载前缀从 `cond_stage_model.transformer.` 误改为 `clip_vision.` | 改回 `cond_stage_model.transformer.` |
+
+> **教训**：升级后即使适配层零改动，**原生功能仍可能因上游重构/新特性引入回归**（#1935、#1957）。启用原生功能前务必实机验证，并对照旧版代码确认前缀/过滤逻辑是否被改。定位方法：`git log -S '<可疑字符串>' -- <file>` 找引入点。
 
 **patch hunk 重定位对照（旧 → 新）：**
 

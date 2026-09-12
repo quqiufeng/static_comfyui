@@ -198,6 +198,7 @@ def checkpoint_loader_simple(inputs):
         print("SD checkpoint load failed, rc=" + string_of_int(rc))
         return (None, None, None)
 
+    print("Checkpoint loaded, model version: " + sd_get_model_version_name(pipeline))
     handle = make_sd_pipeline_handle(pipeline)
     return (handle, handle, handle)
 

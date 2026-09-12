@@ -1,6 +1,5 @@
 #include "sdcpp_adapter.h"
 #include "postproc.h"
-#include "ipadapter.h"
 
 #include <stable-diffusion.h>
 
@@ -22,14 +21,19 @@ public:
     sd_ctx_t* ctx = nullptr;
     int n_threads = 8;
 
+    // Last config used to create the context; kept so we can reload
+    // (native IP-Adapter / scale overrides are sd_ctx_params_t fields).
+    ModelConfig config;
+
     // LoRA strings must outlive generate_image call
     std::vector<std::string> lora_paths;
     std::vector<sd_lora_t> lora_entries;
 
-    // IPAdapter (lazy-load; lives for the pipeline lifetime)
-    std::unique_ptr<IPAdapter> ipadapter;
-    bool ipadapter_enabled = false;
-    float ipadapter_weight = 1.0f;
+    // Native IP-Adapter reference image (owns the RGB pixel buffer)
+    std::vector<uint8_t> ip_adapter_image_data;
+    sd_image_t ip_adapter_image{};
+    bool has_ip_adapter_image = false;
+    float ip_adapter_strength = 1.0f;
 
     // img2img init image (owns the RGB pixel buffer)
     std::vector<uint8_t> init_image_data;
@@ -72,6 +76,7 @@ bool SDPipeline::load(const ModelConfig& config) {
     if (!impl_) {
         return false;
     }
+    impl_->config = config;  // 记住配置，供后续 reload（原生 IP-Adapter / scale）
     if (impl_->ctx) {
         free_sd_ctx(impl_->ctx);
         impl_->ctx = nullptr;
@@ -98,6 +103,9 @@ bool SDPipeline::load(const ModelConfig& config) {
     }
     if (!config.llm_path.empty()) {
         params.llm_path = config.llm_path.c_str();
+    }
+    if (!config.ip_adapter_path.empty()) {
+        params.ip_adapter_path = config.ip_adapter_path.c_str();
     }
     params.n_threads            = config.n_threads;
     impl_->n_threads            = config.n_threads;
@@ -152,32 +160,54 @@ void SDPipeline::set_ipadapter(const std::string& model_path,
                                 float weight) {
     if (!impl_) return;
     if (model_path.empty() || clip_vision_path.empty() || image_path.empty()) {
-        impl_->ipadapter.reset();
-        impl_->ipadapter_enabled = false;
+        impl_->has_ip_adapter_image = false;
+        impl_->ip_adapter_image_data.clear();
         return;
     }
-    IPAdapterConfig config;
-    config.model_path       = model_path;
-    config.clip_vision_path = clip_vision_path;
-    config.image_path       = image_path;
-    config.weight           = weight;
-    impl_->ipadapter        = std::make_unique<IPAdapter>(config);
-    if (impl_->ipadapter && impl_->ipadapter->is_loaded() &&
-        !impl_->ipadapter->get_image_tokens().empty()) {
-        impl_->ipadapter_enabled = true;
-        impl_->ipadapter_weight  = weight;
-    } else {
-        impl_->ipadapter.reset();
-        impl_->ipadapter_enabled = false;
+    // 1) 参考图（OpenCV → RGB）
+    cv::Mat img = cv::imread(image_path, cv::IMREAD_COLOR);
+    if (img.empty()) {
+        std::fprintf(stderr, "[C++ gen] set_ipadapter: failed to read image %s\n", image_path.c_str());
+        impl_->has_ip_adapter_image = false;
+        return;
     }
+    cv::Mat rgb;
+    cv::cvtColor(img, rgb, cv::COLOR_BGR2RGB);
+    impl_->ip_adapter_image_data.assign(rgb.data, rgb.data + rgb.total() * rgb.channels());
+    impl_->ip_adapter_image.width   = rgb.cols;
+    impl_->ip_adapter_image.height  = rgb.rows;
+    impl_->ip_adapter_image.channel = rgb.channels();
+    impl_->ip_adapter_image.data    = impl_->ip_adapter_image_data.data();
+    impl_->has_ip_adapter_image     = true;
+    impl_->ip_adapter_strength      = weight;
+
+    // 2) IP-Adapter / CLIP-Vision 是 sd_ctx_params_t 字段 → 需要重载 context
+    if (impl_->config.ip_adapter_path != model_path ||
+        impl_->config.clip_vision_path != clip_vision_path) {
+        impl_->config.ip_adapter_path  = model_path;
+        impl_->config.clip_vision_path = clip_vision_path;
+        std::fprintf(stderr, "[C++ gen] set_ipadapter: reloading ctx with ip_adapter=%s clip_vision=%s\n",
+                     model_path.c_str(), clip_vision_path.c_str());
+        load(impl_->config);
+    }
+    std::fprintf(stderr, "[C++ gen] set_ipadapter: native ip-adapter ready, strength=%.2f\n", weight);
 }
 
 void SDPipeline::set_ipadapter_enabled(bool enabled, float weight) {
     if (!impl_) return;
-    impl_->ipadapter_enabled = enabled;
-    if (enabled && weight > 0.0f) {
-        impl_->ipadapter_weight = weight;
+    if (!enabled) {
+        impl_->has_ip_adapter_image = false;
+        impl_->ip_adapter_image_data.clear();
     }
+    if (enabled && weight > 0.0f) {
+        impl_->ip_adapter_strength = weight;
+    }
+}
+
+std::string SDPipeline::get_model_version_name() const {
+    if (!impl_ || !impl_->ctx) return std::string();
+    const char* name = sd_get_model_version_name(impl_->ctx);
+    return name ? std::string(name) : std::string();
 }
 
 void SDPipeline::set_init_image(const std::string& image_path, float strength) {
@@ -280,10 +310,6 @@ std::vector<Image> SDPipeline::generate(const ImageGenerationParams& params) {
 
     sd_img_gen_params_t img_params;
     sd_img_gen_params_init(&img_params);
-    img_params.ipadapter.tokens     = nullptr;
-    img_params.ipadapter.num_tokens = 0;
-    img_params.ipadapter.token_dim  = 0;
-    img_params.ipadapter.weight     = 0.0f;
 
     // img2img 时若未指定宽高，则用 init image 的尺寸
     int eff_w = params.width;
@@ -395,15 +421,10 @@ std::vector<Image> SDPipeline::generate(const ImageGenerationParams& params) {
         img_params.sag.scale = params.sag_scale;
     }
 
-    // IPAdapter
-    if (impl_->ipadapter_enabled && impl_->ipadapter && impl_->ipadapter->is_loaded()) {
-        const auto& tokens = impl_->ipadapter->get_image_tokens();
-        if (!tokens.empty()) {
-            img_params.ipadapter.tokens     = tokens.data();
-            img_params.ipadapter.num_tokens = impl_->ipadapter->get_num_tokens();
-            img_params.ipadapter.token_dim  = impl_->ipadapter->get_token_dim();
-            img_params.ipadapter.weight     = impl_->ipadapter_weight;
-        }
+    // Native IP-Adapter (sd.cpp 原生实现)
+    if (impl_->has_ip_adapter_image) {
+        img_params.ip_adapter_image    = impl_->ip_adapter_image;
+        img_params.ip_adapter_strength = impl_->ip_adapter_strength;
     }
 
     // img2img init image
@@ -465,10 +486,6 @@ std::vector<Image> SDPipeline::generate(const ImageGenerationParams& params) {
 
         sd_img_gen_params_t inpaint_params;
         sd_img_gen_params_init(&inpaint_params);
-        inpaint_params.ipadapter.tokens = nullptr;
-        inpaint_params.ipadapter.num_tokens = 0;
-        inpaint_params.ipadapter.token_dim = 0;
-        inpaint_params.ipadapter.weight = 0.0f;
         inpaint_params.width = params.ad_inpaint_width;
         inpaint_params.height   = params.ad_inpaint_height;
         inpaint_params.strength = params.ad_denoising_strength;
@@ -1011,6 +1028,16 @@ int sd_pipeline_set_batch_count(sd_pipeline_t pipeline, int n) {
     std::fprintf(stderr, "[C API] sd_pipeline_set_batch_count: n=%d\n", n);
     p->set_batch_count(n);
     return 0;
+}
+
+const char* sd_pipeline_get_model_version_name(sd_pipeline_t pipeline) {
+    static std::string name;  // CLI 单线程，缓存即可；返回空串而非 NULL
+    name.clear();
+    if (pipeline) {
+        sd::SDPipeline* p = static_cast<sd::SDPipeline*>(pipeline);
+        name = p->get_model_version_name();
+    }
+    return name.c_str();
 }
 
 int sd_pipeline_generate_adetailer(sd_pipeline_t pipeline,

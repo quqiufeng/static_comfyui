@@ -44,6 +44,7 @@ struct ModelConfig {
     std::string vae_path;
     std::string diffusion_model_path;  // standalone diffusion model (e.g. Z-Image GGUF)
     std::string llm_path;              // LLM text encoder for DiT models
+    std::string ip_adapter_path;       // native IP-Adapter weights (sd.cpp format)
     int n_threads = 8;
     bool keep_vae_on_cpu = false;
     bool keep_clip_on_cpu = false;
@@ -162,6 +163,9 @@ public:
                        const std::string& image_path,
                        float weight);
     void set_ipadapter_enabled(bool enabled, float weight);
+
+    // Native model version name (e.g. "SDXL") exposed by sd.cpp
+    std::string get_model_version_name() const;
 
     // img2img: load the init image once; used by subsequent generate() calls.
     // Pass an empty path to clear.
@@ -389,6 +393,9 @@ int sd_pipeline_set_mask(sd_pipeline_t pipeline, const char* mask_path);
 
 /** Set the batch size for subsequent generate() calls. Returns 0 on success. */
 int sd_pipeline_set_batch_count(sd_pipeline_t pipeline, int n);
+
+/** Return the model version name detected by sd.cpp (e.g. "SDXL"). NULL if unknown. */
+const char* sd_pipeline_get_model_version_name(sd_pipeline_t pipeline);
 
 /**
  * Generate image with ADetailer face restoration post-processing.
