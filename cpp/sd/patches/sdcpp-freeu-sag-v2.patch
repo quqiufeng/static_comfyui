@@ -1,5 +1,5 @@
 diff --git a/include/stable-diffusion.h b/include/stable-diffusion.h
-index cf69b48..bbd921d 100644
+index cf69b48..119d63c 100644
 --- a/include/stable-diffusion.h
 +++ b/include/stable-diffusion.h
 @@ -210,6 +210,7 @@ typedef struct {
@@ -10,7 +10,15 @@ index cf69b48..bbd921d 100644
      const char* ip_adapter_path;
      const char* motion_module_path;
      const sd_embedding_t* embeddings;
-@@ -377,6 +378,52 @@ typedef struct {
+@@ -360,6 +361,7 @@ enum sd_hires_upscaler_t {
+     SD_HIRES_UPSCALER_LANCZOS,
+     SD_HIRES_UPSCALER_NEAREST,
+     SD_HIRES_UPSCALER_MODEL,
++    SD_HIRES_UPSCALER_LATENT_BISLERP,
+     SD_HIRES_UPSCALER_COUNT,
+ };
+ 
+@@ -377,6 +379,52 @@ typedef struct {
      int custom_sigmas_count;
  } sd_hires_params_t;
  
@@ -63,7 +71,7 @@ index cf69b48..bbd921d 100644
  typedef struct {
      const sd_lora_t* loras;
      uint32_t lora_count;
-@@ -403,6 +450,15 @@ typedef struct {
+@@ -403,6 +451,15 @@ typedef struct {
      sd_tiling_params_t vae_tiling_params;
      sd_cache_params_t cache;
      sd_hires_params_t hires;
@@ -79,7 +87,7 @@ index cf69b48..bbd921d 100644
      int qwen_image_layers;
      bool circular_x;
      bool circular_y;
-@@ -509,6 +565,12 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
+@@ -509,6 +566,12 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
                             sd_image_t** images_out,
                             int* num_images_out);
  
@@ -858,7 +866,7 @@ index 13cb6e8..0c6f337 100644
  
      std::vector<float> process_timesteps(const std::vector<float>& timesteps,
 diff --git a/src/pipeline/image.cpp b/src/pipeline/image.cpp
-index 294e5b0..2e5c050 100644
+index 294e5b0..e460205 100644
 --- a/src/pipeline/image.cpp
 +++ b/src/pipeline/image.cpp
 @@ -503,6 +503,26 @@ namespace sd::pipeline {
@@ -888,7 +896,153 @@ index 294e5b0..2e5c050 100644
          ImageGenerationEmbeds embeds;
          embeds.img_uncond = std::move(img_uncond);
          embeds.cond       = std::move(cond);
-@@ -795,6 +815,46 @@ namespace sd::pipeline {
+@@ -618,6 +638,127 @@ namespace sd::pipeline {
+         return result_images;
+     }
+ 
++    // bislerp latent 放大（对齐 ComfyUI comfy/utils.py bislerp：按通道向量做球面插值 slerp）
++    static sd::Tensor<float> bislerp_latent(const sd::Tensor<float>& in, int64_t out_w, int64_t out_h) {
++        const auto& sh = in.shape();  // [W, H, C, N]
++        const int64_t W = sh[0], H = sh[1], C = sh[2], N = sh[3];
++
++        auto gen_coords = [](int64_t len_old, int64_t len_new, bool second,
++                             std::vector<int64_t>& coords, std::vector<float>& ratios) {
++            coords.resize(static_cast<size_t>(len_new));
++            ratios.resize(static_cast<size_t>(len_new));
++            auto src_val = [&](int64_t i) -> double {
++                double v = static_cast<double>(i);
++                if (second) {
++                    v += 1.0;
++                    if (i == len_old - 1) v -= 1.0;
++                }
++                return v;
++            };
++            for (int64_t j = 0; j < len_new; j++) {
++                double x   = (static_cast<double>(j) + 0.5) * static_cast<double>(len_old) / static_cast<double>(len_new) - 0.5;
++                double x0  = std::floor(x);
++                double fr  = x - x0;
++                int64_t i0 = static_cast<int64_t>(x0);
++                if (i0 < 0) {
++                    i0 = 0;
++                    fr = 0.0;
++                } else if (i0 > len_old - 1) {
++                    i0 = len_old - 1;
++                    fr = 0.0;
++                }
++                int64_t i1 = std::min(i0 + 1, len_old - 1);
++                double v   = src_val(i0) * (1.0 - fr) + src_val(i1) * fr;
++                double fl  = std::floor(v);
++                coords[static_cast<size_t>(j)] = static_cast<int64_t>(fl);
++                ratios[static_cast<size_t>(j)] = static_cast<float>(v - fl);
++            }
++        };
++
++        auto slerp = [](const float* b1, const float* b2, float r, int64_t c, float* out) {
++            double n1 = 0.0, n2 = 0.0;
++            for (int64_t i = 0; i < c; i++) {
++                n1 += static_cast<double>(b1[i]) * b1[i];
++                n2 += static_cast<double>(b2[i]) * b2[i];
++            }
++            n1 = std::sqrt(n1);
++            n2 = std::sqrt(n2);
++            double dot = 0.0;
++            if (n1 > 0.0 && n2 > 0.0) {
++                for (int64_t i = 0; i < c; i++) {
++                    dot += (b1[i] / n1) * (b2[i] / n2);
++                }
++            }
++            dot = std::max(-1.0, std::min(1.0, dot));
++            if (dot > 1.0 - 1e-5) {
++                for (int64_t i = 0; i < c; i++) out[i] = b1[i];
++                return;
++            }
++            if (dot < 1e-5 - 1.0) {
++                for (int64_t i = 0; i < c; i++) out[i] = static_cast<float>(b1[i] * (1.0 - r) + b2[i] * r);
++                return;
++            }
++            double omega = std::acos(dot);
++            double so    = std::sin(omega);
++            double scale = n1 * (1.0 - r) + n2 * r;
++            for (int64_t i = 0; i < c; i++) {
++                double u1  = n1 > 0.0 ? b1[i] / n1 : 0.0;
++                double u2  = n2 > 0.0 ? b2[i] / n2 : 0.0;
++                double res = (std::sin((1.0 - r) * omega) / so) * u1 + (std::sin(r * omega) / so) * u2;
++                out[i]     = static_cast<float>(res * scale);
++            }
++        };
++
++        // 横向 pass: [W, H, C, N] -> [out_w, H, C, N]，对每个 (y,n) 跨通道 slerp
++        std::vector<int64_t> c1w, c2w;
++        std::vector<float> rw;
++        gen_coords(W, out_w, false, c1w, rw);
++        gen_coords(W, out_w, true, c2w, rw);
++        sd::Tensor<float> tmp({out_w, H, C, N});
++        std::vector<float> b1(static_cast<size_t>(C)), b2(static_cast<size_t>(C)), res(static_cast<size_t>(C));
++        const int64_t HW = H * W;
++        for (int64_t n = 0; n < N; n++) {
++            for (int64_t y = 0; y < H; y++) {
++                for (int64_t j = 0; j < out_w; j++) {
++                    for (int64_t c = 0; c < C; c++) {
++                        const float* base = in.data() + n * C * HW + c * HW + y * W;
++                        b1[static_cast<size_t>(c)] = base[c1w[static_cast<size_t>(j)]];
++                        b2[static_cast<size_t>(c)] = base[c2w[static_cast<size_t>(j)]];
++                    }
++                    slerp(b1.data(), b2.data(), rw[static_cast<size_t>(j)], C, res.data());
++                    for (int64_t c = 0; c < C; c++) {
++                        tmp.data()[n * C * HW + c * H * out_w + y * out_w + j] = res[static_cast<size_t>(c)];
++                    }
++                }
++            }
++        }
++
++        // 纵向 pass: [out_w, H, C, N] -> [out_w, out_h, C, N]
++        std::vector<int64_t> c1h, c2h;
++        std::vector<float> rh;
++        gen_coords(H, out_h, false, c1h, rh);
++        gen_coords(H, out_h, true, c2h, rh);
++        sd::Tensor<float> out({out_w, out_h, C, N});
++        const int64_t OHW = out_h * out_w;
++        const int64_t THW = H * out_w;
++        for (int64_t n = 0; n < N; n++) {
++            for (int64_t x = 0; x < out_w; x++) {
++                for (int64_t j = 0; j < out_h; j++) {
++                    for (int64_t c = 0; c < C; c++) {
++                        const float* base = tmp.data() + n * C * THW + c * THW;
++                        b1[static_cast<size_t>(c)] = base[c1h[static_cast<size_t>(j)] * out_w + x];
++                        b2[static_cast<size_t>(c)] = base[c2h[static_cast<size_t>(j)] * out_w + x];
++                    }
++                    slerp(b1.data(), b2.data(), rh[static_cast<size_t>(j)], C, res.data());
++                    for (int64_t c = 0; c < C; c++) {
++                        out.data()[n * C * OHW + c * OHW + j * out_w + x] = res[static_cast<size_t>(c)];
++                    }
++                }
++            }
++        }
++        return out;
++    }
++
+     static sd::Tensor<float> upscale_hires_latent(StableDiffusionGGML* sd,
+                                                   const sd::Tensor<float>& latent,
+                                                   const GenerationRequest& request,
+@@ -638,6 +779,17 @@ namespace sd::pipeline {
+             return target_shape;
+         };
+ 
++        if (request.hires.upscaler == SD_HIRES_UPSCALER_LATENT_BISLERP) {
++            std::vector<int64_t> target_shape = get_hires_latent_target_shape();
++            if (target_shape.empty()) {
++                LOG_ERROR("latent has invalid shape for hires upscale");
++                return {};
++            }
++            LOG_INFO("hires Latent (bislerp) upscale %" PRId64 "x%" PRId64 " -> %" PRId64 "x%" PRId64,
++                     latent.shape()[0], latent.shape()[1], target_shape[0], target_shape[1]);
++            return bislerp_latent(latent, target_shape[0], target_shape[1]);
++        }
++
+         if (request.hires.upscaler == SD_HIRES_UPSCALER_LATENT ||
+             request.hires.upscaler == SD_HIRES_UPSCALER_LATENT_NEAREST ||
+             request.hires.upscaler == SD_HIRES_UPSCALER_LATENT_NEAREST_EXACT ||
+@@ -795,6 +947,46 @@ namespace sd::pipeline {
              return false;
          sd->apply_circular_axes(sd_img_gen_params->circular_x, sd_img_gen_params->circular_y);
  
@@ -999,10 +1153,18 @@ index ec89406..a6af8b8 100644
  
  static std::tuple<float, float, float> get_ancestral_step(float sigma_from,
 diff --git a/src/stable-diffusion.cpp b/src/stable-diffusion.cpp
-index beb899c..ed27955 100644
+index beb899c..3f2a647 100644
 --- a/src/stable-diffusion.cpp
 +++ b/src/stable-diffusion.cpp
-@@ -493,6 +493,9 @@ void sd_img_gen_params_init(sd_img_gen_params_t* sd_img_gen_params) {
+@@ -231,6 +231,7 @@ const char* hires_upscaler_to_str[] = {
+     "Lanczos",
+     "Nearest",
+     "Model",
++    "Latent (bislerp)",
+ };
+ 
+ const char* sd_hires_upscaler_name(enum sd_hires_upscaler_t upscaler) {
+@@ -493,6 +494,9 @@ void sd_img_gen_params_init(sd_img_gen_params_t* sd_img_gen_params) {
      sd_img_gen_params->batch_count         = 1;
      sd_img_gen_params->control_strength    = 0.9f;
      sd_img_gen_params->ip_adapter_strength = 1.0f;
@@ -1012,7 +1174,7 @@ index beb899c..ed27955 100644
      sd_img_gen_params->qwen_image_layers   = 3;
      sd_img_gen_params->circular_x          = false;
      sd_img_gen_params->circular_y          = false;
-@@ -732,6 +735,20 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
+@@ -732,6 +736,20 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
      return execution.ready && sd::pipeline::generate_image(sd_ctx->sd, params, images_out, num_images_out);
  }
  

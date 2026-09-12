@@ -104,6 +104,7 @@ static std::string normalize_hires_upscaler(const std::string& s) {
     if (l == "latent-antialiased") return "Latent (antialiased)";
     if (l == "latent-bicubic") return "Latent (bicubic)";
     if (l == "latent-bicubic-antialiased") return "Latent (bicubic antialiased)";
+    if (l == "latent-bislerp" || l == "bislerp") return "Latent (bislerp)";
     if (l == "lanczos") return "Lanczos";
     if (l == "nearest") return "Nearest";
     return s;
