@@ -1,5 +1,5 @@
 diff --git a/include/stable-diffusion.h b/include/stable-diffusion.h
-index cf69b48..f2bfea1 100644
+index cf69b48..14add1c 100644
 --- a/include/stable-diffusion.h
 +++ b/include/stable-diffusion.h
 @@ -377,6 +377,52 @@ typedef struct {
@@ -55,7 +55,7 @@ index cf69b48..f2bfea1 100644
  typedef struct {
      const sd_lora_t* loras;
      uint32_t lora_count;
-@@ -403,6 +449,14 @@ typedef struct {
+@@ -403,6 +449,15 @@ typedef struct {
      sd_tiling_params_t vae_tiling_params;
      sd_cache_params_t cache;
      sd_hires_params_t hires;
@@ -67,10 +67,11 @@ index cf69b48..f2bfea1 100644
 +    sd_sigma_range_params_t sigma_range;
 +    const sd_area_cond_t* area_conds;
 +    int area_cond_count;
++    float noise_scale;
      int qwen_image_layers;
      bool circular_x;
      bool circular_y;
-@@ -509,6 +563,9 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
+@@ -509,6 +564,9 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
                             sd_image_t** images_out,
                             int* num_images_out);
  
@@ -200,7 +201,7 @@ index 6ab370c..47eee9a 100644
  
  bool is_unused_tensor(const std::string& name) {
 diff --git a/src/pipeline/diffusion_engine.cpp b/src/pipeline/diffusion_engine.cpp
-index 5d51e24..bb77695 100644
+index 5d51e24..d813288 100644
 --- a/src/pipeline/diffusion_engine.cpp
 +++ b/src/pipeline/diffusion_engine.cpp
 @@ -26,6 +26,7 @@
@@ -267,7 +268,17 @@ index 5d51e24..bb77695 100644
      if (embed.empty()) {
          return;
      }
-@@ -2358,6 +2386,18 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2110,6 +2138,9 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+ 
+     RunnerEndOnExit sample_control_runner_end{!control_image.empty() && control_net != nullptr ? control_net.get() : nullptr};
+ 
++    // ModelNoiseScale（本项目 patch）
++    sampler_noise_scale() = this->noise_scale;
++
+     std::vector<int> skip_layers(guidance.slg.layers, guidance.slg.layers + guidance.slg.layer_count);
+     float cfg_scale     = guidance.txt_cfg;
+     float img_cfg_scale = guidance.img_cfg;
+@@ -2358,6 +2389,18 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
                  diffusion_params.extra = std::monostate{};
              }
  
@@ -286,7 +297,7 @@ index 5d51e24..bb77695 100644
              sd::Tensor<float> cached_output;
              if (step_cache.before_condition(&condition, noised_input, &cached_output)) {
                  return std::move(cached_output);
-@@ -2395,6 +2435,35 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2395,6 +2438,35 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
              return {};
          }
  
@@ -322,7 +333,7 @@ index 5d51e24..bb77695 100644
          if (!uncond.empty()) {
              if (!step_cache.is_step_skipped()) {
                  compute_sample_controls(control_image,
-@@ -2434,7 +2503,10 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2434,7 +2506,10 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
          guidance_input.pred_uncond     = uncond_out.empty() ? nullptr : &uncond_out;
          guidance_input.pred_img_uncond = img_uncond_out.empty() ? nullptr : &img_uncond_out;
  
@@ -334,7 +345,7 @@ index 5d51e24..bb77695 100644
          if (guided.pred.empty()) {
              return {};
          }
-@@ -2455,6 +2527,127 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2455,6 +2530,127 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
              return {};
          }
  
@@ -463,7 +474,7 @@ index 5d51e24..bb77695 100644
          sd::guidance::GuiderOutput output;
          output.pred = denoised;
 diff --git a/src/pipeline/diffusion_engine.h b/src/pipeline/diffusion_engine.h
-index 13cb6e8..8c7dbfd 100644
+index 13cb6e8..baebb6e 100644
 --- a/src/pipeline/diffusion_engine.h
 +++ b/src/pipeline/diffusion_engine.h
 @@ -12,6 +12,7 @@
@@ -474,7 +485,7 @@ index 13cb6e8..8c7dbfd 100644
  #include "core/ggml_extend_backend.h"
  #include "core/ggml_graph_cut.h"
  #include "core/tensor.hpp"
-@@ -100,6 +101,43 @@ public:
+@@ -100,6 +101,46 @@ public:
      bool is_using_v_parameterization     = false;
      bool is_using_edm_v_parameterization = false;
  
@@ -504,6 +515,9 @@ index 13cb6e8..8c7dbfd 100644
 +    int video_cfg_mode     = 0;  // 0 = linear, 1 = triangle
 +    float video_cfg_min    = 1.0f;
 +
++    // ModelNoiseScale（本项目 patch）：ancestral 噪声缩放
++    float noise_scale = 1.0f;
++
 +    // 区域条件（本项目 patch，复刻 ComfyUI calc_cond_batch）
 +    struct AreaCondition {
 +        SDCondition cond;
@@ -518,7 +532,7 @@ index 13cb6e8..8c7dbfd 100644
      std::shared_ptr<ModelManager> model_manager;
  
      enum class RunnerGroup { Core,
-@@ -363,6 +401,10 @@ public:
+@@ -363,6 +404,10 @@ public:
                                               int clip_skip        = -1,
                                               bool zero_out_masked = false);
  
@@ -530,7 +544,7 @@ index 13cb6e8..8c7dbfd 100644
  
      std::vector<float> process_timesteps(const std::vector<float>& timesteps,
 diff --git a/src/pipeline/image.cpp b/src/pipeline/image.cpp
-index 294e5b0..a8630ce 100644
+index 294e5b0..2e5c050 100644
 --- a/src/pipeline/image.cpp
 +++ b/src/pipeline/image.cpp
 @@ -503,6 +503,26 @@ namespace sd::pipeline {
@@ -560,7 +574,7 @@ index 294e5b0..a8630ce 100644
          ImageGenerationEmbeds embeds;
          embeds.img_uncond = std::move(img_uncond);
          embeds.cond       = std::move(cond);
-@@ -795,6 +815,43 @@ namespace sd::pipeline {
+@@ -795,6 +815,46 @@ namespace sd::pipeline {
              return false;
          sd->apply_circular_axes(sd_img_gen_params->circular_x, sd_img_gen_params->circular_y);
  
@@ -591,6 +605,9 @@ index 294e5b0..a8630ce 100644
 +            sd->video_cfg_mode = sd_img_gen_params->video_cfg.mode;
 +            sd->video_cfg_min  = sd_img_gen_params->video_cfg.min_cfg;
 +        }
++        // ModelNoiseScale（本项目 patch）
++        sd->noise_scale = sd_img_gen_params->noise_scale;
++
 +        // ModelSamplingContinuousEDM / ModelSamplingContinuousV（sigma 区间覆盖，须在 SamplePlan 之前）
 +        if (sd->denoiser) {
 +            if (sd_img_gen_params->sigma_range.enabled) {
@@ -605,7 +622,7 @@ index 294e5b0..a8630ce 100644
  
          ImageVaeAxesGuard axes_guard(sd, sd_img_gen_params, request);
 diff --git a/src/runtime/denoiser.hpp b/src/runtime/denoiser.hpp
-index ec89406..4647c82 100644
+index ec89406..a6af8b8 100644
 --- a/src/runtime/denoiser.hpp
 +++ b/src/runtime/denoiser.hpp
 @@ -1033,6 +1033,16 @@ struct LogitNormalScheduler : SigmaScheduler {
@@ -636,11 +653,52 @@ index ec89406..4647c82 100644
      }
  };
  
+@@ -1566,6 +1578,12 @@ struct SenseNovaU1FlowDenoiser : public DiscreteFlowDenoiser {
+ 
+ typedef std::function<sd::guidance::GuiderOutput(const sd::Tensor<float>&, float, int)> denoise_cb_t;
+ 
++// 本项目 patch: ModelNoiseScale — ancestral 噪声缩放（ComfyUI s_noise * noise_scale）
++inline float& sampler_noise_scale() {
++    static float v = 1.0f;
++    return v;
++}
++
+ static std::pair<float, float> get_ancestral_step(float sigma_from,
+                                                   float sigma_to,
+                                                   float eta = 1.0f) {
+@@ -1585,7 +1603,7 @@ static std::pair<float, float> get_ancestral_step(float sigma_from,
+ 
+     float sigma_down_sq = sigma_to_sq - sigma_up * sigma_up;
+     sigma_down          = sigma_down_sq > 0.0f ? std::sqrt(sigma_down_sq) : 0.0f;
+-    return {sigma_down, sigma_up};
++    return {sigma_down, sigma_up * sampler_noise_scale()};
+ }
+ 
+ static std::tuple<float, float, float> get_ancestral_step_flow(float sigma_from,
+@@ -1617,7 +1635,7 @@ static std::tuple<float, float, float> get_ancestral_step_flow(float sigma_from,
+     float term = (sigma_down / sigma_to) * alpha_scale;
+     term       = std::max(-1.0f, std::min(1.0f, term));
+     sigma_up   = sigma_to * std::sqrt(std::max(1.0f - term * term, 0.0f));
+-    return {sigma_down, sigma_up, alpha_scale};
++    return {sigma_down, sigma_up * sampler_noise_scale(), alpha_scale};
+ }
+ 
+ static std::tuple<float, float, float> get_ancestral_step(float sigma_from,
 diff --git a/src/stable-diffusion.cpp b/src/stable-diffusion.cpp
-index beb899c..5cbff12 100644
+index beb899c..351be99 100644
 --- a/src/stable-diffusion.cpp
 +++ b/src/stable-diffusion.cpp
-@@ -732,6 +732,13 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
+@@ -493,6 +493,9 @@ void sd_img_gen_params_init(sd_img_gen_params_t* sd_img_gen_params) {
+     sd_img_gen_params->batch_count         = 1;
+     sd_img_gen_params->control_strength    = 0.9f;
+     sd_img_gen_params->ip_adapter_strength = 1.0f;
++    sd_img_gen_params->area_conds          = nullptr;
++    sd_img_gen_params->area_cond_count     = 0;
++    sd_img_gen_params->noise_scale         = 1.0f;
+     sd_img_gen_params->qwen_image_layers   = 3;
+     sd_img_gen_params->circular_x          = false;
+     sd_img_gen_params->circular_y          = false;
+@@ -732,6 +735,13 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
      return execution.ready && sd::pipeline::generate_image(sd_ctx->sd, params, images_out, num_images_out);
  }
  

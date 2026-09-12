@@ -27,6 +27,7 @@ extern fn sd_pipeline_set_wtype(pipeline: ptr, wtype: int) -> int from "sdcpp_ad
 extern fn sd_pipeline_set_flash_attn(pipeline: ptr, enabled: int) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_rescale_cfg(pipeline: ptr, enabled: int, multiplier: float) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_area_conds(pipeline: ptr, prompts_sep: str, rects_csv: str, strengths_csv: str) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_set_noise_scale(pipeline: ptr, noise_scale: float) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_video_cfg(pipeline: ptr, enabled: int, mode: int, min_cfg: float) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_sigma_range(pipeline: ptr, enabled: int, sigma_min: float, sigma_max: float) -> int from "sdcpp_adapter"
 extern fn sd_rotate_image(input_path: str, output_path: str, degrees: int) -> int from "sdcpp_adapter"
@@ -177,6 +178,10 @@ def sd_set_rescale_cfg(pipeline: ptr, multiplier: float) -> int:
 
 def sd_set_area_conds(pipeline: ptr, prompts_sep: str, rects_csv: str, strengths_csv: str) -> int:
     return sd_pipeline_set_area_conds(pipeline, prompts_sep, rects_csv, strengths_csv)
+
+
+def sd_set_noise_scale(pipeline: ptr, noise_scale: float) -> int:
+    return sd_pipeline_set_noise_scale(pipeline, noise_scale)
 
 
 def sd_set_video_cfg(pipeline: ptr, mode: int, min_cfg: float) -> int:

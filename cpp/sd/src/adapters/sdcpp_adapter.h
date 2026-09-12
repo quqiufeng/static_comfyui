@@ -197,6 +197,9 @@ public:
     // CLIPVisionEncode: pre-encode a reference image for IP-Adapter reuse
     int clip_vision_encode(const std::string& image_path);
 
+    // ModelNoiseScale
+    void set_noise_scale(float noise_scale);
+
     // RescaleCFG override (applied per sampling step)
     void set_rescale_cfg(bool enabled, float multiplier);
 
@@ -437,6 +440,9 @@ int sd_pipeline_set_area_conds(sd_pipeline_t pipeline, const char* prompts_sep, 
 
 /** CLIPVisionEncode: pre-encode a reference image (used by IP-Adapter). */
 int sd_pipeline_clip_vision_encode(sd_pipeline_t pipeline, const char* image_path);
+
+/** ModelNoiseScale: scale ancestral noise. */
+int sd_pipeline_set_noise_scale(sd_pipeline_t pipeline, float noise_scale);
 
 /** Configure RescaleCFG (applied per sampling step). */
 int sd_pipeline_set_rescale_cfg(sd_pipeline_t pipeline, int enabled, float multiplier);

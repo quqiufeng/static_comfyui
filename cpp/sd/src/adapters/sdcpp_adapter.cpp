@@ -76,6 +76,9 @@ public:
     std::vector<std::string> area_prompt_storage;
     std::vector<sd_area_cond_t> area_conds;
 
+    // ModelNoiseScale
+    float noise_scale = 1.0f;
+
     ~Impl() {
         if (ctx) {
             free_sd_ctx(ctx);
@@ -334,6 +337,11 @@ void SDPipeline::set_flow_shift(float shift) {
     impl_->flow_shift = shift;
 }
 
+void SDPipeline::set_noise_scale(float noise_scale) {
+    if (!impl_) return;
+    impl_->noise_scale = noise_scale;
+}
+
 int SDPipeline::clip_vision_encode(const std::string& image_path) {
     if (!impl_ || !impl_->ctx) return -1;
     cv::Mat img = cv::imread(image_path, cv::IMREAD_COLOR);
@@ -585,6 +593,9 @@ std::vector<Image> SDPipeline::generate(const ImageGenerationParams& params) {
     // Area conditioning
     img_params.area_conds      = impl_->area_conds.empty() ? nullptr : impl_->area_conds.data();
     img_params.area_cond_count = (int)impl_->area_conds.size();
+
+    // ModelNoiseScale
+    img_params.noise_scale = impl_->noise_scale;
 
     // Native IP-Adapter (sd.cpp 原生实现)
     if (impl_->has_ip_adapter_image) {
@@ -1228,6 +1239,12 @@ int sd_pipeline_set_area_conds(sd_pipeline_t pipeline, const char* prompts_sep, 
 int sd_pipeline_clip_vision_encode(sd_pipeline_t pipeline, const char* image_path) {
     if (!pipeline || !image_path) return -1;
     return static_cast<sd::SDPipeline*>(pipeline)->clip_vision_encode(image_path);
+}
+
+int sd_pipeline_set_noise_scale(sd_pipeline_t pipeline, float noise_scale) {
+    if (!pipeline) return -1;
+    static_cast<sd::SDPipeline*>(pipeline)->set_noise_scale(noise_scale);
+    return 0;
 }
 
 int sd_pipeline_set_rescale_cfg(sd_pipeline_t pipeline, int enabled, float multiplier) {

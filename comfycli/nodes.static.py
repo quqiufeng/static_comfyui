@@ -1,4 +1,4 @@
-from sd_backend import sd_create, sd_free, sd_load, sd_load_ex, sd_load_lora, sd_generate_full, sd_ensure_directory, sd_set_ipadapter, sd_set_ipadapter_enabled, sd_set_init_image, sd_load_control_net, sd_set_control_image, sd_set_area_conds, SD_WTYPE_AUTO
+from sd_backend import sd_create, sd_free, sd_load, sd_load_ex, sd_load_lora, sd_generate_full, sd_ensure_directory, sd_set_ipadapter, sd_set_ipadapter_enabled, sd_set_init_image, sd_load_control_net, sd_set_control_image, sd_set_area_conds, sd_set_noise_scale, SD_WTYPE_AUTO
 
 
 NODE_CLASS_MAPPINGS: dict = make_dict()
@@ -1586,8 +1586,17 @@ def model_attention_backend(inputs):
 
 register_node("ModelAttentionBackend", "ModelAttentionBackend",
               "model_attention_backend", ("MODEL",), False)
+def model_noise_scale(inputs):
+    m: SDPipelineHandle = dict_get(inputs, "model")
+    if m is None:
+        return (None,)
+    noise_scale = get_float(inputs, "noise_scale", 1.0)
+    sd_set_noise_scale(m.pipeline, noise_scale)
+    return (m,)
+
+
 register_node("ModelNoiseScale", "ModelNoiseScale",
-              "model_passthrough", ("MODEL",), False)
+              "model_noise_scale", ("MODEL",), False)
 
 
 def save_latent(inputs):
@@ -2037,7 +2046,9 @@ def call_node(class_type: str, inputs):
         return rescale_cfg(inputs)
     elif class_type == "ModelSamplingContinuousEDM" or class_type == "ModelSamplingContinuousV":
         return model_sampling_sigma_range(inputs)
-    elif class_type == "ModelSamplingDiscrete" or class_type == "ModelSamplingStableCascade" or class_type == "ModelNoiseScale":
+    elif class_type == "ModelNoiseScale":
+        return model_noise_scale(inputs)
+    elif class_type == "ModelSamplingDiscrete" or class_type == "ModelSamplingStableCascade":
         return model_passthrough(inputs)
     elif class_type == "SaveLatent":
         return save_latent(inputs)

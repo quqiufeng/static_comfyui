@@ -135,7 +135,7 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 > - **真实实现**（有实际语义）：模型加载、采样、VAE、LoRA、ControlNet、IPAdapter、图像算子、`LatentUpscaleBy`、`LoadLatent/SaveLatent`、`CLIPSetLastLayer`（clip_skip）、`ModelSamplingFlux/SD3/AuraFlow`（flow_shift）、`ModelComputeDtype`（wtype）、`ModelAttentionBackend`（flash_attn）、`LatentRotate/Flip/Composite/Blend`、`RepeatLatentBatch/LatentFromBatch/SetLatentNoiseMask`、`RescaleCFG`、`VideoLinearCFGGuidance/VideoTriangleCFGGuidance`、`ModelSamplingContinuousEDM/ContinuousV`（sigma 区间，改 sd.cpp patch）
 > - **sd.cpp patch（ggml，保持优化推理路径）**：`ConditioningSetArea`/`SetAreaPercentage`/`SetAreaStrength`/`Multiply` —— 区域条件在 sd.cpp 采样循环内逐区合成（复刻 ComfyUI `calc_cond_batch`），出图仍走 ggml，显存 ~2.7GB
 > - **libtorch helper 覆盖**（纯权重级张量操作）：`ModelMerge*`（20 变体）、`CLIPMerge*`（3 变体，合并 CLIP 权重段）、`CheckpointSave`/`VAESave`/`CLIPSave`/`ModelSave`/`ImageOnlyCheckpointSave`（权重导出）—— 依赖可选库 `libcomfycli_torch.so`（缺失时相关节点不可用，其余功能不受影响）
-> - **后端能力边界内不可实现**（sd.cpp 无对应 C API，且非纯权重操作）：Conditioning 掩码/时间步变体（`SetMask`/`SetTimestepRange`）、`GLIGEN*`、`StyleModel*`、`ModelNoiseScale`、`SVD_img2vid_Conditioning` —— 这些仅保证工作流可加载运行，透传语义与 ComfyUI 不同
+> - **后端能力边界内不可实现**（sd.cpp 无对应 C API，且非纯权重操作）：Conditioning 掩码/时间步变体（`SetMask`/`SetTimestepRange`）、`GLIGEN*`、`StyleModel*`、`SVD_img2vid_Conditioning` —— 这些仅保证工作流可加载运行，透传语义与 ComfyUI 不同
 >
 > **推理后端原则**：出图一律走 sd.cpp/ggml（专为推理优化：量化、算子融合、低显存）。torch helper 仅用于 ggml 没有的**权重级**操作（合并/导出）。`torch_std_sdxl_generate[_areas]`（独立 torch 管线）保留作为 GLIGEN/StyleModel/unCLIP 等需额外模型组件的备用路径，不在主出图路径上。
 > - **部分映射**：`ModelAttentionBackend` 仅 `flash_attn` 有语义；`ModelSamplingContinuousEDM/ContinuousV` 仅对使用 sigma 区间的调度器（`exponential`/`karras` 等）生效，`discrete` 用模型内置 sigma 表、天然忽略区间
@@ -225,7 +225,7 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 | `ModelComputeDtype` | `MODEL` | 真实实现（映射 sd.cpp `wtype`，重载 ctx） |
 | `ModelAttentionBackend` | `MODEL` | 部分实现（`flash_attn` → sd.cpp diffusion flash attention） |
 | `RescaleCFG` | `MODEL` | 真实实现（sd.cpp patch 采样循环，1:1 复刻 ComfyUI） |
-| `ModelNoiseScale` | `MODEL` | 透传（sd.cpp 无对应 C API） |
+| `ModelNoiseScale` | `MODEL` | 真实实现（sd.cpp patch 缩放 ancestral 噪声） |
 | `VideoLinearCFGGuidance` / `VideoTriangleCFGGuidance` | `MODEL` | 真实实现（按 batch/帧逐元素改 CFG scale） |
 
 ### Latent 序列化 / 保存

@@ -1,4 +1,5 @@
 from comfycli_builtins import dict_keys, is_link, path_dirname, path_split
+from comfycli_builtins import torch_std_safetensors_load, torch_std_safetensors_count, torch_std_safetensors_save, torch_std_safetensors_merge, torch_std_safetensors_free, torch_std_copy_file
 
 # === cli_args.static.py ===
 def parse_cli_args() -> dict:
@@ -170,6 +171,7 @@ extern fn sd_pipeline_set_wtype(pipeline: ptr, wtype: int) -> int from "sdcpp_ad
 extern fn sd_pipeline_set_flash_attn(pipeline: ptr, enabled: int) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_rescale_cfg(pipeline: ptr, enabled: int, multiplier: float) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_area_conds(pipeline: ptr, prompts_sep: str, rects_csv: str, strengths_csv: str) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_set_noise_scale(pipeline: ptr, noise_scale: float) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_video_cfg(pipeline: ptr, enabled: int, mode: int, min_cfg: float) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_sigma_range(pipeline: ptr, enabled: int, sigma_min: float, sigma_max: float) -> int from "sdcpp_adapter"
 extern fn sd_rotate_image(input_path: str, output_path: str, degrees: int) -> int from "sdcpp_adapter"
@@ -322,6 +324,10 @@ def sd_set_area_conds(pipeline: ptr, prompts_sep: str, rects_csv: str, strengths
     return sd_pipeline_set_area_conds(pipeline, prompts_sep, rects_csv, strengths_csv)
 
 
+def sd_set_noise_scale(pipeline: ptr, noise_scale: float) -> int:
+    return sd_pipeline_set_noise_scale(pipeline, noise_scale)
+
+
 def sd_set_video_cfg(pipeline: ptr, mode: int, min_cfg: float) -> int:
     return sd_pipeline_set_video_cfg(pipeline, 1, mode, min_cfg)
 
@@ -392,18 +398,14 @@ def sd_generate_full(pipeline: ptr, prompt: str, negative_prompt: str,
         dict_get(opts, "ad_negative_prompt"),
         output_path)
 # === torch_helper.static.py ===
-# torch_helper.static.py — libtorch_std_helper.so FFI
+# torch_helper.static.py — libcomfycli_torch.so 绑定说明
 #
-# 用于 sd.cpp C API 无法覆盖的权重级操作（模型合并 / CLIP 合并 / 权重导出）。
-# 共享库由 comfycli_ffi.scm 以 guard 方式加载；缺失时相关节点不可用。
-
-extern fn torch_std_safetensors_load(path: str) -> ptr from "torch_helper"
-extern fn torch_std_safetensors_count(d: ptr) -> int from "torch_helper"
-extern fn torch_std_safetensors_save(d: ptr, path: str) -> int from "torch_helper"
-extern fn torch_std_safetensors_merge(a: ptr, b: ptr, mode: int, prefixes_csv: str, ratios_csv: str, default_ratio: float, strip_prefix: str) -> ptr from "torch_helper"
-extern fn torch_std_safetensors_free(d: ptr) -> None from "torch_helper"
-extern fn torch_std_copy_file(src: str, dst: str) -> int from "torch_helper"
-extern fn torch_std_sdxl_generate_areas_paths(model_path: str, clip_l_jit: str, clip_g_jit: str, vae_jit: str, vocab_path: str, merges_path: str, prompt: str, negative_prompt: str, width: int, height: int, steps: int, cfg: float, scheduler: str, seed: int, area_prompts: str, area_rects_csv: str, area_strengths_csv: str, output_path: str) -> int from "torch_helper"
+# 这些函数不在 StaticPy 里用 extern 声明，而是在 comfycli_ffi.scm 中
+# 按共享库是否加载来定义（未加载时退化为报错桩），避免 foreign-procedure
+# 在 AOT 载入期因符号缺失而让整个程序起不来。
+#
+# 名字由 concat_src.py 的 HEADER import 提供给类型检查器：
+#   torch_std_safetensors_load / _count / _save / _merge / _free / torch_std_copy_file
 
 # === nodes.static.py ===
 
@@ -1992,8 +1994,17 @@ def model_attention_backend(inputs):
 
 register_node("ModelAttentionBackend", "ModelAttentionBackend",
               "model_attention_backend", ("MODEL",), False)
+def model_noise_scale(inputs):
+    m: SDPipelineHandle = dict_get(inputs, "model")
+    if m is None:
+        return (None,)
+    noise_scale = get_float(inputs, "noise_scale", 1.0)
+    sd_set_noise_scale(m.pipeline, noise_scale)
+    return (m,)
+
+
 register_node("ModelNoiseScale", "ModelNoiseScale",
-              "model_passthrough", ("MODEL",), False)
+              "model_noise_scale", ("MODEL",), False)
 
 
 def save_latent(inputs):
@@ -2443,7 +2454,9 @@ def call_node(class_type: str, inputs):
         return rescale_cfg(inputs)
     elif class_type == "ModelSamplingContinuousEDM" or class_type == "ModelSamplingContinuousV":
         return model_sampling_sigma_range(inputs)
-    elif class_type == "ModelSamplingDiscrete" or class_type == "ModelSamplingStableCascade" or class_type == "ModelNoiseScale":
+    elif class_type == "ModelNoiseScale":
+        return model_noise_scale(inputs)
+    elif class_type == "ModelSamplingDiscrete" or class_type == "ModelSamplingStableCascade":
         return model_passthrough(inputs)
     elif class_type == "SaveLatent":
         return save_latent(inputs)
