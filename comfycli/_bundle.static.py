@@ -1690,7 +1690,14 @@ register_node("InpaintModelConditioning", "InpaintModelConditioning",
 
 
 def preview_any(inputs):
-    return (dict_get(inputs, "source"),)
+    v = dict_get(inputs, "source")
+    text = "None"
+    if v is None:
+        text = "None"
+    else:
+        text = json_dumps(v)
+    print("PreviewAny: " + text)
+    return (text,)
 
 
 register_node("PreviewAny", "Preview Any",

@@ -244,13 +244,13 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 | `ControlNetApplyAdvanced` | `CONDITIONING`×2 | 应用 ControlNet |
 | `LatentUpscaleBy` | `LATENT` | 按倍数缩放 |
 | `InpaintModelConditioning` | `CONDITIONING`×2, `LATENT` | inpainting 条件 |
-| `PreviewAny` | `*` | 预览任意值 |
+| `PreviewAny` | `*` | 真实实现（序列化为字符串并打印） |
 
 ### 工具
 
 | 节点 | 输出 | 说明 |
 |------|------|------|
-| `Reroute` | `*` | 透传任意输入 |
+| `Reroute` | `*` | 真实实现（透传输入，即 Reroute 语义） |
 
 > **注意**：StaticPy 无运行期自定义节点加载能力。新增节点需在 `comfycli/nodes.static.py` 中注册并重新编译。
 
