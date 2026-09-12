@@ -84,11 +84,220 @@ index cf69b48..04a2e9e 100644
  enum sd_cancel_mode_t {
      // Stop the current generation as soon as possible.
      SD_CANCEL_ALL,
+diff --git a/src/core/ggml_runner.h b/src/core/ggml_runner.h
+index 5dc3fa5..d3a1c4d 100644
+--- a/src/core/ggml_runner.h
++++ b/src/core/ggml_runner.h
+@@ -64,6 +64,14 @@ struct WeightAdapter {
+     virtual size_t get_extra_graph_size()                                                                                             = 0;
+ };
+ 
++struct GGMLRunnerContext;
++
++// GLIGEN（本项目 patch）：在 transformer 块内注入 gated self-attention 的抽象接口
++struct GligenApplier {
++    virtual ggml_tensor* apply(GGMLRunnerContext* ctx, ggml_tensor* x, int index) = 0;
++    virtual ~GligenApplier() = default;
++};
++
+ struct GGMLRunnerContext {
+     ggml_backend_t backend                                           = nullptr;
+     ggml_context* ggml_ctx                                           = nullptr;
+@@ -75,6 +83,10 @@ struct GGMLRunnerContext {
+     bool circular_y_enabled                                          = false;
+     ggml_tensor* ip_context                                          = nullptr;
+     float ip_scale                                                   = 1.0f;
++    // GLIGEN（本项目 patch）
++    GligenApplier* gligen_applier                                    = nullptr;
++    ggml_tensor* gligen_objs                                         = nullptr;
++    int gligen_index                                                 = 0;
+     std::shared_ptr<WeightAdapter> weight_adapter                    = nullptr;
+     std::vector<std::pair<ggml_tensor*, std::string>>* debug_tensors = nullptr;
+     std::function<ggml_tensor*(const std::string&)> get_cache_tensor;
+diff --git a/src/model/common/block.hpp b/src/model/common/block.hpp
+index 5a5e661..6a98809 100644
+--- a/src/model/common/block.hpp
++++ b/src/model/common/block.hpp
+@@ -456,6 +456,10 @@ public:
+         x      = norm1->forward(ctx, x);
+         x      = attn1->forward(ctx, x, x);  // self-attention
+         x      = ggml_add(ctx->ggml_ctx, x, r);
++        // GLIGEN gated self-attention（本项目 patch，位于 self-attn 之后 / cross-attn 之前）
++        if (ctx->gligen_applier != nullptr) {
++            x = ctx->gligen_applier->apply(ctx, x, ctx->gligen_index);
++        }
+         r      = x;
+         x      = norm2->forward(ctx, x);
+         x      = attn2->forward(ctx, x, context);  // cross-attention
+diff --git a/src/model/diffusion/gligen.hpp b/src/model/diffusion/gligen.hpp
+new file mode 100644
+index 0000000..608ca95
+--- /dev/null
++++ b/src/model/diffusion/gligen.hpp
+@@ -0,0 +1,136 @@
++#ifndef __GLIGEN_HPP__
++#define __GLIGEN_HPP__
++
++// GLIGEN（本项目 patch）：gated self-attention 注入 UNet transformer 块。
++// 参照 ComfyUI comfy/gligen.py：
++//   GatedSelfAttentionDense / PositionNet / Gligen
++#include <cmath>
++#include <string>
++#include <vector>
++
++#include "model/common/block.hpp"
++
++struct GatedSelfAttentionDense : public GGMLBlock {
++protected:
++    int64_t query_dim;
++    int64_t context_dim;
++    int64_t n_head;
++    int64_t d_head;
++
++public:
++    // alpha 是 checkpoint 里的标量参数，加载时读到 host float
++    float alpha_attn  = 0.0f;
++    float alpha_dense = 0.0f;
++
++    GatedSelfAttentionDense(int64_t query_dim,
++                            int64_t context_dim,
++                            int64_t n_head,
++                            int64_t d_head)
++        : query_dim(query_dim),
++          context_dim(context_dim),
++          n_head(n_head),
++          d_head(d_head) {
++        blocks["linear"] = std::shared_ptr<GGMLBlock>(new Linear(context_dim, query_dim));
++        blocks["attn"]   = std::shared_ptr<GGMLBlock>(new CrossAttention(query_dim, query_dim, n_head, d_head));
++        blocks["ff"]     = std::shared_ptr<GGMLBlock>(new FeedForward(query_dim, query_dim));
++        blocks["norm1"]  = std::shared_ptr<GGMLBlock>(new LayerNorm(query_dim));
++        blocks["norm2"]  = std::shared_ptr<GGMLBlock>(new LayerNorm(query_dim));
++    }
++
++    ggml_tensor* forward(GGMLRunnerContext* ctx, ggml_tensor* x, ggml_tensor* objs) {
++        // x:    [N, n_visual, query_dim]
++        // objs: [N, n_ground, query_dim]
++        auto linear = std::dynamic_pointer_cast<Linear>(blocks["linear"]);
++        auto attn   = std::dynamic_pointer_cast<CrossAttention>(blocks["attn"]);
++        auto ff     = std::dynamic_pointer_cast<FeedForward>(blocks["ff"]);
++        auto norm1  = std::dynamic_pointer_cast<LayerNorm>(blocks["norm1"]);
++        auto norm2  = std::dynamic_pointer_cast<LayerNorm>(blocks["norm2"]);
++
++        int64_t n_visual = x->ne[1];
++
++        objs = linear->forward(ctx, objs);                             // [N, n_ground, query_dim]
++        auto xc = ggml_concat(ctx->ggml_ctx, x, objs, 1);              // [N, n_visual+n_ground, query_dim]
++        xc      = norm1->forward(ctx, xc);
++        auto a  = attn->forward(ctx, xc, xc);                          // self-attention over concat
++
++        // 取前 n_visual 个 token
++        auto a_vis = ggml_view_3d(ctx->ggml_ctx,
++                                  a,
++                                  a->ne[0],
++                                  n_visual,
++                                  a->ne[2],
++                                  a->nb[1],
++                                  a->nb[2],
++                                  0);
++        a_vis      = ggml_cont(ctx->ggml_ctx, a_vis);
++
++        float sa = std::tanh(alpha_attn);
++        float sd = std::tanh(alpha_dense);
++
++        x = ggml_add(ctx->ggml_ctx, x, ggml_scale(ctx->ggml_ctx, a_vis, sa));
++
++        auto f = ff->forward(ctx, norm2->forward(ctx, x));
++        x      = ggml_add(ctx->ggml_ctx, x, ggml_scale(ctx->ggml_ctx, f, sd));
++        return x;
++    }
++};
++
++struct PositionNet : public GGMLBlock {
++protected:
++    int64_t in_dim;
++    int64_t out_dim;
++    int64_t fourier_freqs;
++    int64_t position_dim;
++
++public:
++    PositionNet(int64_t in_dim, int64_t out_dim, int64_t fourier_freqs = 8)
++        : in_dim(in_dim),
++          out_dim(out_dim),
++          fourier_freqs(fourier_freqs),
++          position_dim(fourier_freqs * 2 * 4) {
++        blocks["linears.0"] = std::shared_ptr<GGMLBlock>(new Linear(in_dim + position_dim, 512));
++        blocks["linears.2"] = std::shared_ptr<GGMLBlock>(new Linear(512, 512));
++        blocks["linears.4"] = std::shared_ptr<GGMLBlock>(new Linear(512, out_dim));
++    }
++
++    // 由适配层预计算 Fourier 位置特征后传入；此处只做 MLP
++    // positive_embeddings: [N, n_objs, in_dim]
++    // pos_features:        [N, n_objs, position_dim]
++    ggml_tensor* forward(GGMLRunnerContext* ctx, ggml_tensor* positive_embeddings, ggml_tensor* pos_features) {
++        auto l0 = std::dynamic_pointer_cast<Linear>(blocks["linears.0"]);
++        auto l2 = std::dynamic_pointer_cast<Linear>(blocks["linears.2"]);
++        auto l4 = std::dynamic_pointer_cast<Linear>(blocks["linears.4"]);
++
++        auto x = ggml_concat(ctx->ggml_ctx, positive_embeddings, pos_features, 0);  // [N, n_objs, in+pos]
++        x      = l0->forward(ctx, x);
++        x      = ggml_silu_inplace(ctx->ggml_ctx, x);
++        x      = l2->forward(ctx, x);
++        x      = ggml_silu_inplace(ctx->ggml_ctx, x);
++        x      = l4->forward(ctx, x);
++        return x;
++    }
++};
++
++// 供 UNet transformer 块回调（transformer_index 对应 modules 下标）
++struct GligenModules : public GligenApplier {
++    std::vector<std::shared_ptr<GatedSelfAttentionDense>> modules;
++
++    ggml_tensor* apply(GGMLRunnerContext* ctx, ggml_tensor* x, int index) override {
++        if (index < 0 || index >= (int)modules.size()) {
++            return x;
++        }
++        auto& m = modules[index];
++        if (m == nullptr) {
++            return x;
++        }
++        return m->forward(ctx, x, ctx->gligen_objs);
++    }
++};
++
++struct Gligen {
++    std::shared_ptr<GligenModules> modules;
++    std::shared_ptr<PositionNet> position_net;
++    int64_t key_dim = 768;
++};
++
++#endif  // __GLIGEN_HPP__
+diff --git a/src/model/diffusion/model.hpp b/src/model/diffusion/model.hpp
+index 9d611c4..7c42b44 100644
+--- a/src/model/diffusion/model.hpp
++++ b/src/model/diffusion/model.hpp
+@@ -48,6 +48,9 @@ struct UNetDiffusionExtra {
+     float control_strength                         = 0.f;
+     const sd::Tensor<float>* ip_context            = nullptr;
+     float ip_scale                                 = 1.f;
++    // GLIGEN（本项目 patch）
++    void* gligen_applier                           = nullptr;
++    const sd::Tensor<float>* gligen_objs           = nullptr;
+ };
+ 
+ struct SkipLayerDiffusionExtra {
 diff --git a/src/model/diffusion/unet.hpp b/src/model/diffusion/unet.hpp
-index 1c8ddf4..026d503 100644
+index 1c8ddf4..344d52c 100644
 --- a/src/model/diffusion/unet.hpp
 +++ b/src/model/diffusion/unet.hpp
-@@ -302,6 +302,20 @@ class UnetModelBlock : public GGMLBlock {
+@@ -8,6 +8,7 @@
+ #include "model.h"
+ #include "model/common/block.hpp"
+ #include "model/diffusion/animatediff.hpp"
++#include "model/diffusion/gligen.hpp"
+ #include "model/diffusion/model.hpp"
+ 
+ /*==================================================== UnetModel =====================================================*/
+@@ -302,6 +303,20 @@ class UnetModelBlock : public GGMLBlock {
  public:
      UNetConfig config;
  
@@ -109,7 +318,41 @@ index 1c8ddf4..026d503 100644
      explicit UnetModelBlock(UNetConfig config = {})
          : config(config) {
          const SDVersion version           = this->config.version;
-@@ -700,6 +714,46 @@ public:
+@@ -513,15 +528,21 @@ public:
+                                          ggml_tensor* x,
+                                          ggml_tensor* context,
+                                          int timesteps) {
++        ggml_tensor* out;
+         if (config.version == VERSION_SVD) {
+             auto block = std::dynamic_pointer_cast<SpatialVideoTransformer>(blocks[name]);
+ 
+-            return block->forward(ctx, x, context, timesteps);
++            out = block->forward(ctx, x, context, timesteps);
+         } else {
+             auto block = std::dynamic_pointer_cast<SpatialTransformer>(blocks[name]);
+ 
+-            return block->forward(ctx, x, context);
++            out = block->forward(ctx, x, context);
+         }
++        // GLIGEN：transformer_index 随每个 SpatialTransformer 递增（本项目 patch）
++        if (ctx->gligen_applier != nullptr) {
++            ctx->gligen_index++;
++        }
++        return out;
+     }
+ 
+     ggml_tensor* forward(GGMLRunnerContext* ctx,
+@@ -539,6 +560,9 @@ public:
+         // c_concat: [N, in_channels, h, w] or [1, in_channels, h, w]
+         // y: [N, adm_in_channels] or [1, adm_in_channels]
+         // return: [N, out_channels, h, w]
++        // GLIGEN：每次 forward 重置 transformer_index（本项目 patch）
++        ctx->gligen_index = 0;
++
+         const SDVersion version           = config.version;
+         const int model_channels          = config.model_channels;
+         const int num_res_blocks          = config.num_res_blocks;
+@@ -700,6 +724,46 @@ public:
                      control_offset--;
                  }
  
@@ -156,7 +399,7 @@ index 1c8ddf4..026d503 100644
                  h = ggml_concat(ctx->ggml_ctx, h, h_skip, 2);
  
                  std::string name = "output_blocks." + std::to_string(output_block_idx) + ".0";
-@@ -750,6 +804,20 @@ struct UNetModelRunner : public DiffusionModelRunner {
+@@ -750,6 +814,24 @@ struct UNetModelRunner : public DiffusionModelRunner {
      UNetConfig config;
      UnetModelBlock unet;
  
@@ -165,6 +408,10 @@ index 1c8ddf4..026d503 100644
 +    float freeu_b2     = 1.4f;
 +    float freeu_s1     = 0.9f;
 +    float freeu_s2     = 0.2f;
++
++    // GLIGEN（本项目 patch）
++    void* gligen_applier                 = nullptr;
++    const sd::Tensor<float>* gligen_objs = nullptr;
 +
 +    void set_freeu_params(bool enabled, float b1, float b2, float s1, float s2) {
 +        freeu_enabled = enabled;
@@ -177,10 +424,24 @@ index 1c8ddf4..026d503 100644
      UNetModelRunner(ggml_backend_t backend,
                      const String2TensorStorage& tensor_storage_map,
                      const std::string prefix,
-@@ -845,6 +913,11 @@ struct UNetModelRunner : public DiffusionModelRunner {
+@@ -800,6 +882,11 @@ struct UNetModelRunner : public DiffusionModelRunner {
+         auto runner_ctx       = get_context();
+         runner_ctx.ip_context = ip_context;
+         runner_ctx.ip_scale   = ip_scale;
++        // GLIGEN（本项目 patch）
++        runner_ctx.gligen_applier = static_cast<GligenApplier*>(gligen_applier);
++        if (gligen_objs != nullptr) {
++            runner_ctx.gligen_objs = make_optional_input(*gligen_objs);
++        }
+ 
+         ggml_tensor* out = unet.forward(&runner_ctx,
+                                         x,
+@@ -845,6 +932,13 @@ struct UNetModelRunner : public DiffusionModelRunner {
          GGML_ASSERT(diffusion_params.timesteps != nullptr);
          const auto* extra = diffusion_extra_as<UNetDiffusionExtra>(diffusion_params);
          static const std::vector<sd::Tensor<float>> empty_controls;
++        this->gligen_applier = extra->gligen_applier;
++        this->gligen_objs    = extra->gligen_objs;
 +        unet.set_freeu(freeu_enabled,
 +                       freeu_b1,
 +                       freeu_b2,
@@ -204,7 +465,7 @@ index 6ab370c..47eee9a 100644
  
  bool is_unused_tensor(const std::string& name) {
 diff --git a/src/pipeline/diffusion_engine.cpp b/src/pipeline/diffusion_engine.cpp
-index 5d51e24..c9e225d 100644
+index 5d51e24..9d2641d 100644
 --- a/src/pipeline/diffusion_engine.cpp
 +++ b/src/pipeline/diffusion_engine.cpp
 @@ -26,6 +26,7 @@
@@ -295,7 +556,19 @@ index 5d51e24..c9e225d 100644
      std::vector<int> skip_layers(guidance.slg.layers, guidance.slg.layers + guidance.slg.layer_count);
      float cfg_scale     = guidance.txt_cfg;
      float img_cfg_scale = guidance.img_cfg;
-@@ -2358,6 +2396,18 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2302,6 +2340,11 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+                     nvf = static_cast<int>(noised_input.shape()[3]);
+                 }
+                 UNetDiffusionExtra unet_extra{nvf, &controls, control_strength};
++                // GLIGEN（本项目 patch）
++                if (this->gligen && this->gligen->modules && !this->gligen_objs.empty()) {
++                    unet_extra.gligen_applier = this->gligen->modules.get();
++                    unet_extra.gligen_objs    = &this->gligen_objs;
++                }
+                 const auto& ip_tokens = use_uncond_ip ? ip_adapter_uncond_tokens : ip_adapter_tokens;
+                 if (!ip_tokens.empty()) {
+                     unet_extra.ip_context = &ip_tokens;
+@@ -2358,6 +2401,18 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
                  diffusion_params.extra = std::monostate{};
              }
  
@@ -314,7 +587,7 @@ index 5d51e24..c9e225d 100644
              sd::Tensor<float> cached_output;
              if (step_cache.before_condition(&condition, noised_input, &cached_output)) {
                  return std::move(cached_output);
-@@ -2395,6 +2445,35 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2395,6 +2450,35 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
              return {};
          }
  
@@ -350,7 +623,7 @@ index 5d51e24..c9e225d 100644
          if (!uncond.empty()) {
              if (!step_cache.is_step_skipped()) {
                  compute_sample_controls(control_image,
-@@ -2434,7 +2513,10 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2434,7 +2518,10 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
          guidance_input.pred_uncond     = uncond_out.empty() ? nullptr : &uncond_out;
          guidance_input.pred_img_uncond = img_uncond_out.empty() ? nullptr : &img_uncond_out;
  
@@ -362,7 +635,7 @@ index 5d51e24..c9e225d 100644
          if (guided.pred.empty()) {
              return {};
          }
-@@ -2455,6 +2537,127 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2455,6 +2542,127 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
              return {};
          }
  
@@ -491,18 +764,20 @@ index 5d51e24..c9e225d 100644
          sd::guidance::GuiderOutput output;
          output.pred = denoised;
 diff --git a/src/pipeline/diffusion_engine.h b/src/pipeline/diffusion_engine.h
-index 13cb6e8..f714ccc 100644
+index 13cb6e8..0c6f337 100644
 --- a/src/pipeline/diffusion_engine.h
 +++ b/src/pipeline/diffusion_engine.h
-@@ -12,6 +12,7 @@
+@@ -12,7 +12,9 @@
  #include <string>
  #include <vector>
  
 +#include "conditioning/conditioner.hpp"
  #include "core/ggml_extend_backend.h"
++#include "model/diffusion/gligen.hpp"
  #include "core/ggml_graph_cut.h"
  #include "core/tensor.hpp"
-@@ -100,6 +101,46 @@ public:
+ #include "core/util.h"
+@@ -100,6 +102,50 @@ public:
      bool is_using_v_parameterization     = false;
      bool is_using_edm_v_parameterization = false;
  
@@ -535,6 +810,10 @@ index 13cb6e8..f714ccc 100644
 +    // ModelNoiseScale（本项目 patch）：ancestral 噪声缩放
 +    float noise_scale = 1.0f;
 +
++    // GLIGEN（本项目 patch）
++    std::shared_ptr<Gligen> gligen;
++    sd::Tensor<float> gligen_objs;
++
 +    // 区域条件（本项目 patch，复刻 ComfyUI calc_cond_batch）
 +    struct AreaCondition {
 +        SDCondition cond;
@@ -549,7 +828,7 @@ index 13cb6e8..f714ccc 100644
      std::shared_ptr<ModelManager> model_manager;
  
      enum class RunnerGroup { Core,
-@@ -324,6 +365,9 @@ public:
+@@ -324,6 +370,9 @@ public:
  
      bool build_denoiser();
  
@@ -559,7 +838,7 @@ index 13cb6e8..f714ccc 100644
      bool build_runners(const RunnerGroups& groups);
  
      bool is_using_v_parameterization_for_sd2(bool is_inpaint = false);
-@@ -363,6 +407,10 @@ public:
+@@ -363,6 +412,10 @@ public:
                                               int clip_skip        = -1,
                                               bool zero_out_masked = false);
  
