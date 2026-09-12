@@ -1293,6 +1293,18 @@ def load_latent(inputs):
 register_node("LoadLatent", "Load Latent", "load_latent", ("LATENT",), False)
 
 
+def save_noop(inputs):
+    # 模型/CLIP/VAE 由 sd.cpp 内部持有，暂不支持导出
+    print("Save node: model is internal to sd.cpp backend, export not supported")
+    return ("",)
+
+
+register_node("CheckpointSave", "CheckpointSave", "save_noop", ("*",), True)
+register_node("VAESave", "VAESave", "save_noop", ("*",), True)
+register_node("CLIPSave", "CLIPSave", "save_noop", ("*",), True)
+register_node("ModelSave", "ModelSave", "save_noop", ("*",), True)
+
+
 def print_node_list():
     keys = dict_keys(NODE_CLASS_MAPPINGS)
     i = 0
@@ -1411,6 +1423,8 @@ def call_node(class_type: str, inputs):
         return save_latent(inputs)
     elif class_type == "LoadLatent":
         return load_latent(inputs)
+    elif class_type == "CheckpointSave" or class_type == "VAESave" or class_type == "CLIPSave" or class_type == "ModelSave":
+        return save_noop(inputs)
     elif class_type == "VAEDecodeTiled":
         return vae_decode(inputs)
     elif class_type == "ConditioningZeroOut":
