@@ -1,8 +1,16 @@
 diff --git a/include/stable-diffusion.h b/include/stable-diffusion.h
-index cf69b48..04a2e9e 100644
+index cf69b48..bbd921d 100644
 --- a/include/stable-diffusion.h
 +++ b/include/stable-diffusion.h
-@@ -377,6 +377,52 @@ typedef struct {
+@@ -210,6 +210,7 @@ typedef struct {
+     const char* audio_vae_path;
+     const char* taesd_path;
+     const char* control_net_path;
++    const char* gligen_path;
+     const char* ip_adapter_path;
+     const char* motion_module_path;
+     const sd_embedding_t* embeddings;
+@@ -377,6 +378,52 @@ typedef struct {
      int custom_sigmas_count;
  } sd_hires_params_t;
  
@@ -55,7 +63,7 @@ index cf69b48..04a2e9e 100644
  typedef struct {
      const sd_lora_t* loras;
      uint32_t lora_count;
-@@ -403,6 +449,15 @@ typedef struct {
+@@ -403,6 +450,15 @@ typedef struct {
      sd_tiling_params_t vae_tiling_params;
      sd_cache_params_t cache;
      sd_hires_params_t hires;
@@ -71,7 +79,7 @@ index cf69b48..04a2e9e 100644
      int qwen_image_layers;
      bool circular_x;
      bool circular_y;
-@@ -509,6 +564,12 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
+@@ -509,6 +565,12 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
                             sd_image_t** images_out,
                             int* num_images_out);
  
@@ -131,7 +139,7 @@ index 5a5e661..6a98809 100644
          x      = attn2->forward(ctx, x, context);  // cross-attention
 diff --git a/src/model/diffusion/gligen.hpp b/src/model/diffusion/gligen.hpp
 new file mode 100644
-index 0000000..608ca95
+index 0000000..011c0ef
 --- /dev/null
 +++ b/src/model/diffusion/gligen.hpp
 @@ -0,0 +1,136 @@
@@ -155,7 +163,7 @@ index 0000000..608ca95
 +    int64_t d_head;
 +
 +public:
-+    // alpha 是 checkpoint 里的标量参数，加载时读到 host float
++    // alpha_attn / alpha_dense：checkpoint 标量，由加载器读入（默认 0 → 不生效）
 +    float alpha_attn  = 0.0f;
 +    float alpha_dense = 0.0f;
 +
