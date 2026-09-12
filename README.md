@@ -130,10 +130,11 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 
 `comfycli/nodes.static.py` 注册 **132 个节点**，覆盖 ComfyUI 全部 **120 个内置节点名（100%）**。
 
-> **对齐度说明（重要）**：节点**名称**已 100% 对齐，但**行为**分两类：
+> **对齐度说明（重要）**：节点**名称**已 100% 对齐，但**行为**分三类：
 >
-> - **真实实现**（有实际语义）：模型加载、采样、VAE、LoRA、ControlNet、IPAdapter、图像算子、`LatentUpscaleBy`、`LoadLatent/SaveLatent` 等
-> - **透传 / 占位**：Conditioning 变体、Latent 变体、`ModelSampling*`、`ModelMerge*`、视频/模型专属节点 —— 因 sd.cpp 后端无对应能力，仅保证工作流可加载运行
+> - **真实实现**（有实际语义）：模型加载、采样、VAE、LoRA、ControlNet、IPAdapter、图像算子、`LatentUpscaleBy`、`LoadLatent/SaveLatent`、`CLIPSetLastLayer`（clip_skip）、`ModelSamplingFlux/SD3/AuraFlow`（flow_shift）、`ModelComputeDtype`（wtype）、`ModelAttentionBackend`（flash_attn）、`LatentRotate/Flip/Composite/Blend`、`RepeatLatentBatch/LatentFromBatch/SetLatentNoiseMask`
+> - **后端能力边界内不可实现**（非占位糊弄，是 sd.cpp 无对应 C API）：Conditioning 区域/掩码变体、`ModelMerge*`、`CLIPMerge*`、模型导出（`CheckpointSave/VAESave/CLIPSave/ModelSave`）、`GLIGEN*`、`StyleModel*`、`RescaleCFG`/`ModelNoiseScale`、视频专属节点 —— 这些仅保证工作流可加载运行，透传语义与 ComfyUI 不同
+> - **部分映射**：`ModelAttentionBackend` 仅 `flash_attn` 有语义（映射到 sd.cpp diffusion flash attention），其余 backend 值透传
 >
 > 即"能跑通的工作流范围"取决于 sd.cpp 的能力边界；核心出图链路（txt2img / img2img / inpainting / ControlNet / HiRes / LoRA / IPAdapter）是真实可用的。
 
@@ -152,7 +153,7 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 | 节点 | 输出 | 说明 |
 |------|------|------|
 | `CLIPTextEncode` | `CONDITIONING` | 文本编码（后端 CLIP 内部处理） |
-| `CLIPSetLastLayer` | `CLIP` | 兼容占位 |
+| `CLIPSetLastLayer` | `CLIP` | 真实实现（映射 sd.cpp `clip_skip`） |
 | `ConditioningCombine` / `ConditioningConcat` | `CONDITIONING` | 文本拼接 |
 | `ConditioningAverage` | `CONDITIONING` | 按强度决定拼接顺序 |
 | `ConditioningZeroOut` | `CONDITIONING` | 空条件 |
@@ -166,7 +167,8 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 | `EmptyLatentImage` | `LATENT` | 空白潜空间 |
 | `EmptyImage` | `IMAGE` | 纯色图（OpenCV 生成） |
 | `LatentUpscale` / `LatentCrop` | `LATENT` | 修改潜空间尺寸 |
-| `LatentRotate` / `LatentFlip` / `LatentComposite` / `LatentBlend` / `RepeatLatentBatch` / `LatentFromBatch` / `SetLatentNoiseMask` | `LATENT` | 透传 |
+| `LatentRotate` / `LatentFlip` / `LatentComposite` / `LatentBlend` | `LATENT` | 真实实现（OpenCV 图像级旋转/翻转/合成/混合） |
+| `RepeatLatentBatch` / `LatentFromBatch` / `SetLatentNoiseMask` | `LATENT` | 真实实现（latent 字段运算） |
 | `LoadImage` / `LoadImageMask` | `IMAGE`, `MASK` | 从文件加载图片/掩码 |
 | `ImageScale` / `ImageScaleBy` | `IMAGE` | 缩放（OpenCV） |
 | `ImageInvert` | `IMAGE` | 反色 |
@@ -208,13 +210,16 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 | `CLIPMergeSimple` / `CLIPMergeAdd` / `CLIPMergeSubtract` | `CLIP` | 透传（sd.cpp 单 CLIP） |
 | `LoraLoaderBypass` / `LoraLoaderBypassModelOnly` | `MODEL` | 等价 LoRA 加载 |
 
-### 采样 / 模型配置（透传）
+### 采样 / 模型配置
 
 | 节点 | 输出 | 说明 |
 |------|------|------|
-| `ModelSamplingDiscrete` / `Flux` / `SD3` / `ContinuousEDM` / `ContinuousV` / `AuraFlow` / `StableCascade` | `MODEL` | sd.cpp 按模型自动调度 |
-| `RescaleCFG` / `ModelComputeDtype` / `ModelAttentionBackend` / `ModelNoiseScale` | `MODEL` | 透传 |
-| `VideoLinearCFGGuidance` / `VideoTriangleCFGGuidance` | `MODEL` | 透传 |
+| `ModelSamplingFlux` / `SD3` / `AuraFlow` | `MODEL` | 真实实现（映射 sd.cpp `flow_shift`） |
+| `ModelSamplingDiscrete` / `ContinuousEDM` / `ContinuousV` / `StableCascade` | `MODEL` | 透传（sd.cpp 按模型自动调度） |
+| `ModelComputeDtype` | `MODEL` | 真实实现（映射 sd.cpp `wtype`，重载 ctx） |
+| `ModelAttentionBackend` | `MODEL` | 部分实现（`flash_attn` → sd.cpp diffusion flash attention） |
+| `RescaleCFG` / `ModelNoiseScale` | `MODEL` | 透传（需改采样循环，sd.cpp 无 C API） |
+| `VideoLinearCFGGuidance` / `VideoTriangleCFGGuidance` | `MODEL` | 透传（视频专属） |
 
 ### Latent 序列化 / 保存
 
@@ -455,7 +460,7 @@ ComfyUI 是 Python ML 生态中最复杂的纯推理项目之一：
 - 无自定义节点动态加载——自定义节点需编译期注册
 - CLI 先行，无 WebSocket/HTTP UI
 - 同步执行，无 asyncio
-- 已实现 132 个节点（ComfyUI 120 个内置节点名全覆盖）；部分为透传/占位，行为对齐取决于 sd.cpp 能力边界
+- 已实现 132 个节点（ComfyUI 120 个内置节点名全覆盖）；核心链路真实实现，其余受 sd.cpp 能力边界限制（详见「对齐度说明」）
 - 执行引擎为简化版：拓扑排序 + 校验 + 输出缓存，但无 list 输入广播 / lazy 求值 / ExecutionBlocker / 子图
 - 数据类型为占位（LATENT/CONDITIONING/MODEL 非真实张量），节点间无法做张量级操作
 
