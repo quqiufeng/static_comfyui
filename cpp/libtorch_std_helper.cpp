@@ -2213,6 +2213,12 @@ void* torch_std_safetensors_merge(void* a, void* b, int mode,
         }
         int n_prefix = (int)std::min(prefixes.size(), ratios.size());
 
+        // strip_prefix 支持逗号分隔的多个候选（任一匹配即可合并，并按其后缀做前缀匹配）
+        std::vector<std::string> strips;
+        for (auto& s : split_csv(strip_prefix)) {
+            if (!s.empty()) strips.push_back(s);
+        }
+
         auto find = [](STDict* d, const std::string& name) -> torch::Tensor* {
             for (int i = 0; i < d->count; i++) {
                 if (name == d->entries[i].name) return static_cast<torch::Tensor*>(d->entries[i].tensor);
@@ -2235,12 +2241,15 @@ void* torch_std_safetensors_merge(void* a, void* b, int mode,
 
                 std::string k_unet = name;
                 bool mergeable     = true;
-                if (!sp.empty()) {
-                    size_t pos = name.find(sp);
-                    if (pos == std::string::npos) {
-                        mergeable = false;
-                    } else {
-                        k_unet = name.substr(pos + sp.size());
+                if (!strips.empty()) {
+                    mergeable = false;
+                    for (auto& s : strips) {
+                        size_t pos = name.find(s);
+                        if (pos != std::string::npos) {
+                            k_unet    = name.substr(pos + s.size());
+                            mergeable = true;
+                            break;
+                        }
                     }
                 }
 

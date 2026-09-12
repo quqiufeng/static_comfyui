@@ -133,8 +133,8 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 > **对齐度说明（重要）**：节点**名称**已 100% 对齐，但**行为**分三类：
 >
 > - **真实实现**（有实际语义）：模型加载、采样、VAE、LoRA、ControlNet、IPAdapter、图像算子、`LatentUpscaleBy`、`LoadLatent/SaveLatent`、`CLIPSetLastLayer`（clip_skip）、`ModelSamplingFlux/SD3/AuraFlow`（flow_shift）、`ModelComputeDtype`（wtype）、`ModelAttentionBackend`（flash_attn）、`LatentRotate/Flip/Composite/Blend`、`RepeatLatentBatch/LatentFromBatch/SetLatentNoiseMask`、`RescaleCFG`、`VideoLinearCFGGuidance/VideoTriangleCFGGuidance`、`ModelSamplingContinuousEDM/ContinuousV`（sigma 区间，改 sd.cpp patch）
-> - **libtorch helper 覆盖**（sd.cpp 无 C API，但可用权重级张量操作实现）：`ModelMerge*`（20 变体，safetensors 权重合并后加载）、`CheckpointSave`/`VAESave`/`CLIPSave`/`ModelSave`/`ImageOnlyCheckpointSave`（权重导出）—— 依赖可选库 `libcomfycli_torch.so`（缺失时相关节点不可用，其余功能不受影响）
-> - **后端能力边界内不可实现**（sd.cpp 无对应 C API，且非纯权重操作）：Conditioning 区域/掩码变体、`CLIPMerge*`（当前透传）、`GLIGEN*`、`StyleModel*`、`ModelNoiseScale`、`SVD_img2vid_Conditioning` —— 这些仅保证工作流可加载运行，透传语义与 ComfyUI 不同
+> - **libtorch helper 覆盖**（sd.cpp 无 C API，但可用权重级张量操作实现）：`ModelMerge*`（20 变体）、`CLIPMerge*`（3 变体，合并 CLIP 权重段）、`CheckpointSave`/`VAESave`/`CLIPSave`/`ModelSave`/`ImageOnlyCheckpointSave`（权重导出）—— 依赖可选库 `libcomfycli_torch.so`（缺失时相关节点不可用，其余功能不受影响）
+> - **后端能力边界内不可实现**（sd.cpp 无对应 C API，且非纯权重操作）：Conditioning 区域/掩码变体、`GLIGEN*`、`StyleModel*`、`ModelNoiseScale`、`SVD_img2vid_Conditioning` —— 这些仅保证工作流可加载运行，透传语义与 ComfyUI 不同
 > - **部分映射**：`ModelAttentionBackend` 仅 `flash_attn` 有语义；`ModelSamplingContinuousEDM/ContinuousV` 仅对使用 sigma 区间的调度器（`exponential`/`karras` 等）生效，`discrete` 用模型内置 sigma 表、天然忽略区间
 >
 > 即"能跑通的工作流范围"取决于 sd.cpp 的能力边界；核心出图链路（txt2img / img2img / inpainting / ControlNet / HiRes / LoRA / IPAdapter）是真实可用的。
@@ -208,7 +208,7 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 
 | 节点 | 输出 | 说明 |
 |------|------|------|
-| `CLIPMergeSimple` / `CLIPMergeAdd` / `CLIPMergeSubtract` | `CLIP` | 透传（sd.cpp 单 CLIP） |
+| `CLIPMergeSimple` / `CLIPMergeAdd` / `CLIPMergeSubtract` | `CLIP` | 真实实现（libtorch helper 合并 CLIP 权重段） |
 | `LoraLoaderBypass` / `LoraLoaderBypassModelOnly` | `MODEL` | 等价 LoRA 加载 |
 
 ### 采样 / 模型配置

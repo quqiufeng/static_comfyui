@@ -1297,20 +1297,12 @@ register_node("PreviewAny", "Preview Any",
               "preview_any", ("*",), True)
 
 
-def clip_merge_passthrough(inputs):
-    # sd.cpp 只加载一份 CLIP，CLIP 合并无法在后端实现 → 透传 clip1
-    c = dict_get(inputs, "clip1")
-    if c is None:
-        return (None,)
-    return (c,)
-
-
 register_node("CLIPMergeSimple", "Merge CLIP (Simple)",
-              "clip_merge_passthrough", ("CLIP",), False)
+              "clip_merge_simple", ("CLIP",), False)
 register_node("CLIPMergeAdd", "Merge CLIP (Add)",
-              "clip_merge_passthrough", ("CLIP",), False)
+              "clip_merge_add", ("CLIP",), False)
 register_node("CLIPMergeSubtract", "Merge CLIP (Subtract)",
-              "clip_merge_passthrough", ("CLIP",), False)
+              "clip_merge_subtract", ("CLIP",), False)
 
 
 def model_passthrough(inputs):
@@ -1614,6 +1606,35 @@ def model_merge_blocks(inputs):
     return merge_models(m1.model_path, m2.model_path, 0, br.prefixes, br.ratios, br.default_ratio, "diffusion_model.")
 
 
+def clip_merge_simple(inputs):
+    c1: SDPipelineHandle = dict_get(inputs, "clip1")
+    c2: SDPipelineHandle = dict_get(inputs, "clip2")
+    if c1 is None or c2 is None:
+        return (None,)
+    ratio = get_float(inputs, "ratio", 1.0)
+    return merge_models(c1.model_path, c2.model_path, 0, "", "", ratio,
+                        "conditioner.embedders.,cond_stage_model.,text_encoders.")
+
+
+def clip_merge_add(inputs):
+    c1: SDPipelineHandle = dict_get(inputs, "clip1")
+    c2: SDPipelineHandle = dict_get(inputs, "clip2")
+    if c1 is None or c2 is None:
+        return (None,)
+    return merge_models(c1.model_path, c2.model_path, 1, "", "", 0.0,
+                        "conditioner.embedders.,cond_stage_model.,text_encoders.")
+
+
+def clip_merge_subtract(inputs):
+    c1: SDPipelineHandle = dict_get(inputs, "clip1")
+    c2: SDPipelineHandle = dict_get(inputs, "clip2")
+    if c1 is None or c2 is None:
+        return (None,)
+    multiplier = get_float(inputs, "multiplier", 1.0)
+    return merge_models(c1.model_path, c2.model_path, 2, "", "", multiplier,
+                        "conditioner.embedders.,cond_stage_model.,text_encoders.")
+
+
 register_node("ModelMergeSimple", "ModelMergeSimple", "model_merge_simple", ("MODEL",), False)
 register_node("ModelMergeBlocks", "ModelMergeBlocks", "model_merge_blocks", ("MODEL",), False)
 register_node("ModelMergeAdd", "ModelMergeAdd", "model_merge_add", ("MODEL",), False)
@@ -1808,8 +1829,12 @@ def call_node(class_type: str, inputs):
         return clip_loader(inputs)
     elif class_type == "LoraLoader" or class_type == "LoraLoaderModelOnly" or class_type == "LoraLoaderBypass" or class_type == "LoraLoaderBypassModelOnly":
         return lora_loader(inputs)
-    elif class_type == "CLIPMergeSimple" or class_type == "CLIPMergeAdd" or class_type == "CLIPMergeSubtract":
-        return clip_merge_passthrough(inputs)
+    elif class_type == "CLIPMergeSimple":
+        return clip_merge_simple(inputs)
+    elif class_type == "CLIPMergeAdd":
+        return clip_merge_add(inputs)
+    elif class_type == "CLIPMergeSubtract":
+        return clip_merge_subtract(inputs)
     elif class_type == "ModelSamplingFlux" or class_type == "ModelSamplingSD3" or class_type == "ModelSamplingAuraFlow":
         return model_sampling_flow(inputs)
     elif class_type == "ModelComputeDtype":
