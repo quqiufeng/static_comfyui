@@ -42,10 +42,10 @@
 - ESRGAN 保留为可选（`upscaler=model` + `upscaler_model`）
 
 仍待做：
-- **二次采样参数**：`hires_strength`/`hires_steps`/`scheduler`/`cfg` 默认值与自适应
-- **FreeU 默认值**：旧 sdxl_pipeline 曾记录 FreeU 导致过拟合，需重新标定
-- **VAE tiling 接缝**：高分辨率 tile 边界可能出现接缝，检查 overlap/tile_size
-- **bislerp**：ComfyUI 有 bislerp 更锐，sd.cpp 无对应插值模式
+- **二次采样参数**：`hires_strength`/`hires_steps`/`scheduler`/`cfg` 已对齐 backup.sh（0.35/45/…），如需更好需跑实验标定
+- **FreeU 默认值**：已对齐 backup.sh（b1=1.3/b2=1.4）；旧 sdxl_pipeline 曾记录过拟合，待复标
+- **VAE tiling 接缝**：参数已对齐（128/0.5），高分辨率 tile 边界若有接缝需查 sd.cpp tiling
+- **bislerp**：已实现（`upscaler=latent-bislerp`，对齐 ComfyUI `bislerp`）；默认仍 bicubic
 - **多步渐进放大** / **与 ComfyUI 同工作流质量对照**
 
 ## 已完成并验证
