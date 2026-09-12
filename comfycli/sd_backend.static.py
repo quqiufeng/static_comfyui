@@ -26,6 +26,8 @@ extern fn sd_pipeline_set_flow_shift(pipeline: ptr, shift: float) -> int from "s
 extern fn sd_pipeline_set_wtype(pipeline: ptr, wtype: int) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_flash_attn(pipeline: ptr, enabled: int) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_rescale_cfg(pipeline: ptr, enabled: int, multiplier: float) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_set_video_cfg(pipeline: ptr, enabled: int, mode: int, min_cfg: float) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_set_sigma_range(pipeline: ptr, enabled: int, sigma_min: float, sigma_max: float) -> int from "sdcpp_adapter"
 extern fn sd_rotate_image(input_path: str, output_path: str, degrees: int) -> int from "sdcpp_adapter"
 extern fn sd_flip_image(input_path: str, output_path: str, method: int) -> int from "sdcpp_adapter"
 extern fn sd_blend_images(path1: str, path2: str, output_path: str, factor: float) -> int from "sdcpp_adapter"
@@ -170,6 +172,14 @@ def sd_set_flash_attn(pipeline: ptr, enabled: bool) -> int:
 
 def sd_set_rescale_cfg(pipeline: ptr, multiplier: float) -> int:
     return sd_pipeline_set_rescale_cfg(pipeline, 1, multiplier)
+
+
+def sd_set_video_cfg(pipeline: ptr, mode: int, min_cfg: float) -> int:
+    return sd_pipeline_set_video_cfg(pipeline, 1, mode, min_cfg)
+
+
+def sd_set_sigma_range(pipeline: ptr, sigma_min: float, sigma_max: float) -> int:
+    return sd_pipeline_set_sigma_range(pipeline, 1, sigma_min, sigma_max)
 
 
 def sd_ensure_directory(path: str) -> int:

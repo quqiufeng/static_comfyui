@@ -1336,10 +1336,20 @@ register_node("ModelSamplingFlux", "ModelSamplingFlux",
               "model_sampling_flow", ("MODEL",), False)
 register_node("ModelSamplingSD3", "ModelSamplingSD3",
               "model_sampling_flow", ("MODEL",), False)
+def model_sampling_sigma_range(inputs):
+    m: SDPipelineHandle = dict_get(inputs, "model")
+    if m is None:
+        return (None,)
+    sigma_min = get_float(inputs, "sigma_min", 0.002)
+    sigma_max = get_float(inputs, "sigma_max", 120.0)
+    sd_set_sigma_range(m.pipeline, sigma_min, sigma_max)
+    return (m,)
+
+
 register_node("ModelSamplingContinuousEDM", "ModelSamplingContinuousEDM",
-              "model_passthrough", ("MODEL",), False)
+              "model_sampling_sigma_range", ("MODEL",), False)
 register_node("ModelSamplingContinuousV", "ModelSamplingContinuousV",
-              "model_passthrough", ("MODEL",), False)
+              "model_sampling_sigma_range", ("MODEL",), False)
 register_node("ModelSamplingAuraFlow", "ModelSamplingAuraFlow",
               "model_sampling_flow", ("MODEL",), False)
 register_node("ModelSamplingStableCascade", "ModelSamplingStableCascade",
@@ -1519,10 +1529,28 @@ register_node("SUPIRApply", "SUPIRApply",
               "conditioning_passthrough", ("CONDITIONING",), False)
 register_node("USOStyleReference", "USOStyleReference",
               "conditioning_passthrough", ("CONDITIONING",), False)
+def video_linear_cfg_guidance(inputs):
+    m: SDPipelineHandle = dict_get(inputs, "model")
+    if m is None:
+        return (None,)
+    min_cfg = get_float(inputs, "min_cfg", 1.0)
+    sd_set_video_cfg(m.pipeline, 0, min_cfg)
+    return (m,)
+
+
+def video_triangle_cfg_guidance(inputs):
+    m: SDPipelineHandle = dict_get(inputs, "model")
+    if m is None:
+        return (None,)
+    min_cfg = get_float(inputs, "min_cfg", 1.0)
+    sd_set_video_cfg(m.pipeline, 1, min_cfg)
+    return (m,)
+
+
 register_node("VideoLinearCFGGuidance", "VideoLinearCFGGuidance",
-              "model_passthrough", ("MODEL",), False)
+              "video_linear_cfg_guidance", ("MODEL",), False)
 register_node("VideoTriangleCFGGuidance", "VideoTriangleCFGGuidance",
-              "model_passthrough", ("MODEL",), False)
+              "video_triangle_cfg_guidance", ("MODEL",), False)
 
 
 def print_node_list():
@@ -1645,7 +1673,9 @@ def call_node(class_type: str, inputs):
         return model_attention_backend(inputs)
     elif class_type == "RescaleCFG":
         return rescale_cfg(inputs)
-    elif class_type == "ModelSamplingDiscrete" or class_type == "ModelSamplingContinuousEDM" or class_type == "ModelSamplingContinuousV" or class_type == "ModelSamplingStableCascade" or class_type == "ModelNoiseScale":
+    elif class_type == "ModelSamplingContinuousEDM" or class_type == "ModelSamplingContinuousV":
+        return model_sampling_sigma_range(inputs)
+    elif class_type == "ModelSamplingDiscrete" or class_type == "ModelSamplingStableCascade" or class_type == "ModelNoiseScale":
         return model_passthrough(inputs)
     elif class_type == "SaveLatent":
         return save_latent(inputs)
@@ -1665,8 +1695,10 @@ def call_node(class_type: str, inputs):
         return svd_img2vid_conditioning(inputs)
     elif class_type == "ConditioningSetAreaPercentageVideo" or class_type == "AnimaLLLiteApply" or class_type == "QwenImageDiffsynthControlnet" or class_type == "ZImageFunControlnet" or class_type == "WanUni3CControlnetApply" or class_type == "SUPIRApply" or class_type == "USOStyleReference":
         return conditioning_passthrough(inputs)
-    elif class_type == "VideoLinearCFGGuidance" or class_type == "VideoTriangleCFGGuidance":
-        return model_passthrough(inputs)
+    elif class_type == "VideoLinearCFGGuidance":
+        return video_linear_cfg_guidance(inputs)
+    elif class_type == "VideoTriangleCFGGuidance":
+        return video_triangle_cfg_guidance(inputs)
     elif class_type == "VAEDecodeTiled":
         return vae_decode(inputs)
     elif class_type == "ConditioningZeroOut":

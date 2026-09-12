@@ -1,8 +1,8 @@
 diff --git a/include/stable-diffusion.h b/include/stable-diffusion.h
-index cf69b48..7d45618 100644
+index cf69b48..c14b91d 100644
 --- a/include/stable-diffusion.h
 +++ b/include/stable-diffusion.h
-@@ -377,6 +377,31 @@ typedef struct {
+@@ -377,6 +377,43 @@ typedef struct {
      int custom_sigmas_count;
  } sd_hires_params_t;
  
@@ -31,10 +31,22 @@ index cf69b48..7d45618 100644
 +    float multiplier;
 +} sd_rescale_cfg_params_t;
 +
++typedef struct {
++    bool enabled;
++    int mode;  // 0 = linear, 1 = triangle
++    float min_cfg;
++} sd_video_cfg_params_t;
++
++typedef struct {
++    bool enabled;
++    float sigma_min;
++    float sigma_max;
++} sd_sigma_range_params_t;
++
  typedef struct {
      const sd_lora_t* loras;
      uint32_t lora_count;
-@@ -403,6 +428,10 @@ typedef struct {
+@@ -403,6 +440,12 @@ typedef struct {
      sd_tiling_params_t vae_tiling_params;
      sd_cache_params_t cache;
      sd_hires_params_t hires;
@@ -42,6 +54,8 @@ index cf69b48..7d45618 100644
 +    sd_sag_params_t sag;
 +    sd_dynamic_cfg_params_t dynamic_cfg;
 +    sd_rescale_cfg_params_t rescale_cfg;
++    sd_video_cfg_params_t video_cfg;
++    sd_sigma_range_params_t sigma_range;
      int qwen_image_layers;
      bool circular_x;
      bool circular_y;
@@ -165,7 +179,7 @@ index 6ab370c..47eee9a 100644
  
  bool is_unused_tensor(const std::string& name) {
 diff --git a/src/pipeline/diffusion_engine.cpp b/src/pipeline/diffusion_engine.cpp
-index 5d51e24..85d3fbb 100644
+index 5d51e24..19c6582 100644
 --- a/src/pipeline/diffusion_engine.cpp
 +++ b/src/pipeline/diffusion_engine.cpp
 @@ -26,6 +26,7 @@
@@ -219,10 +233,40 @@ index 5d51e24..85d3fbb 100644
          if (guided.pred.empty()) {
              return {};
          }
-@@ -2455,6 +2474,97 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2455,6 +2474,127 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
              return {};
          }
  
++        // VideoLinearCFGGuidance / VideoTriangleCFGGuidance — 本项目 patch
++        // ComfyUI 按 batch（视频帧）逐元素调整 CFG scale，这里直接覆盖 guided.pred。
++        if (this->video_cfg_enabled && !cond_out.empty() && !uncond_out.empty()) {
++            int64_t n   = cond_out.shape().empty() ? 1 : cond_out.shape()[0];
++            int64_t per = (n > 0) ? cond_out.numel() / n : cond_out.numel();
++            sd::Tensor<float> out = uncond_out;
++            for (int64_t b = 0; b < n; b++) {
++                float scale;
++                if (n == 1) {
++                    scale = this->video_cfg_min;
++                } else {
++                    float t = static_cast<float>(b) / static_cast<float>(n - 1);
++                    if (this->video_cfg_mode == 1) {
++                        float period = 1.0f;
++                        float tri    = 2.0f * std::abs(t / period - std::floor(t / period + 0.5f));
++                        scale        = tri * (step_cfg_scale - this->video_cfg_min) + this->video_cfg_min;
++                    } else {
++                        scale = this->video_cfg_min + (step_cfg_scale - this->video_cfg_min) * t;
++                    }
++                }
++                float* op       = out.data() + b * per;
++                const float* cp = cond_out.data() + b * per;
++                const float* up = uncond_out.data() + b * per;
++                for (int64_t i = 0; i < per; i++) {
++                    op[i] = up[i] + scale * (cp[i] - up[i]);
++                }
++            }
++            guided.pred = out;
++        }
++
 +        // SAG (Self-Attention Guidance) — 本项目 patch
 +        if (this->sag_enabled && !uncond_out.empty()) {
 +            guided.pred = guided.pred * this->sag_scale + uncond_out * (1.0f - this->sag_scale);
@@ -318,10 +362,10 @@ index 5d51e24..85d3fbb 100644
          sd::guidance::GuiderOutput output;
          output.pred = denoised;
 diff --git a/src/pipeline/diffusion_engine.h b/src/pipeline/diffusion_engine.h
-index 13cb6e8..beb45e9 100644
+index 13cb6e8..f01e6fe 100644
 --- a/src/pipeline/diffusion_engine.h
 +++ b/src/pipeline/diffusion_engine.h
-@@ -100,6 +100,27 @@ public:
+@@ -100,6 +100,32 @@ public:
      bool is_using_v_parameterization     = false;
      bool is_using_edm_v_parameterization = false;
  
@@ -346,14 +390,19 @@ index 13cb6e8..beb45e9 100644
 +    bool rescale_cfg_enabled    = false;
 +    float rescale_cfg_multiplier = 0.7f;
 +
++    // VideoLinearCFGGuidance / VideoTriangleCFGGuidance (ComfyUI comfy_extras/nodes_video_model.py)
++    bool video_cfg_enabled = false;
++    int video_cfg_mode     = 0;  // 0 = linear, 1 = triangle
++    float video_cfg_min    = 1.0f;
++
      std::shared_ptr<ModelManager> model_manager;
  
      enum class RunnerGroup { Core,
 diff --git a/src/pipeline/image.cpp b/src/pipeline/image.cpp
-index 294e5b0..9939924 100644
+index 294e5b0..b00a11c 100644
 --- a/src/pipeline/image.cpp
 +++ b/src/pipeline/image.cpp
-@@ -795,6 +795,29 @@ namespace sd::pipeline {
+@@ -795,6 +795,43 @@ namespace sd::pipeline {
              return false;
          sd->apply_circular_axes(sd_img_gen_params->circular_x, sd_img_gen_params->circular_y);
  
@@ -379,7 +428,53 @@ index 294e5b0..9939924 100644
 +        if (sd_img_gen_params->rescale_cfg.enabled) {
 +            sd->rescale_cfg_multiplier = sd_img_gen_params->rescale_cfg.multiplier;
 +        }
++        sd->video_cfg_enabled = sd_img_gen_params->video_cfg.enabled;
++        if (sd_img_gen_params->video_cfg.enabled) {
++            sd->video_cfg_mode = sd_img_gen_params->video_cfg.mode;
++            sd->video_cfg_min  = sd_img_gen_params->video_cfg.min_cfg;
++        }
++        // ModelSamplingContinuousEDM / ModelSamplingContinuousV（sigma 区间覆盖，须在 SamplePlan 之前）
++        if (sd->denoiser) {
++            if (sd_img_gen_params->sigma_range.enabled) {
++                sd->denoiser->set_sigma_range(sd_img_gen_params->sigma_range.sigma_min,
++                                              sd_img_gen_params->sigma_range.sigma_max);
++            } else {
++                sd->denoiser->set_sigma_range(-1.0f, -1.0f);
++            }
++        }
 +
          const RefImageParams ref_image_params = sd->resolve_ref_image_params(sd_img_gen_params->ref_image_args);
  
          ImageVaeAxesGuard axes_guard(sd, sd_img_gen_params, request);
+diff --git a/src/runtime/denoiser.hpp b/src/runtime/denoiser.hpp
+index ec89406..4647c82 100644
+--- a/src/runtime/denoiser.hpp
++++ b/src/runtime/denoiser.hpp
+@@ -1033,6 +1033,16 @@ struct LogitNormalScheduler : SigmaScheduler {
+ };
+ 
+ struct Denoiser {
++    // Optional sigma range override (ComfyUI ModelSamplingContinuousEDM / ModelSamplingContinuousV)
++    // 负数表示使用模型自带的 sigma 区间。
++    float sigma_min_override = -1.0f;
++    float sigma_max_override = -1.0f;
++
++    void set_sigma_range(float sigma_min, float sigma_max) {
++        sigma_min_override = sigma_min;
++        sigma_max_override = sigma_max;
++    }
++
+     virtual float sigma_min()                                                        = 0;
+     virtual float sigma_max()                                                        = 0;
+     virtual float sigma_to_t(float sigma)                                            = 0;
+@@ -1131,7 +1141,9 @@ struct Denoiser {
+                 scheduler = std::make_shared<DiscreteScheduler>();
+                 break;
+         }
+-        return scheduler->get_sigmas(n, sigma_min(), sigma_max(), bound_t_to_sigma);
++        float eff_sigma_min = this->sigma_min_override >= 0.0f ? this->sigma_min_override : this->sigma_min();
++        float eff_sigma_max = this->sigma_max_override >= 0.0f ? this->sigma_max_override : this->sigma_max();
++        return scheduler->get_sigmas(n, eff_sigma_min, eff_sigma_max, bound_t_to_sigma);
+     }
+ };
+ 

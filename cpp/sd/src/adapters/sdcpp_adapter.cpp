@@ -62,6 +62,16 @@ public:
     bool rescale_cfg_enabled   = false;
     float rescale_cfg_multiplier = 0.7f;
 
+    // Video CFG guidance
+    bool video_cfg_enabled = false;
+    int video_cfg_mode     = 0;
+    float video_cfg_min    = 1.0f;
+
+    // Sigma range override (ModelSamplingContinuousEDM/V)
+    bool sigma_range_enabled = false;
+    float sigma_range_min    = 0.0f;
+    float sigma_range_max    = 0.0f;
+
     ~Impl() {
         if (ctx) {
             free_sd_ctx(ctx);
@@ -326,6 +336,20 @@ void SDPipeline::set_rescale_cfg(bool enabled, float multiplier) {
     impl_->rescale_cfg_multiplier = multiplier;
 }
 
+void SDPipeline::set_video_cfg(bool enabled, int mode, float min_cfg) {
+    if (!impl_) return;
+    impl_->video_cfg_enabled = enabled;
+    impl_->video_cfg_mode    = mode;
+    impl_->video_cfg_min     = min_cfg;
+}
+
+void SDPipeline::set_sigma_range(bool enabled, float sigma_min, float sigma_max) {
+    if (!impl_) return;
+    impl_->sigma_range_enabled = enabled;
+    impl_->sigma_range_min     = sigma_min;
+    impl_->sigma_range_max     = sigma_max;
+}
+
 void SDPipeline::set_wtype(int wtype) {
     if (!impl_ || wtype < 0) return;
     impl_->config.wtype = wtype;
@@ -465,6 +489,20 @@ std::vector<Image> SDPipeline::generate(const ImageGenerationParams& params) {
     img_params.rescale_cfg.enabled = impl_->rescale_cfg_enabled;
     if (impl_->rescale_cfg_enabled) {
         img_params.rescale_cfg.multiplier = impl_->rescale_cfg_multiplier;
+    }
+
+    // Video CFG guidance
+    img_params.video_cfg.enabled = impl_->video_cfg_enabled;
+    if (impl_->video_cfg_enabled) {
+        img_params.video_cfg.mode    = impl_->video_cfg_mode;
+        img_params.video_cfg.min_cfg = impl_->video_cfg_min;
+    }
+
+    // Sigma range override
+    img_params.sigma_range.enabled = impl_->sigma_range_enabled;
+    if (impl_->sigma_range_enabled) {
+        img_params.sigma_range.sigma_min = impl_->sigma_range_min;
+        img_params.sigma_range.sigma_max = impl_->sigma_range_max;
     }
 
     // Native IP-Adapter (sd.cpp 原生实现)
@@ -1103,6 +1141,18 @@ int sd_pipeline_set_flash_attn(sd_pipeline_t pipeline, int enabled) {
 int sd_pipeline_set_rescale_cfg(sd_pipeline_t pipeline, int enabled, float multiplier) {
     if (!pipeline) return -1;
     static_cast<sd::SDPipeline*>(pipeline)->set_rescale_cfg(enabled != 0, multiplier);
+    return 0;
+}
+
+int sd_pipeline_set_video_cfg(sd_pipeline_t pipeline, int enabled, int mode, float min_cfg) {
+    if (!pipeline) return -1;
+    static_cast<sd::SDPipeline*>(pipeline)->set_video_cfg(enabled != 0, mode, min_cfg);
+    return 0;
+}
+
+int sd_pipeline_set_sigma_range(sd_pipeline_t pipeline, int enabled, float sigma_min, float sigma_max) {
+    if (!pipeline) return -1;
+    static_cast<sd::SDPipeline*>(pipeline)->set_sigma_range(enabled != 0, sigma_min, sigma_max);
     return 0;
 }
 

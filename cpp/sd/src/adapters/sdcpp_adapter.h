@@ -194,6 +194,12 @@ public:
     // RescaleCFG override (applied per sampling step)
     void set_rescale_cfg(bool enabled, float multiplier);
 
+    // Video CFG guidance override (per-batch CFG scale; mode 0=linear, 1=triangle)
+    void set_video_cfg(bool enabled, int mode, float min_cfg);
+
+    // Sigma range override (ModelSamplingContinuousEDM / ModelSamplingContinuousV)
+    void set_sigma_range(bool enabled, float sigma_min, float sigma_max);
+
 private:
     class Impl;
     std::unique_ptr<Impl> impl_;
@@ -422,6 +428,12 @@ int sd_pipeline_set_flash_attn(sd_pipeline_t pipeline, int enabled);
 
 /** Configure RescaleCFG (applied per sampling step). */
 int sd_pipeline_set_rescale_cfg(sd_pipeline_t pipeline, int enabled, float multiplier);
+
+/** Configure video CFG guidance (mode 0=linear, 1=triangle). */
+int sd_pipeline_set_video_cfg(sd_pipeline_t pipeline, int enabled, int mode, float min_cfg);
+
+/** Override sampling sigma range (ModelSamplingContinuousEDM/V). */
+int sd_pipeline_set_sigma_range(sd_pipeline_t pipeline, int enabled, float sigma_min, float sigma_max);
 
 /** Rotate an image by 90/180/270 degrees (counter-clockwise) and save as PNG. */
 int sd_rotate_image(const char* input_path, const char* output_path, int degrees);
