@@ -72,6 +72,10 @@ public:
     float sigma_range_min    = 0.0f;
     float sigma_range_max    = 0.0f;
 
+    // Area conditioning (sd.cpp patch)
+    std::vector<std::string> area_prompt_storage;
+    std::vector<sd_area_cond_t> area_conds;
+
     ~Impl() {
         if (ctx) {
             free_sd_ctx(ctx);
@@ -350,6 +354,61 @@ void SDPipeline::set_sigma_range(bool enabled, float sigma_min, float sigma_max)
     impl_->sigma_range_max     = sigma_max;
 }
 
+void SDPipeline::set_area_conds(const char* prompts_sep, const char* rects_csv, const char* strengths_csv) {
+    if (!impl_) return;
+    impl_->area_prompt_storage.clear();
+    impl_->area_conds.clear();
+    if (!prompts_sep || !*prompts_sep) return;
+
+    std::vector<std::string> ps;
+    {
+        std::string cur;
+        for (const char* p = prompts_sep; *p; p++) {
+            if (*p == '\n') {
+                ps.push_back(cur);
+                cur.clear();
+            } else {
+                cur += *p;
+            }
+        }
+        ps.push_back(cur);
+    }
+    auto split = [](const char* s) {
+        std::vector<std::string> o;
+        if (!s) return o;
+        std::string cur;
+        for (const char* p = s; *p; p++) {
+            if (*p == ',') {
+                o.push_back(cur);
+                cur.clear();
+            } else {
+                cur += *p;
+            }
+        }
+        o.push_back(cur);
+        return o;
+    };
+    std::vector<std::string> rects = split(rects_csv);
+    std::vector<std::string> strs  = split(strengths_csv);
+
+    impl_->area_prompt_storage.reserve(ps.size());
+    for (size_t i = 0; i < ps.size(); i++) {
+        impl_->area_prompt_storage.push_back(ps[i]);
+    }
+    for (size_t i = 0; i < impl_->area_prompt_storage.size(); i++) {
+        sd_area_cond_t ac{};
+        ac.prompt = impl_->area_prompt_storage[i].c_str();
+        if (i * 4 + 3 < rects.size()) {
+            ac.x = atoi(rects[i * 4 + 0].c_str());
+            ac.y = atoi(rects[i * 4 + 1].c_str());
+            ac.w = atoi(rects[i * 4 + 2].c_str());
+            ac.h = atoi(rects[i * 4 + 3].c_str());
+        }
+        ac.strength = (i < strs.size() && !strs[i].empty()) ? (float)atof(strs[i].c_str()) : 1.0f;
+        impl_->area_conds.push_back(ac);
+    }
+}
+
 void SDPipeline::set_wtype(int wtype) {
     if (!impl_ || wtype < 0) return;
     impl_->config.wtype = wtype;
@@ -504,6 +563,10 @@ std::vector<Image> SDPipeline::generate(const ImageGenerationParams& params) {
         img_params.sigma_range.sigma_min = impl_->sigma_range_min;
         img_params.sigma_range.sigma_max = impl_->sigma_range_max;
     }
+
+    // Area conditioning
+    img_params.area_conds      = impl_->area_conds.empty() ? nullptr : impl_->area_conds.data();
+    img_params.area_cond_count = (int)impl_->area_conds.size();
 
     // Native IP-Adapter (sd.cpp 原生实现)
     if (impl_->has_ip_adapter_image) {
@@ -1135,6 +1198,12 @@ int sd_pipeline_set_wtype(sd_pipeline_t pipeline, int wtype) {
 int sd_pipeline_set_flash_attn(sd_pipeline_t pipeline, int enabled) {
     if (!pipeline) return -1;
     static_cast<sd::SDPipeline*>(pipeline)->set_flash_attn(enabled != 0);
+    return 0;
+}
+
+int sd_pipeline_set_area_conds(sd_pipeline_t pipeline, const char* prompts_sep, const char* rects_csv, const char* strengths_csv) {
+    if (!pipeline) return -1;
+    static_cast<sd::SDPipeline*>(pipeline)->set_area_conds(prompts_sep, rects_csv, strengths_csv);
     return 0;
 }
 

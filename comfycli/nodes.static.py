@@ -1,4 +1,4 @@
-from sd_backend import sd_create, sd_free, sd_load, sd_load_ex, sd_load_lora, sd_generate_full, sd_ensure_directory, sd_set_ipadapter, sd_set_ipadapter_enabled, sd_set_init_image, sd_load_control_net, sd_set_control_image, SD_WTYPE_AUTO
+from sd_backend import sd_create, sd_free, sd_load, sd_load_ex, sd_load_lora, sd_generate_full, sd_ensure_directory, sd_set_ipadapter, sd_set_ipadapter_enabled, sd_set_init_image, sd_load_control_net, sd_set_control_image, sd_set_area_conds, SD_WTYPE_AUTO
 
 
 NODE_CLASS_MAPPINGS: dict = make_dict()
@@ -379,29 +379,22 @@ def apply_latent_extras(model: SDPipelineHandle, inputs, latent: LatentImage):
         sd_set_control_image(model.pipeline, cn_image, cn_strength)
 
 
-def torch_jit_path(name: str) -> str:
-    d = os_getenv("COMFYCLI_TORCH_DIR")
-    if str_length(d) == 0:
-        d = model_root()
-    return d + "/" + name
-
-
-def ksampler_torch(model: SDPipelineHandle, pos_c: Conditioning, neg_c: Conditioning,
-                   width: int, height: int, opts, output_dir: str, output_path: str) -> int:
-    pos_text = ""
+def collect_area_conds(c: Conditioning, width: int, height: int) -> list:
+    # 返回 [base_text, area_prompts(\n 分隔), area_rects(CSV), area_strengths(CSV)]
+    base_text = ""
     area_prompts = ""
     area_rects = ""
     area_strengths = ""
-    first_area = True
+    first = True
     i = 0
-    while i < list_length(pos_c.entries):
-        e: CondEntry = pos_c.entries[i]
+    while i < list_length(c.entries):
+        e: CondEntry = c.entries[i]
         if e.area_w > 0 and e.area_h > 0:
-            if not first_area:
+            if not first:
                 area_prompts = area_prompts + "\n"
                 area_rects = area_rects + ","
                 area_strengths = area_strengths + ","
-            first_area = False
+            first = False
             area_prompts = area_prompts + e.text
             ax = e.area_x
             ay = e.area_y
@@ -415,21 +408,9 @@ def ksampler_torch(model: SDPipelineHandle, pos_c: Conditioning, neg_c: Conditio
             area_rects = area_rects + string_of_int(ax) + "," + string_of_int(ay) + "," + string_of_int(aw) + "," + string_of_int(ah)
             area_strengths = area_strengths + format_float(e.strength, 4)
         else:
-            pos_text = merge_conditioning_text(pos_text, e.text)
+            base_text = merge_conditioning_text(base_text, e.text)
         i = i + 1
-
-    rc = sd_ensure_directory(output_dir)
-    if rc != 0:
-        print("torch: failed to create output dir: " + output_dir)
-        return -1
-
-    return torch_std_sdxl_generate_areas_paths(
-        model.model_path,
-        torch_jit_path("clip_l_jit.pt"), torch_jit_path("clip_g_jit.pt"), torch_jit_path("vae_jit.pt"),
-        torch_jit_path("clip_l_vocab.json"), torch_jit_path("clip_l_merges.txt"),
-        pos_text, cond_text(neg_c), width, height,
-        dict_get(opts, "steps"), dict_get(opts, "cfg"), dict_get(opts, "sampler_name"),
-        dict_get(opts, "seed"), area_prompts, area_rects, area_strengths, output_path)
+    return [base_text, area_prompts, area_rects, area_strengths]
 
 
 def ksampler(inputs):
@@ -452,15 +433,14 @@ def ksampler(inputs):
     opts = parse_sampler_opts(inputs)
     out = sampler_output(inputs)
 
-    # 带区域条件的正向 → 走 torch 管线（sd.cpp C API 无区域条件能力）
+    # 区域条件：base + 各 area 交给 sd.cpp/ggml 按区合成（保持优化推理路径）
     if cond_has_area(pos_c):
-        rc = ksampler_torch(model, pos_c, neg_c, width, height, opts, out[0], out[1])
-        if rc != 0:
-            print("torch generate failed, rc=" + string_of_int(rc))
-            return (None,)
-        return (out[1],)
-
-    prompt = cond_text(pos_c)
+        ar = collect_area_conds(pos_c, width, height)
+        sd_set_area_conds(model.pipeline, ar[1], ar[2], ar[3])
+        prompt = ar[0]
+    else:
+        sd_set_area_conds(model.pipeline, "", "", "")
+        prompt = cond_text(pos_c)
     negative_prompt = cond_text(neg_c)
 
     apply_latent_extras(model, inputs, latent)

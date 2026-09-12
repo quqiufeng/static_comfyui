@@ -191,6 +191,9 @@ public:
     // Enable diffusion flash attention (requires reload)
     void set_flash_attn(bool enabled);
 
+    // Area conditioning (sd.cpp patch); prompts separated by '\n', rects/strengths CSV
+    void set_area_conds(const char* prompts_sep, const char* rects_csv, const char* strengths_csv);
+
     // RescaleCFG override (applied per sampling step)
     void set_rescale_cfg(bool enabled, float multiplier);
 
@@ -425,6 +428,9 @@ int sd_pipeline_set_wtype(sd_pipeline_t pipeline, int wtype);
 
 /** Enable/disable diffusion flash attention (reloads the context). */
 int sd_pipeline_set_flash_attn(sd_pipeline_t pipeline, int enabled);
+
+/** Configure area conditioning (prompts separated by '\n', rects/strengths CSV). */
+int sd_pipeline_set_area_conds(sd_pipeline_t pipeline, const char* prompts_sep, const char* rects_csv, const char* strengths_csv);
 
 /** Configure RescaleCFG (applied per sampling step). */
 int sd_pipeline_set_rescale_cfg(sd_pipeline_t pipeline, int enabled, float multiplier);

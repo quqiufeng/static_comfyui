@@ -1,8 +1,8 @@
 diff --git a/include/stable-diffusion.h b/include/stable-diffusion.h
-index cf69b48..c14b91d 100644
+index cf69b48..2af4685 100644
 --- a/include/stable-diffusion.h
 +++ b/include/stable-diffusion.h
-@@ -377,6 +377,43 @@ typedef struct {
+@@ -377,6 +377,52 @@ typedef struct {
      int custom_sigmas_count;
  } sd_hires_params_t;
  
@@ -43,10 +43,19 @@ index cf69b48..c14b91d 100644
 +    float sigma_max;
 +} sd_sigma_range_params_t;
 +
++typedef struct {
++    const char* prompt;
++    int x;
++    int y;
++    int w;
++    int h;
++    float strength;
++} sd_area_cond_t;
++
  typedef struct {
      const sd_lora_t* loras;
      uint32_t lora_count;
-@@ -403,6 +440,12 @@ typedef struct {
+@@ -403,6 +449,14 @@ typedef struct {
      sd_tiling_params_t vae_tiling_params;
      sd_cache_params_t cache;
      sd_hires_params_t hires;
@@ -56,6 +65,8 @@ index cf69b48..c14b91d 100644
 +    sd_rescale_cfg_params_t rescale_cfg;
 +    sd_video_cfg_params_t video_cfg;
 +    sd_sigma_range_params_t sigma_range;
++    const sd_area_cond_t* area_conds;
++    int area_cond_count;
      int qwen_image_layers;
      bool circular_x;
      bool circular_y;
@@ -179,7 +190,7 @@ index 6ab370c..47eee9a 100644
  
  bool is_unused_tensor(const std::string& name) {
 diff --git a/src/pipeline/diffusion_engine.cpp b/src/pipeline/diffusion_engine.cpp
-index 5d51e24..19c6582 100644
+index 5d51e24..18f8632 100644
 --- a/src/pipeline/diffusion_engine.cpp
 +++ b/src/pipeline/diffusion_engine.cpp
 @@ -26,6 +26,7 @@
@@ -221,7 +232,43 @@ index 5d51e24..19c6582 100644
              sd::Tensor<float> cached_output;
              if (step_cache.before_condition(&condition, noised_input, &cached_output)) {
                  return std::move(cached_output);
-@@ -2434,7 +2450,10 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2395,6 +2411,35 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+             return {};
+         }
+ 
++        // 区域条件合成（本项目 patch）— 复刻 ComfyUI calc_cond_batch 的按区叠加
++        if (!this->area_conditions.empty()) {
++            const auto& cs = cond_out.shape();
++            if (cs.size() == 4) {
++                int64_t B = cs[0], C = cs[1], H = cs[2], W = cs[3];
++                for (auto& ac : this->area_conditions) {
++                    sd::Tensor<float> aout = run_condition(ac.cond,
++                                                           ac.cond.c_concat.empty() ? nullptr : &ac.cond.c_concat);
++                    if (aout.empty()) continue;
++                    int x0 = std::max(0, ac.x);
++                    int y0 = std::max(0, ac.y);
++                    int x1 = std::min((int)W, ac.x + ac.w);
++                    int y1 = std::min((int)H, ac.y + ac.h);
++                    if (x1 <= x0 || y1 <= y0) continue;
++                    float w = ac.strength;
++                    for (int64_t b = 0; b < B; b++) {
++                        for (int64_t c = 0; c < C; c++) {
++                            for (int yy = y0; yy < y1; yy++) {
++                                for (int xx = x0; xx < x1; xx++) {
++                                    int64_t idx           = ((b * C + c) * H + yy) * W + xx;
++                                    cond_out.data()[idx] = (cond_out.data()[idx] + aout.data()[idx] * w) / (1.0f + w);
++                                }
++                            }
++                        }
++                    }
++                }
++            }
++        }
++
+         if (!uncond.empty()) {
+             if (!step_cache.is_step_skipped()) {
+                 compute_sample_controls(control_image,
+@@ -2434,7 +2479,10 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
          guidance_input.pred_uncond     = uncond_out.empty() ? nullptr : &uncond_out;
          guidance_input.pred_img_uncond = img_uncond_out.empty() ? nullptr : &img_uncond_out;
  
@@ -233,7 +280,7 @@ index 5d51e24..19c6582 100644
          if (guided.pred.empty()) {
              return {};
          }
-@@ -2455,6 +2474,127 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2455,6 +2503,127 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
              return {};
          }
  
@@ -362,10 +409,18 @@ index 5d51e24..19c6582 100644
          sd::guidance::GuiderOutput output;
          output.pred = denoised;
 diff --git a/src/pipeline/diffusion_engine.h b/src/pipeline/diffusion_engine.h
-index 13cb6e8..f01e6fe 100644
+index 13cb6e8..0120529 100644
 --- a/src/pipeline/diffusion_engine.h
 +++ b/src/pipeline/diffusion_engine.h
-@@ -100,6 +100,32 @@ public:
+@@ -12,6 +12,7 @@
+ #include <string>
+ #include <vector>
+ 
++#include "conditioning/conditioner.hpp"
+ #include "core/ggml_extend_backend.h"
+ #include "core/ggml_graph_cut.h"
+ #include "core/tensor.hpp"
+@@ -100,6 +101,43 @@ public:
      bool is_using_v_parameterization     = false;
      bool is_using_edm_v_parameterization = false;
  
@@ -395,14 +450,52 @@ index 13cb6e8..f01e6fe 100644
 +    int video_cfg_mode     = 0;  // 0 = linear, 1 = triangle
 +    float video_cfg_min    = 1.0f;
 +
++    // 区域条件（本项目 patch，复刻 ComfyUI calc_cond_batch）
++    struct AreaCondition {
++        SDCondition cond;
++        int x = 0;
++        int y = 0;
++        int w = 0;
++        int h = 0;
++        float strength = 1.0f;
++    };
++    std::vector<AreaCondition> area_conditions;
++
      std::shared_ptr<ModelManager> model_manager;
  
      enum class RunnerGroup { Core,
 diff --git a/src/pipeline/image.cpp b/src/pipeline/image.cpp
-index 294e5b0..b00a11c 100644
+index 294e5b0..a8630ce 100644
 --- a/src/pipeline/image.cpp
 +++ b/src/pipeline/image.cpp
-@@ -795,6 +795,43 @@ namespace sd::pipeline {
+@@ -503,6 +503,26 @@ namespace sd::pipeline {
+         int64_t t1 = ggml_time_ms();
+         LOG_INFO("get_learned_condition completed, taking %.2fs", (t1 - prepare_start_ms) * 1.0f / 1000);
+ 
++        // 区域条件编码（本项目 patch）
++        sd->area_conditions.clear();
++        if (sd_img_gen_params->area_conds != nullptr && sd_img_gen_params->area_cond_count > 0) {
++            for (int i = 0; i < sd_img_gen_params->area_cond_count; i++) {
++                const sd_area_cond_t& ac = sd_img_gen_params->area_conds[i];
++                if (ac.prompt == nullptr) continue;
++                condition_params.text            = ac.prompt;
++                condition_params.zero_out_masked = false;
++                StableDiffusionGGML::AreaCondition a;
++                a.cond     = sd->cond_stage_model->get_learned_condition(sd->n_threads, condition_params);
++                a.x        = ac.x;
++                a.y        = ac.y;
++                a.w        = ac.w;
++                a.h        = ac.h;
++                a.strength = ac.strength;
++                sd->area_conditions.push_back(std::move(a));
++            }
++            LOG_INFO("area conditions: %d", sd_img_gen_params->area_cond_count);
++        }
++
+         ImageGenerationEmbeds embeds;
+         embeds.img_uncond = std::move(img_uncond);
+         embeds.cond       = std::move(cond);
+@@ -795,6 +815,43 @@ namespace sd::pipeline {
              return false;
          sd->apply_circular_axes(sd_img_gen_params->circular_x, sd_img_gen_params->circular_y);
  
