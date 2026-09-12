@@ -870,12 +870,15 @@ register_node("PreviewImage", "Preview Image",
 
 
 def clip_set_last_layer(inputs):
-    clip = dict_get(inputs, "clip")
-    layer = get_int(inputs, "stop_at_clip_layer", -1)
-    # The backend currently always uses the default CLIP layer;
-    # this node is provided for workflow compatibility.
+    clip: SDPipelineHandle = dict_get(inputs, "clip")
     if clip is None:
         return (None,)
+    layer = get_int(inputs, "stop_at_clip_layer", -1)
+    # ComfyUI 的 stop_at_clip_layer 为负数（如 -2）；sd.cpp 的 clip_skip 为正数
+    skip = -layer
+    if skip < 0:
+        skip = 1
+    sd_set_clip_skip(clip.pipeline, skip)
     return (clip,)
 
 
@@ -1067,30 +1070,116 @@ register_node("ConditioningSetTimestepRange", "ConditioningSetTimestepRange",
               "conditioning_passthrough", ("CONDITIONING",), False)
 
 
-def latent_passthrough(inputs):
-    # 潜空间变换在 sd.cpp 后端无对应能力，透传原 latent
-    l: LatentImage = dict_get(inputs, "samples")
-    if l is None:
-        l = dict_get(inputs, "samples1")
-    if l is None:
+def latent_rotate(inputs):
+    latent: LatentImage = dict_get(inputs, "samples")
+    if latent is None:
         return (None,)
-    return (l,)
+    rotation = string_to_int(get_str(inputs, "rotation", "0"))
+    w = latent.width
+    h = latent.height
+    if rotation == 90 or rotation == 270:
+        w = latent.height
+        h = latent.width
+    image_path = latent.image_path
+    if image_path != "":
+        out = "/tmp/comfycli_rotate.png"
+        if sd_rotate_image(image_path, out, rotation) == 0:
+            image_path = out
+    return (LatentImage(w, h, latent.batch_size, image_path, latent.mask_path),)
 
 
-register_node("LatentRotate", "LatentRotate",
-              "latent_passthrough", ("LATENT",), False)
-register_node("LatentFlip", "LatentFlip",
-              "latent_passthrough", ("LATENT",), False)
-register_node("LatentComposite", "LatentComposite",
-              "latent_passthrough", ("LATENT",), False)
-register_node("LatentBlend", "LatentBlend",
-              "latent_passthrough", ("LATENT",), False)
+register_node("LatentRotate", "LatentRotate", "latent_rotate", ("LATENT",), False)
+
+
+def latent_flip(inputs):
+    latent: LatentImage = dict_get(inputs, "samples")
+    if latent is None:
+        return (None,)
+    method = 0
+    if get_str(inputs, "flip_method", "x") == "y":
+        method = 1
+    image_path = latent.image_path
+    if image_path != "":
+        out = "/tmp/comfycli_flip.png"
+        if sd_flip_image(image_path, out, method) == 0:
+            image_path = out
+    return (LatentImage(latent.width, latent.height, latent.batch_size, image_path, latent.mask_path),)
+
+
+register_node("LatentFlip", "LatentFlip", "latent_flip", ("LATENT",), False)
+
+
+def latent_composite(inputs):
+    to_lat: LatentImage = dict_get(inputs, "samples_to")
+    from_lat: LatentImage = dict_get(inputs, "samples_from")
+    if to_lat is None or from_lat is None:
+        return (None,)
+    if to_lat.image_path != "" and from_lat.image_path != "":
+        out = "/tmp/comfycli_latcomposite.png"
+        if sd_composite_masked(to_lat.image_path, from_lat.image_path, "", out,
+                               get_int(inputs, "x", 0), get_int(inputs, "y", 0)) == 0:
+            return (LatentImage(to_lat.width, to_lat.height, to_lat.batch_size, out, to_lat.mask_path),)
+    return (to_lat,)
+
+
+register_node("LatentComposite", "LatentComposite", "latent_composite", ("LATENT",), False)
+
+
+def latent_blend(inputs):
+    l1: LatentImage = dict_get(inputs, "samples1")
+    l2: LatentImage = dict_get(inputs, "samples2")
+    if l1 is None or l2 is None:
+        return (None,)
+    factor = get_float(inputs, "blend_factor", 0.5)
+    if l1.image_path != "" and l2.image_path != "":
+        out = "/tmp/comfycli_latblend.png"
+        if sd_blend_images(l1.image_path, l2.image_path, out, factor) == 0:
+            return (LatentImage(l1.width, l1.height, l1.batch_size, out, l1.mask_path),)
+    return (l1,)
+
+
+register_node("LatentBlend", "LatentBlend", "latent_blend", ("LATENT",), False)
+
+
+def repeat_latent_batch(inputs):
+    latent: LatentImage = dict_get(inputs, "samples")
+    if latent is None:
+        return (None,)
+    amount = get_int(inputs, "amount", 1)
+    return (LatentImage(latent.width, latent.height, latent.batch_size * amount,
+                        latent.image_path, latent.mask_path),)
+
+
 register_node("RepeatLatentBatch", "RepeatLatentBatch",
-              "latent_passthrough", ("LATENT",), False)
+              "repeat_latent_batch", ("LATENT",), False)
+
+
+def latent_from_batch(inputs):
+    latent: LatentImage = dict_get(inputs, "samples")
+    if latent is None:
+        return (None,)
+    length = get_int(inputs, "length", 1)
+    return (LatentImage(latent.width, latent.height, length,
+                        latent.image_path, latent.mask_path),)
+
+
 register_node("LatentFromBatch", "LatentFromBatch",
-              "latent_passthrough", ("LATENT",), False)
+              "latent_from_batch", ("LATENT",), False)
+
+
+def set_latent_noise_mask(inputs):
+    latent: LatentImage = dict_get(inputs, "samples")
+    if latent is None:
+        return (None,)
+    mask = dict_get(inputs, "mask")
+    if mask is None:
+        mask = ""
+    return (LatentImage(latent.width, latent.height, latent.batch_size,
+                        latent.image_path, mask),)
+
+
 register_node("SetLatentNoiseMask", "SetLatentNoiseMask",
-              "latent_passthrough", ("LATENT",), False)
+              "set_latent_noise_mask", ("LATENT",), False)
 
 
 def style_model_loader(inputs):
@@ -1228,24 +1317,54 @@ def model_passthrough(inputs):
     return (m,)
 
 
+def model_sampling_flow(inputs):
+    # Flux/SD3/AuraFlow 的 shift 参数 → sd.cpp flow_shift
+    m: SDPipelineHandle = dict_get(inputs, "model")
+    if m is None:
+        return (None,)
+    shift = get_float(inputs, "shift", 0.0)
+    if shift <= 0.0:
+        shift = get_float(inputs, "max_shift", 0.0)
+    if shift > 0.0:
+        sd_set_flow_shift(m.pipeline, shift)
+    return (m,)
+
+
 register_node("ModelSamplingDiscrete", "ModelSamplingDiscrete",
               "model_passthrough", ("MODEL",), False)
 register_node("ModelSamplingFlux", "ModelSamplingFlux",
-              "model_passthrough", ("MODEL",), False)
+              "model_sampling_flow", ("MODEL",), False)
 register_node("ModelSamplingSD3", "ModelSamplingSD3",
-              "model_passthrough", ("MODEL",), False)
+              "model_sampling_flow", ("MODEL",), False)
 register_node("ModelSamplingContinuousEDM", "ModelSamplingContinuousEDM",
               "model_passthrough", ("MODEL",), False)
 register_node("ModelSamplingContinuousV", "ModelSamplingContinuousV",
               "model_passthrough", ("MODEL",), False)
 register_node("ModelSamplingAuraFlow", "ModelSamplingAuraFlow",
-              "model_passthrough", ("MODEL",), False)
+              "model_sampling_flow", ("MODEL",), False)
 register_node("ModelSamplingStableCascade", "ModelSamplingStableCascade",
               "model_passthrough", ("MODEL",), False)
 register_node("RescaleCFG", "RescaleCFG",
               "model_passthrough", ("MODEL",), False)
+def model_compute_dtype(inputs):
+    m: SDPipelineHandle = dict_get(inputs, "model")
+    if m is None:
+        return (None,)
+    dtype = get_str(inputs, "dtype", "default")
+    wtype = -1
+    if dtype == "fp32":
+        wtype = 0
+    elif dtype == "fp16":
+        wtype = 1
+    elif dtype == "bf16":
+        wtype = 30
+    if wtype >= 0:
+        sd_set_wtype(m.pipeline, wtype)
+    return (m,)
+
+
 register_node("ModelComputeDtype", "ModelComputeDtype",
-              "model_passthrough", ("MODEL",), False)
+              "model_compute_dtype", ("MODEL",), False)
 register_node("ModelAttentionBackend", "ModelAttentionBackend",
               "model_passthrough", ("MODEL",), False)
 register_node("ModelNoiseScale", "ModelNoiseScale",
@@ -1497,7 +1616,11 @@ def call_node(class_type: str, inputs):
         return lora_loader(inputs)
     elif class_type == "CLIPMergeSimple" or class_type == "CLIPMergeAdd" or class_type == "CLIPMergeSubtract":
         return clip_merge_passthrough(inputs)
-    elif class_type == "ModelSamplingDiscrete" or class_type == "ModelSamplingFlux" or class_type == "ModelSamplingSD3" or class_type == "ModelSamplingContinuousEDM" or class_type == "ModelSamplingContinuousV" or class_type == "ModelSamplingAuraFlow" or class_type == "ModelSamplingStableCascade" or class_type == "RescaleCFG" or class_type == "ModelComputeDtype" or class_type == "ModelAttentionBackend" or class_type == "ModelNoiseScale":
+    elif class_type == "ModelSamplingFlux" or class_type == "ModelSamplingSD3" or class_type == "ModelSamplingAuraFlow":
+        return model_sampling_flow(inputs)
+    elif class_type == "ModelComputeDtype":
+        return model_compute_dtype(inputs)
+    elif class_type == "ModelSamplingDiscrete" or class_type == "ModelSamplingContinuousEDM" or class_type == "ModelSamplingContinuousV" or class_type == "ModelSamplingStableCascade" or class_type == "RescaleCFG" or class_type == "ModelAttentionBackend" or class_type == "ModelNoiseScale":
         return model_passthrough(inputs)
     elif class_type == "SaveLatent":
         return save_latent(inputs)
@@ -1537,8 +1660,20 @@ def call_node(class_type: str, inputs):
         return preview_any(inputs)
     elif class_type == "ConditioningSetArea" or class_type == "ConditioningSetAreaPercentage" or class_type == "ConditioningSetAreaStrength" or class_type == "ConditioningSetMask" or class_type == "ConditioningMultiply" or class_type == "ConditioningSetTimestepRange":
         return conditioning_passthrough(inputs)
-    elif class_type == "LatentRotate" or class_type == "LatentFlip" or class_type == "LatentComposite" or class_type == "LatentBlend" or class_type == "RepeatLatentBatch" or class_type == "LatentFromBatch" or class_type == "SetLatentNoiseMask":
-        return latent_passthrough(inputs)
+    elif class_type == "LatentRotate":
+        return latent_rotate(inputs)
+    elif class_type == "LatentFlip":
+        return latent_flip(inputs)
+    elif class_type == "LatentComposite":
+        return latent_composite(inputs)
+    elif class_type == "LatentBlend":
+        return latent_blend(inputs)
+    elif class_type == "RepeatLatentBatch":
+        return repeat_latent_batch(inputs)
+    elif class_type == "LatentFromBatch":
+        return latent_from_batch(inputs)
+    elif class_type == "SetLatentNoiseMask":
+        return set_latent_noise_mask(inputs)
     else:
         return (None,)
 

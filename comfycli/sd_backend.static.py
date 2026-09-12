@@ -21,6 +21,12 @@ extern fn sd_resize_image(input_path: str, output_path: str, width: int, height:
 extern fn sd_scale_image(input_path: str, output_path: str, scale_by: float) -> int from "sdcpp_adapter"
 extern fn sd_invert_image(input_path: str, output_path: str) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_get_model_version_name(pipeline: ptr) -> str from "sdcpp_adapter"
+extern fn sd_pipeline_set_clip_skip(pipeline: ptr, n: int) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_set_flow_shift(pipeline: ptr, shift: float) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_set_wtype(pipeline: ptr, wtype: int) -> int from "sdcpp_adapter"
+extern fn sd_rotate_image(input_path: str, output_path: str, degrees: int) -> int from "sdcpp_adapter"
+extern fn sd_flip_image(input_path: str, output_path: str, method: int) -> int from "sdcpp_adapter"
+extern fn sd_blend_images(path1: str, path2: str, output_path: str, factor: float) -> int from "sdcpp_adapter"
 extern fn sd_make_solid_image(output_path: str, width: int, height: int, r: int, g: int, b: int) -> int from "sdcpp_adapter"
 extern fn sd_pad_image(input_path: str, output_path: str, left: int, top: int, right: int, bottom: int, r: int, g: int, b: int) -> int from "sdcpp_adapter"
 extern fn sd_blur_image(input_path: str, output_path: str, sigma: float) -> int from "sdcpp_adapter"
@@ -140,6 +146,18 @@ def sd_set_batch_count(pipeline: ptr, n: int) -> int:
 
 def sd_get_model_version_name(pipeline: ptr) -> str:
     return sd_pipeline_get_model_version_name(pipeline)
+
+
+def sd_set_clip_skip(pipeline: ptr, n: int) -> int:
+    return sd_pipeline_set_clip_skip(pipeline, n)
+
+
+def sd_set_flow_shift(pipeline: ptr, shift: float) -> int:
+    return sd_pipeline_set_flow_shift(pipeline, shift)
+
+
+def sd_set_wtype(pipeline: ptr, wtype: int) -> int:
+    return sd_pipeline_set_wtype(pipeline, wtype)
 
 
 def sd_ensure_directory(path: str) -> int:

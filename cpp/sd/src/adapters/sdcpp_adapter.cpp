@@ -54,6 +54,10 @@ public:
 
     int batch_count = 1;
 
+    // Per-generation sampling overrides
+    int clip_skip = -1;
+    float flow_shift = 0.0f;
+
     ~Impl() {
         if (ctx) {
             free_sd_ctx(ctx);
@@ -302,6 +306,22 @@ void SDPipeline::set_batch_count(int n) {
     impl_->batch_count = n > 0 ? n : 1;
 }
 
+void SDPipeline::set_clip_skip(int n) {
+    if (!impl_) return;
+    impl_->clip_skip = n;
+}
+
+void SDPipeline::set_flow_shift(float shift) {
+    if (!impl_) return;
+    impl_->flow_shift = shift;
+}
+
+void SDPipeline::set_wtype(int wtype) {
+    if (!impl_ || wtype < 0) return;
+    impl_->config.wtype = wtype;
+    load(impl_->config);  // wtype 是加载期参数 → 重载
+}
+
 std::vector<Image> SDPipeline::generate(const ImageGenerationParams& params) {
     std::vector<Image> results;
     if (!impl_ || !impl_->ctx) {
@@ -325,7 +345,10 @@ std::vector<Image> SDPipeline::generate(const ImageGenerationParams& params) {
     img_params.negative_prompt = params.negative_prompt.c_str();
     img_params.width           = eff_w;
     img_params.height          = eff_h;
-    img_params.clip_skip       = params.clip_skip;
+    img_params.clip_skip       = impl_->clip_skip >= 0 ? impl_->clip_skip : params.clip_skip;
+    if (impl_->flow_shift > 0.0f) {
+        img_params.sample_params.flow_shift = impl_->flow_shift;
+    }
     img_params.seed            = params.seed;
     img_params.batch_count     = impl_->batch_count;
 
@@ -1030,6 +1053,24 @@ int sd_pipeline_set_batch_count(sd_pipeline_t pipeline, int n) {
     return 0;
 }
 
+int sd_pipeline_set_clip_skip(sd_pipeline_t pipeline, int n) {
+    if (!pipeline) return -1;
+    static_cast<sd::SDPipeline*>(pipeline)->set_clip_skip(n);
+    return 0;
+}
+
+int sd_pipeline_set_flow_shift(sd_pipeline_t pipeline, float shift) {
+    if (!pipeline) return -1;
+    static_cast<sd::SDPipeline*>(pipeline)->set_flow_shift(shift);
+    return 0;
+}
+
+int sd_pipeline_set_wtype(sd_pipeline_t pipeline, int wtype) {
+    if (!pipeline) return -1;
+    static_cast<sd::SDPipeline*>(pipeline)->set_wtype(wtype);
+    return 0;
+}
+
 const char* sd_pipeline_get_model_version_name(sd_pipeline_t pipeline) {
     static std::string name;  // CLI 单线程，缓存即可；返回空串而非 NULL
     name.clear();
@@ -1241,6 +1282,45 @@ int sd_crop_image(const char* input_path, const char* output_path,
     }
     cv::Mat out = img(cv::Rect(x, y, width, height)).clone();
     cv::Mat rgb;
+    cv::cvtColor(out, rgb, cv::COLOR_BGR2RGB);
+    if (!save_png(output_path, rgb.data, rgb.cols, rgb.rows, rgb.channels())) return -3;
+    return 0;
+}
+
+int sd_rotate_image(const char* input_path, const char* output_path, int degrees) {
+    if (!input_path || !output_path) return -1;
+    cv::Mat img = cv::imread(input_path, cv::IMREAD_COLOR);
+    if (img.empty()) return -2;
+    int d = ((degrees % 360) + 360) % 360;
+    cv::Mat out, rgb;
+    if (d == 90)       cv::rotate(img, out, cv::ROTATE_90_COUNTERCLOCKWISE);
+    else if (d == 180) cv::rotate(img, out, cv::ROTATE_180);
+    else if (d == 270) cv::rotate(img, out, cv::ROTATE_90_CLOCKWISE);
+    else               out = img;
+    cv::cvtColor(out, rgb, cv::COLOR_BGR2RGB);
+    if (!save_png(output_path, rgb.data, rgb.cols, rgb.rows, rgb.channels())) return -3;
+    return 0;
+}
+
+int sd_flip_image(const char* input_path, const char* output_path, int method) {
+    if (!input_path || !output_path) return -1;
+    cv::Mat img = cv::imread(input_path, cv::IMREAD_COLOR);
+    if (img.empty()) return -2;
+    cv::Mat out, rgb;
+    cv::flip(img, out, method == 0 ? 0 : 1);
+    cv::cvtColor(out, rgb, cv::COLOR_BGR2RGB);
+    if (!save_png(output_path, rgb.data, rgb.cols, rgb.rows, rgb.channels())) return -3;
+    return 0;
+}
+
+int sd_blend_images(const char* path1, const char* path2, const char* output_path, float factor) {
+    if (!path1 || !path2 || !output_path) return -1;
+    cv::Mat a = cv::imread(path1, cv::IMREAD_COLOR);
+    cv::Mat b = cv::imread(path2, cv::IMREAD_COLOR);
+    if (a.empty() || b.empty()) return -2;
+    cv::Mat b2, out, rgb;
+    cv::resize(b, b2, a.size());
+    cv::addWeighted(a, 1.0 - factor, b2, factor, 0.0, out);
     cv::cvtColor(out, rgb, cv::COLOR_BGR2RGB);
     if (!save_png(output_path, rgb.data, rgb.cols, rgb.rows, rgb.channels())) return -3;
     return 0;

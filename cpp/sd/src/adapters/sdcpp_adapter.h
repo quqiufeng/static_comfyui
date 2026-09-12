@@ -181,6 +181,13 @@ public:
     // Batch size for subsequent generate() calls (>= 1).
     void set_batch_count(int n);
 
+    // Per-generation sampling overrides
+    void set_clip_skip(int n);
+    void set_flow_shift(float shift);
+
+    // Model weight type override (requires reload); wtype < 0 keeps current
+    void set_wtype(int wtype);
+
 private:
     class Impl;
     std::unique_ptr<Impl> impl_;
@@ -396,6 +403,23 @@ int sd_pipeline_set_batch_count(sd_pipeline_t pipeline, int n);
 
 /** Return the model version name detected by sd.cpp (e.g. "SDXL"). NULL if unknown. */
 const char* sd_pipeline_get_model_version_name(sd_pipeline_t pipeline);
+
+/** Per-generation sampling overrides. */
+int sd_pipeline_set_clip_skip(sd_pipeline_t pipeline, int n);
+int sd_pipeline_set_flow_shift(sd_pipeline_t pipeline, float shift);
+
+/** Override model weight type (reloads the context). wtype < 0 keeps current. */
+int sd_pipeline_set_wtype(sd_pipeline_t pipeline, int wtype);
+
+/** Rotate an image by 90/180/270 degrees (counter-clockwise) and save as PNG. */
+int sd_rotate_image(const char* input_path, const char* output_path, int degrees);
+
+/** Flip an image: method 0 = vertical, 1 = horizontal. */
+int sd_flip_image(const char* input_path, const char* output_path, int method);
+
+/** Blend two images: out = a*(1-factor) + b*factor. */
+int sd_blend_images(const char* path1, const char* path2, const char* output_path,
+                    float factor);
 
 /**
  * Generate image with ADetailer face restoration post-processing.
