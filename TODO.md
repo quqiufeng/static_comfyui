@@ -32,15 +32,21 @@
 - `CLIPMerge*`：不同 CLIP 合并
 
 ## HiRes Fix 出图质量优化
-已修复（`23d9050`）：根因是**一直走 latent 插值放大**（`hires.model_path` 未设置 + `hires_upscaler` 默认 latent + sd.cpp 枚举串精确匹配 "Model" 而节点传 "model"）。现默认走 **2x_ESRGAN 模型放大**，后处理默认关闭。
+**原理**：latent 放大 + 二次采样（denoise<1），即 ComfyUI 的 `LatentUpscale`（bicubic/bislerp）+ `KSampler(denoise)`；`backup.sh` 同原理（低分构图 → latent 放大 refine，基础分辨率越高、放大倍数越小越好）。
+
+已修（`23d9050` + `c950631`）：
+- 修复 `hires.model_path` 从未设置 / 枚举串大小写不匹配（"Model" vs "model"）
+- 默认改回 **latent-bicubic**（sd.cpp 的 `LATENT` 实为 Bilinear 偏软，ComfyUI 常用 bicubic）
+- 后处理默认关闭（旧 backup.sh 不做后处理）
+- base 分辨率计算与 backup.sh 一致（2560×1440→1920×1080 等）
+- ESRGAN 保留为可选（`upscaler=model` + `upscaler_model`）
+
 仍待做：
-- **二次采样参数**：`hires_strength`/`hires_steps`/`scheduler`/`cfg` 的默认值与自适应（强度过高丢细节、过低留伪影）
-- **base 分辨率策略**：当前 `sd_compute_hires_resolution` 约 1.33×，旧 backup.sh 用 2×（1280×720→2560×1440），可选
-- **FreeU 默认值**：当前 b1=1.3/b2=1.4，旧 sdxl_pipeline 曾记录 FreeU 导致过拟合，需重新标定
-- **后处理**：已默认关闭，如启用需按分辨率自适应避免过锐
+- **二次采样参数**：`hires_strength`/`hires_steps`/`scheduler`/`cfg` 默认值与自适应
+- **FreeU 默认值**：旧 sdxl_pipeline 曾记录 FreeU 导致过拟合，需重新标定
 - **VAE tiling 接缝**：高分辨率 tile 边界可能出现接缝，检查 overlap/tile_size
-- **多步渐进放大**：一次大幅放大 → 分 1.5x 多轮，减少伪影
-- **对比基线**：与 ComfyUI 同工作流的 hires 输出做质量对照
+- **bislerp**：ComfyUI 有 bislerp 更锐，sd.cpp 无对应插值模式
+- **多步渐进放大** / **与 ComfyUI 同工作流质量对照**
 
 ## 已完成并验证
 - `ModelNoiseScale`：euler_a 下 noise_scale=8 与基线不同
