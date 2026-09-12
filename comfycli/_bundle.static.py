@@ -1486,6 +1486,65 @@ register_node("GLIGENTextBoxApply", "GLIGEN Textbox Apply",
               "gligen_textbox_apply", ("CONDITIONING",), False)
 
 
+def latent_upscale_by(inputs):
+    latent = dict_get(inputs, "samples")
+    if latent is None:
+        print("LatentUpscaleBy: no samples received")
+        return (None,)
+    scale_by = get_float(inputs, "scale_by", 1.0)
+    width = int(latent.width * scale_by)
+    height = int(latent.height * scale_by)
+    return (LatentImage(width, height, latent.batch_size, latent.image_path, latent.mask_path),)
+
+
+register_node("LatentUpscaleBy", "Latent Upscale By",
+              "latent_upscale_by", ("LATENT",), False)
+
+
+def controlnet_apply_advanced(inputs):
+    pos: Conditioning = dict_get(inputs, "positive")
+    neg: Conditioning = dict_get(inputs, "negative")
+    cn: ControlNetModel = dict_get(inputs, "control_net")
+    cn_path = ""
+    if cn is not None:
+        cn_path = cn.name
+    image_path = get_str(inputs, "image", "")
+    strength = get_float(inputs, "strength", 1.0)
+    if pos is None:
+        return (None, None)
+    new_pos = Conditioning(pos.text, cn_path, image_path, strength)
+    return (new_pos, neg)
+
+
+register_node("ControlNetApplyAdvanced", "Apply ControlNet (Advanced)",
+              "controlnet_apply_advanced", ("CONDITIONING", "CONDITIONING"), False)
+
+
+def inpaint_model_conditioning(inputs):
+    pos = dict_get(inputs, "positive")
+    neg = dict_get(inputs, "negative")
+    image_path = dict_get(inputs, "pixels")
+    if image_path is None:
+        image_path = ""
+    mask_path = dict_get(inputs, "mask")
+    if mask_path is None:
+        mask_path = ""
+    latent = LatentImage(0, 0, 1, image_path, mask_path)
+    return (pos, neg, latent)
+
+
+register_node("InpaintModelConditioning", "InpaintModelConditioning",
+              "inpaint_model_conditioning", ("CONDITIONING", "CONDITIONING", "LATENT"), False)
+
+
+def preview_any(inputs):
+    return (dict_get(inputs, "source"),)
+
+
+register_node("PreviewAny", "Preview Any",
+              "preview_any", ("*",), True)
+
+
 def print_node_list():
     keys = dict_keys(NODE_CLASS_MAPPINGS)
     i = 0
@@ -1604,6 +1663,14 @@ def call_node(class_type: str, inputs):
         return controlnet_loader(inputs)
     elif class_type == "ControlNetApply":
         return controlnet_apply(inputs)
+    elif class_type == "ControlNetApplyAdvanced":
+        return controlnet_apply_advanced(inputs)
+    elif class_type == "InpaintModelConditioning":
+        return inpaint_model_conditioning(inputs)
+    elif class_type == "LatentUpscaleBy":
+        return latent_upscale_by(inputs)
+    elif class_type == "PreviewAny":
+        return preview_any(inputs)
     elif class_type == "ConditioningSetArea" or class_type == "ConditioningSetAreaPercentage" or class_type == "ConditioningSetAreaStrength" or class_type == "ConditioningSetMask" or class_type == "ConditioningMultiply" or class_type == "ConditioningSetTimestepRange":
         return conditioning_passthrough(inputs)
     elif class_type == "LatentRotate" or class_type == "LatentFlip" or class_type == "LatentComposite" or class_type == "LatentBlend" or class_type == "RepeatLatentBatch" or class_type == "LatentFromBatch" or class_type == "SetLatentNoiseMask":
