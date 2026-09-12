@@ -1565,6 +1565,38 @@ register_node("CLIPMergeSubtract", "Merge CLIP (Subtract)",
               "clip_merge_passthrough", ("CLIP",), False)
 
 
+def model_passthrough(inputs):
+    # 采样/模型配置类节点：sd.cpp 内部按模型自动选择调度，这里透传 model
+    m = dict_get(inputs, "model")
+    if m is None:
+        return (None,)
+    return (m,)
+
+
+register_node("ModelSamplingDiscrete", "ModelSamplingDiscrete",
+              "model_passthrough", ("MODEL",), False)
+register_node("ModelSamplingFlux", "ModelSamplingFlux",
+              "model_passthrough", ("MODEL",), False)
+register_node("ModelSamplingSD3", "ModelSamplingSD3",
+              "model_passthrough", ("MODEL",), False)
+register_node("ModelSamplingContinuousEDM", "ModelSamplingContinuousEDM",
+              "model_passthrough", ("MODEL",), False)
+register_node("ModelSamplingContinuousV", "ModelSamplingContinuousV",
+              "model_passthrough", ("MODEL",), False)
+register_node("ModelSamplingAuraFlow", "ModelSamplingAuraFlow",
+              "model_passthrough", ("MODEL",), False)
+register_node("ModelSamplingStableCascade", "ModelSamplingStableCascade",
+              "model_passthrough", ("MODEL",), False)
+register_node("RescaleCFG", "RescaleCFG",
+              "model_passthrough", ("MODEL",), False)
+register_node("ModelComputeDtype", "ModelComputeDtype",
+              "model_passthrough", ("MODEL",), False)
+register_node("ModelAttentionBackend", "ModelAttentionBackend",
+              "model_passthrough", ("MODEL",), False)
+register_node("ModelNoiseScale", "ModelNoiseScale",
+              "model_passthrough", ("MODEL",), False)
+
+
 def print_node_list():
     keys = dict_keys(NODE_CLASS_MAPPINGS)
     i = 0
@@ -1677,6 +1709,8 @@ def call_node(class_type: str, inputs):
         return lora_loader(inputs)
     elif class_type == "CLIPMergeSimple" or class_type == "CLIPMergeAdd" or class_type == "CLIPMergeSubtract":
         return clip_merge_passthrough(inputs)
+    elif class_type == "ModelSamplingDiscrete" or class_type == "ModelSamplingFlux" or class_type == "ModelSamplingSD3" or class_type == "ModelSamplingContinuousEDM" or class_type == "ModelSamplingContinuousV" or class_type == "ModelSamplingAuraFlow" or class_type == "ModelSamplingStableCascade" or class_type == "RescaleCFG" or class_type == "ModelComputeDtype" or class_type == "ModelAttentionBackend" or class_type == "ModelNoiseScale":
+        return model_passthrough(inputs)
     elif class_type == "VAEDecodeTiled":
         return vae_decode(inputs)
     elif class_type == "ConditioningZeroOut":
