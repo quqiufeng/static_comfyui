@@ -79,8 +79,8 @@ public:
     // ModelNoiseScale
     float noise_scale = 1.0f;
 
-    // HiRes Fix 放大器（默认 model + 2x_ESRGAN，对齐旧 backup.sh）
-    std::string hires_upscaler       = "model";
+    // HiRes Fix 放大器（默认 latent-bicubic，对齐 ComfyUI LatentUpscale 原理）
+    std::string hires_upscaler       = "latent-bicubic";
     std::string hires_upscaler_model;
 
     ~Impl() {

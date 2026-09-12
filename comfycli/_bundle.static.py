@@ -1011,8 +1011,9 @@ def hires_fix(inputs):
     if seed == 0:
         seed = -1
 
-    # HiRes 放大器：默认 model + 2x_ESRGAN（对齐旧 backup.sh），可选 latent 等
-    upscaler = get_str(inputs, "upscaler", "model")
+    # HiRes 放大器：默认 latent-bicubic（对齐 ComfyUI LatentUpscale 原理）；
+    # 如需 ESRGAN 可显式设 upscaler=model + upscaler_model
+    upscaler = get_str(inputs, "upscaler", "latent-bicubic")
     upscaler_model = get_str(inputs, "upscaler_model", "2x_ESRGAN.gguf")
     upscaler_path = ""
     if upscaler == "model" and upscaler_model != "":
