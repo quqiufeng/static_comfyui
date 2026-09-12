@@ -1887,6 +1887,12 @@ def validate_prompt(prompt) -> int:
     return 0
 
 
+def input_signature(class_type: str, raw) -> str:
+    # 简化版输入签名：class_type + 原始输入（链接以 [src_id, idx] 参与）。
+    # 静态 DAG 下，签名相同的节点输出相同，可复用缓存。
+    return class_type + "|" + json_dumps(raw)
+
+
 def execute_prompt(prompt_json: str, output_dir: str):
     prompt = parse_json(prompt_json)
     vrc = validate_prompt(prompt)
@@ -1897,6 +1903,7 @@ def execute_prompt(prompt_json: str, output_dir: str):
     deps, inputs_cache = build_deps(prompt)
     node_outputs = make_dict()
     executed = make_dict()
+    cache = make_dict()
     n = len(node_ids)
     remaining = n
     while remaining > 0:
@@ -1918,8 +1925,14 @@ def execute_prompt(prompt_json: str, output_dir: str):
                     node = dict_get(prompt, nid)
                     class_type = dict_get(node, "class_type")
                     inputs = dict_get(inputs_cache, nid)
-                    resolved = resolve_all(inputs, node_outputs, output_dir)
-                    outputs = call_node(class_type, resolved)
+                    sig = input_signature(class_type, inputs)
+                    cached = dict_get(cache, sig)
+                    if cached is not None:
+                        outputs = cached
+                    else:
+                        resolved = resolve_all(inputs, node_outputs, output_dir)
+                        outputs = call_node(class_type, resolved)
+                        dict_set(cache, sig, outputs)
                     dict_set(node_outputs, nid, outputs)
                     dict_set(executed, nid, 1)
                     remaining = remaining - 1
