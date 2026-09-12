@@ -194,6 +194,9 @@ public:
     // Area conditioning (sd.cpp patch); prompts separated by '\n', rects/strengths CSV
     void set_area_conds(const char* prompts_sep, const char* rects_csv, const char* strengths_csv);
 
+    // CLIPVisionEncode: pre-encode a reference image for IP-Adapter reuse
+    int clip_vision_encode(const std::string& image_path);
+
     // RescaleCFG override (applied per sampling step)
     void set_rescale_cfg(bool enabled, float multiplier);
 
@@ -431,6 +434,9 @@ int sd_pipeline_set_flash_attn(sd_pipeline_t pipeline, int enabled);
 
 /** Configure area conditioning (prompts separated by '\n', rects/strengths CSV). */
 int sd_pipeline_set_area_conds(sd_pipeline_t pipeline, const char* prompts_sep, const char* rects_csv, const char* strengths_csv);
+
+/** CLIPVisionEncode: pre-encode a reference image (used by IP-Adapter). */
+int sd_pipeline_clip_vision_encode(sd_pipeline_t pipeline, const char* image_path);
 
 /** Configure RescaleCFG (applied per sampling step). */
 int sd_pipeline_set_rescale_cfg(sd_pipeline_t pipeline, int enabled, float multiplier);

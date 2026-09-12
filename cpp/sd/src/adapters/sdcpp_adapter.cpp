@@ -334,6 +334,24 @@ void SDPipeline::set_flow_shift(float shift) {
     impl_->flow_shift = shift;
 }
 
+int SDPipeline::clip_vision_encode(const std::string& image_path) {
+    if (!impl_ || !impl_->ctx) return -1;
+    cv::Mat img = cv::imread(image_path, cv::IMREAD_COLOR);
+    if (img.empty()) {
+        std::fprintf(stderr, "[C++ gen] clip_vision_encode: failed to read %s\n", image_path.c_str());
+        return -2;
+    }
+    cv::Mat rgb;
+    cv::cvtColor(img, rgb, cv::COLOR_BGR2RGB);
+    sd_image_t image{};
+    image.width   = rgb.cols;
+    image.height  = rgb.rows;
+    image.channel = rgb.channels();
+    image.data    = rgb.data;
+    bool ok       = sd_clip_vision_encode(impl_->ctx, &image);
+    return ok ? 0 : -3;
+}
+
 void SDPipeline::set_rescale_cfg(bool enabled, float multiplier) {
     if (!impl_) return;
     impl_->rescale_cfg_enabled    = enabled;
@@ -1205,6 +1223,11 @@ int sd_pipeline_set_area_conds(sd_pipeline_t pipeline, const char* prompts_sep, 
     if (!pipeline) return -1;
     static_cast<sd::SDPipeline*>(pipeline)->set_area_conds(prompts_sep, rects_csv, strengths_csv);
     return 0;
+}
+
+int sd_pipeline_clip_vision_encode(sd_pipeline_t pipeline, const char* image_path) {
+    if (!pipeline || !image_path) return -1;
+    return static_cast<sd::SDPipeline*>(pipeline)->clip_vision_encode(image_path);
 }
 
 int sd_pipeline_set_rescale_cfg(sd_pipeline_t pipeline, int enabled, float multiplier) {
