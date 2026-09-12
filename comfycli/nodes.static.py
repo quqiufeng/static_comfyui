@@ -1344,8 +1344,19 @@ register_node("ModelSamplingAuraFlow", "ModelSamplingAuraFlow",
               "model_sampling_flow", ("MODEL",), False)
 register_node("ModelSamplingStableCascade", "ModelSamplingStableCascade",
               "model_passthrough", ("MODEL",), False)
+def rescale_cfg(inputs):
+    m: SDPipelineHandle = dict_get(inputs, "model")
+    if m is None:
+        return (None,)
+    multiplier = get_float(inputs, "multiplier", 0.7)
+    sd_set_rescale_cfg(m.pipeline, multiplier)
+    return (m,)
+
+
 register_node("RescaleCFG", "RescaleCFG",
-              "model_passthrough", ("MODEL",), False)
+              "rescale_cfg", ("MODEL",), False)
+
+
 def model_compute_dtype(inputs):
     m: SDPipelineHandle = dict_get(inputs, "model")
     if m is None:
@@ -1632,7 +1643,9 @@ def call_node(class_type: str, inputs):
         return model_compute_dtype(inputs)
     elif class_type == "ModelAttentionBackend":
         return model_attention_backend(inputs)
-    elif class_type == "ModelSamplingDiscrete" or class_type == "ModelSamplingContinuousEDM" or class_type == "ModelSamplingContinuousV" or class_type == "ModelSamplingStableCascade" or class_type == "RescaleCFG" or class_type == "ModelNoiseScale":
+    elif class_type == "RescaleCFG":
+        return rescale_cfg(inputs)
+    elif class_type == "ModelSamplingDiscrete" or class_type == "ModelSamplingContinuousEDM" or class_type == "ModelSamplingContinuousV" or class_type == "ModelSamplingStableCascade" or class_type == "ModelNoiseScale":
         return model_passthrough(inputs)
     elif class_type == "SaveLatent":
         return save_latent(inputs)

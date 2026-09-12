@@ -191,6 +191,9 @@ public:
     // Enable diffusion flash attention (requires reload)
     void set_flash_attn(bool enabled);
 
+    // RescaleCFG override (applied per sampling step)
+    void set_rescale_cfg(bool enabled, float multiplier);
+
 private:
     class Impl;
     std::unique_ptr<Impl> impl_;
@@ -416,6 +419,9 @@ int sd_pipeline_set_wtype(sd_pipeline_t pipeline, int wtype);
 
 /** Enable/disable diffusion flash attention (reloads the context). */
 int sd_pipeline_set_flash_attn(sd_pipeline_t pipeline, int enabled);
+
+/** Configure RescaleCFG (applied per sampling step). */
+int sd_pipeline_set_rescale_cfg(sd_pipeline_t pipeline, int enabled, float multiplier);
 
 /** Rotate an image by 90/180/270 degrees (counter-clockwise) and save as PNG. */
 int sd_rotate_image(const char* input_path, const char* output_path, int degrees);

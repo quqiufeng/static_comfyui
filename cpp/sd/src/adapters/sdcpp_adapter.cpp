@@ -58,6 +58,10 @@ public:
     int clip_skip = -1;
     float flow_shift = 0.0f;
 
+    // RescaleCFG
+    bool rescale_cfg_enabled   = false;
+    float rescale_cfg_multiplier = 0.7f;
+
     ~Impl() {
         if (ctx) {
             free_sd_ctx(ctx);
@@ -316,6 +320,12 @@ void SDPipeline::set_flow_shift(float shift) {
     impl_->flow_shift = shift;
 }
 
+void SDPipeline::set_rescale_cfg(bool enabled, float multiplier) {
+    if (!impl_) return;
+    impl_->rescale_cfg_enabled    = enabled;
+    impl_->rescale_cfg_multiplier = multiplier;
+}
+
 void SDPipeline::set_wtype(int wtype) {
     if (!impl_ || wtype < 0) return;
     impl_->config.wtype = wtype;
@@ -449,6 +459,12 @@ std::vector<Image> SDPipeline::generate(const ImageGenerationParams& params) {
     img_params.sag.enabled = params.sag_enabled;
     if (params.sag_enabled) {
         img_params.sag.scale = params.sag_scale;
+    }
+
+    // RescaleCFG
+    img_params.rescale_cfg.enabled = impl_->rescale_cfg_enabled;
+    if (impl_->rescale_cfg_enabled) {
+        img_params.rescale_cfg.multiplier = impl_->rescale_cfg_multiplier;
     }
 
     // Native IP-Adapter (sd.cpp 原生实现)
@@ -1081,6 +1097,12 @@ int sd_pipeline_set_wtype(sd_pipeline_t pipeline, int wtype) {
 int sd_pipeline_set_flash_attn(sd_pipeline_t pipeline, int enabled) {
     if (!pipeline) return -1;
     static_cast<sd::SDPipeline*>(pipeline)->set_flash_attn(enabled != 0);
+    return 0;
+}
+
+int sd_pipeline_set_rescale_cfg(sd_pipeline_t pipeline, int enabled, float multiplier) {
+    if (!pipeline) return -1;
+    static_cast<sd::SDPipeline*>(pipeline)->set_rescale_cfg(enabled != 0, multiplier);
     return 0;
 }
 

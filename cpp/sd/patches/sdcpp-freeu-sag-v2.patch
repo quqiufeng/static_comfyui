@@ -1,8 +1,8 @@
 diff --git a/include/stable-diffusion.h b/include/stable-diffusion.h
-index cf69b48..d5f1f88 100644
+index cf69b48..7d45618 100644
 --- a/include/stable-diffusion.h
 +++ b/include/stable-diffusion.h
-@@ -377,6 +377,26 @@ typedef struct {
+@@ -377,6 +377,31 @@ typedef struct {
      int custom_sigmas_count;
  } sd_hires_params_t;
  
@@ -26,16 +26,22 @@ index cf69b48..d5f1f88 100644
 +    float threshold_percentile;
 +} sd_dynamic_cfg_params_t;
 +
++typedef struct {
++    bool enabled;
++    float multiplier;
++} sd_rescale_cfg_params_t;
++
  typedef struct {
      const sd_lora_t* loras;
      uint32_t lora_count;
-@@ -403,6 +423,9 @@ typedef struct {
+@@ -403,6 +428,10 @@ typedef struct {
      sd_tiling_params_t vae_tiling_params;
      sd_cache_params_t cache;
      sd_hires_params_t hires;
 +    sd_freeu_params_t freeu;
 +    sd_sag_params_t sag;
 +    sd_dynamic_cfg_params_t dynamic_cfg;
++    sd_rescale_cfg_params_t rescale_cfg;
      int qwen_image_layers;
      bool circular_x;
      bool circular_y;
@@ -159,7 +165,7 @@ index 6ab370c..47eee9a 100644
  
  bool is_unused_tensor(const std::string& name) {
 diff --git a/src/pipeline/diffusion_engine.cpp b/src/pipeline/diffusion_engine.cpp
-index 5d51e24..bc3242a 100644
+index 5d51e24..85d3fbb 100644
 --- a/src/pipeline/diffusion_engine.cpp
 +++ b/src/pipeline/diffusion_engine.cpp
 @@ -26,6 +26,7 @@
@@ -201,7 +207,19 @@ index 5d51e24..bc3242a 100644
              sd::Tensor<float> cached_output;
              if (step_cache.before_condition(&condition, noised_input, &cached_output)) {
                  return std::move(cached_output);
-@@ -2455,6 +2471,23 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2434,7 +2450,10 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+         guidance_input.pred_uncond     = uncond_out.empty() ? nullptr : &uncond_out;
+         guidance_input.pred_img_uncond = img_uncond_out.empty() ? nullptr : &img_uncond_out;
+ 
+-        sd::guidance::GuiderOutput guided = guidance_schedule.empty() ? primary_guidance.forward(guidance_input, {}) : primary_guidance.forward(guidance_input, {}, guidance_schedule[guidance_schedule.size() - 1 - step]);
++        const float step_cfg_scale = guidance_schedule.empty()
++                                         ? cfg_scale
++                                         : guidance_schedule[guidance_schedule.size() - 1 - step];
++        sd::guidance::GuiderOutput guided = guidance_schedule.empty() ? primary_guidance.forward(guidance_input, {}) : primary_guidance.forward(guidance_input, {}, step_cfg_scale);
+         if (guided.pred.empty()) {
+             return {};
+         }
+@@ -2455,6 +2474,97 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
              return {};
          }
  
@@ -222,14 +240,88 @@ index 5d51e24..bc3242a 100644
 +            }
 +        }
 +
++        // RescaleCFG — 本项目 patch（1:1 复刻 ComfyUI comfy_extras/nodes_model_advanced.py）
++        if (this->rescale_cfg_enabled && !cond_out.empty() && !uncond_out.empty()) {
++            auto batch_std = [](const sd::Tensor<float>& t) -> std::vector<float> {
++                int64_t n   = t.shape().empty() ? 1 : t.shape()[0];
++                int64_t per = (n > 0) ? t.numel() / n : t.numel();
++                std::vector<float> out(static_cast<size_t>(n), 0.0f);
++                for (int64_t b = 0; b < n; b++) {
++                    const float* p = t.data() + b * per;
++                    double mean    = 0.0;
++                    for (int64_t i = 0; i < per; i++) mean += p[i];
++                    mean /= static_cast<double>(per);
++                    double var = 0.0;
++                    for (int64_t i = 0; i < per; i++) {
++                        double d = p[i] - mean;
++                        var += d * d;
++                    }
++                    out[static_cast<size_t>(b)] = static_cast<float>(std::sqrt(var / static_cast<double>(per)));
++                }
++                return out;
++            };
++            auto scale_batch = [](const sd::Tensor<float>& t, const std::vector<float>& s) -> sd::Tensor<float> {
++                sd::Tensor<float> out = t;
++                int64_t n             = t.shape().empty() ? 1 : t.shape()[0];
++                int64_t per           = (n > 0) ? t.numel() / n : t.numel();
++                for (int64_t b = 0; b < n; b++) {
++                    float* p = out.data() + b * per;
++                    for (int64_t i = 0; i < per; i++) p[i] *= s[static_cast<size_t>(b)];
++                }
++                return out;
++            };
++            const float mult = this->rescale_cfg_multiplier;
++            const float s2   = sigma * sigma;
++            const float a    = std::sqrt(s2 + 1.0f);
++            // ComfyUI 的 sampler_cfg_function 返回值被当作"预测噪声"，
++            // cfg_result = x_orig - fn(args)，最终 denoised 即 target。
++            sd::Tensor<float> target;
++            if (this->is_flow_denoiser()) {
++                sd::Tensor<float> x0_cond   = cond_out * c_out + x * c_skip;
++                sd::Tensor<float> x0_uncond = uncond_out * c_out + x * c_skip;
++                sd::Tensor<float> x0_cfg    = x0_uncond + (x0_cond - x0_uncond) * step_cfg_scale;
++                std::vector<float> ro_pos   = batch_std(x0_cond);
++                std::vector<float> ro_cfg   = batch_std(x0_cfg);
++                for (auto& v : ro_cfg) {
++                    if (v < 1e-8f) v = 1e-8f;
++                }
++                for (size_t i = 0; i < ro_pos.size(); i++) ro_pos[i] /= ro_cfg[i];
++                sd::Tensor<float> x0_rescaled = scale_batch(x0_cfg, ro_pos);
++                target                        = x0_rescaled * mult + x0_cfg * (1.0f - mult);
++            } else {
++                // cond_v = (x_orig/(s2+1) - x0) * sqrt(s2+1)/sigma，x0 = raw*c_out + x*c_skip
++                auto to_v = [&](const sd::Tensor<float>& raw) {
++                    sd::Tensor<float> x0  = raw * c_out + x * c_skip;
++                    sd::Tensor<float> out = x0;
++                    for (int64_t i = 0; i < out.numel(); i++) {
++                        out.data()[i] = (x.data()[i] / (s2 + 1.0f) - x0.data()[i]) * a / sigma;
++                    }
++                    return out;
++                };
++                sd::Tensor<float> cond_v   = to_v(cond_out);
++                sd::Tensor<float> uncond_v = to_v(uncond_out);
++                sd::Tensor<float> x_cfg    = uncond_v + (cond_v - uncond_v) * step_cfg_scale;
++                std::vector<float> ro_pos  = batch_std(cond_v);
++                std::vector<float> ro_cfg  = batch_std(x_cfg);
++                for (auto& v : ro_cfg) {
++                    if (v < 1e-8f) v = 1e-8f;
++                }
++                for (size_t i = 0; i < ro_pos.size(); i++) ro_pos[i] /= ro_cfg[i];
++                sd::Tensor<float> x_rescaled = scale_batch(x_cfg, ro_pos);
++                sd::Tensor<float> x_final    = x_rescaled * mult + x_cfg * (1.0f - mult);
++                target                       = x * (1.0f / (s2 + 1.0f)) - x_final * (sigma / a);
++            }
++            guided.pred = (target - x * c_skip) / c_out;
++        }
++
          denoised = guided.pred * c_out + x * c_skip;
          sd::guidance::GuiderOutput output;
          output.pred = denoised;
 diff --git a/src/pipeline/diffusion_engine.h b/src/pipeline/diffusion_engine.h
-index 13cb6e8..b1a25a4 100644
+index 13cb6e8..beb45e9 100644
 --- a/src/pipeline/diffusion_engine.h
 +++ b/src/pipeline/diffusion_engine.h
-@@ -100,6 +100,23 @@ public:
+@@ -100,6 +100,27 @@ public:
      bool is_using_v_parameterization     = false;
      bool is_using_edm_v_parameterization = false;
  
@@ -250,14 +342,18 @@ index 13cb6e8..b1a25a4 100644
 +    float dynamic_cfg_mimic_scale          = 10.0f;
 +    float dynamic_cfg_threshold_percentile = 1.0f;
 +
++    // RescaleCFG (ComfyUI comfy_extras/nodes_model_advanced.py)
++    bool rescale_cfg_enabled    = false;
++    float rescale_cfg_multiplier = 0.7f;
++
      std::shared_ptr<ModelManager> model_manager;
  
      enum class RunnerGroup { Core,
 diff --git a/src/pipeline/image.cpp b/src/pipeline/image.cpp
-index 294e5b0..235d0bb 100644
+index 294e5b0..9939924 100644
 --- a/src/pipeline/image.cpp
 +++ b/src/pipeline/image.cpp
-@@ -795,6 +795,25 @@ namespace sd::pipeline {
+@@ -795,6 +795,29 @@ namespace sd::pipeline {
              return false;
          sd->apply_circular_axes(sd_img_gen_params->circular_x, sd_img_gen_params->circular_y);
  
@@ -278,6 +374,10 @@ index 294e5b0..235d0bb 100644
 +            sd->dynamic_cfg_percentile           = sd_img_gen_params->dynamic_cfg.percentile;
 +            sd->dynamic_cfg_mimic_scale          = sd_img_gen_params->dynamic_cfg.mimic_scale;
 +            sd->dynamic_cfg_threshold_percentile = sd_img_gen_params->dynamic_cfg.threshold_percentile;
++        }
++        sd->rescale_cfg_enabled = sd_img_gen_params->rescale_cfg.enabled;
++        if (sd_img_gen_params->rescale_cfg.enabled) {
++            sd->rescale_cfg_multiplier = sd_img_gen_params->rescale_cfg.multiplier;
 +        }
 +
          const RefImageParams ref_image_params = sd->resolve_ref_image_params(sd_img_gen_params->ref_image_args);
