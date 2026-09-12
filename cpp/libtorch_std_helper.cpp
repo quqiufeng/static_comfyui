@@ -47,6 +47,7 @@ static void install_quiet_rnn_warning() {
 // 工具函数
 // ============================================================
 static void log_tensor(const at::Tensor& t, const char* name) {
+    if (!getenv("COMFYCLI_UNET_DEBUG")) return;
     char buf[256];
     int n = snprintf(buf, sizeof(buf), "CMP %-30s shape=%d,%d,%d,%d mean=%.4f std=%.4f\n",
         name, (int)t.size(0), (int)t.size(1), (int)t.size(2), (int)t.size(3),
@@ -2554,14 +2555,6 @@ void* torch_std_euler_step(void* x_ptr, void* sigma_t_ptr, void* sigma_next_ptr,
         auto sig_next_d = sig_next.to(dev);
         auto dt = sig_next_d - sig_t_d;
         auto result = x + dt * eps;
-        {
-            static int step = 0;
-            char buf[256];
-            int n = snprintf(buf, sizeof(buf), "STK_EULER step=%d x=%.4f cond=%.4f uncond=%.4f eps=%.4f sig_t=%.4f\n",
-                step, x.abs().mean().item<float>(), cond.abs().mean().item<float>(),
-                uncond.abs().mean().item<float>(), eps.abs().mean().item<float>(), sig_t_d.item<float>());
-            write(2, buf, n); step++;
-        }
         return wrap(result);
     } catch (const std::exception& e) {
         std::cerr << "torch_std_euler_step error: " << e.what() << std::endl;
@@ -3003,7 +2996,7 @@ void* torch_std_vae_decode(void* vae_module, void* latent) {
         auto* vae = static_cast<torch::jit::Module*>(vae_module);
         auto& lat = unwrap(latent);
         // VAE was loaded on CUDA by torch_std_jit_load; do NOT call .to() on module
-        auto lat_ready = lat.to(torch::kFloat32);
+        auto lat_ready = lat.to(torch::kHalf);
         auto decoded = vae->forward({lat_ready / 0.18215f}).toTensor();
         return wrap(decoded);
     } catch (const std::exception& e) {
@@ -4370,7 +4363,7 @@ static at::Tensor sdxl_attn_block(const at::Tensor& x, const at::Tensor& te,
         {
             // Check attention output variance (should be high if softmax dim is correct)
             static int attn_check = 0;
-            if (attn_check < 4 && p.find("input_blocks.4") != std::string::npos) {
+            if (getenv("COMFYCLI_UNET_DEBUG") && attn_check < 4 && p.find("input_blocks.4") != std::string::npos) {
                 float m = co.mean().item<float>(), s = co.std().item<float>();
                 char buf[128];
                 int n = snprintf(buf, sizeof(buf), "ATTN_OUT %s b%d mean=%.4f std=%.4f\n", p.c_str(), bi, m, s);
@@ -4380,7 +4373,7 @@ static at::Tensor sdxl_attn_block(const at::Tensor& x, const at::Tensor& te,
         }
         co = co.transpose(1,2).contiguous().reshape({B,N,ch});
         co = sdxl_linear(co.reshape({-1, ch}), d, tp+".attn2.to_out.0").contiguous();
-        if (bi == 0) {
+        if (getenv("COMFYCLI_UNET_DEBUG") && bi == 0) {
             float ck_m = ck.abs().mean().item<float>();
             float co_m = co.abs().mean().item<float>();
             float hn_m = hn.abs().mean().item<float>();
@@ -4476,7 +4469,7 @@ void* torch_std_sdxl_unet_jit_forward(
             auto sigmas = at::sqrt((1.0 - alpha_bar) / alpha_bar.clamp_min(1e-8)).clamp_min(1e-8);
             return sigmas.log().to(torch::kFloat32).contiguous();
         }();
-        auto ts_sigma = unwrap(timestep_ptr).to(torch::kFloat32).contiguous();
+        auto ts_sigma = unwrap(timestep_ptr).to(torch::kCPU).to(torch::kFloat32).contiguous();
         float* ls_p = _cpu_log_sigmas.data_ptr<float>();
         float* s_p = ts_sigma.data_ptr<float>();
         float log_s = s_p ? std::log(std::max(*s_p, 1e-8f)) : 0.0f;
@@ -4549,8 +4542,15 @@ void* torch_std_sdxl_unet_forward(
         if (!wdict_ptr) { return nullptr; }
         auto& inp_ref = unwrap(inp_ptr);
         auto dev = inp_ref.device();
-        auto d = st_to_map(wdict_ptr);
-        for (auto& kv : d) kv.second = kv.second.to(dev).detach();
+        // 权重缓存：首次调用搬到 GPU，后续复用（避免每步重复传输）
+        static std::unordered_map<void*, std::unordered_map<std::string, at::Tensor>> _wdict_cache;
+        auto _it = _wdict_cache.find(wdict_ptr);
+        if (_it == _wdict_cache.end()) {
+            auto d0 = st_to_map(wdict_ptr);
+            for (auto& kv : d0) kv.second = kv.second.to(dev).detach();
+            _it = _wdict_cache.emplace(wdict_ptr, std::move(d0)).first;
+        }
+        auto& d    = _it->second;
         auto inp = inp_ref.to(torch::kHalf);
         at::Tensor txt = unwrap(text_emb_ptr).to(dev).to(torch::kHalf);
         //txt.zero_();  // ZERO-OUT TEST: disabled for now
@@ -4567,7 +4567,7 @@ void* torch_std_sdxl_unet_forward(
             auto sigmas = at::sqrt((1.0 - alpha_bar) / alpha_bar.clamp_min(1e-8)).clamp_min(1e-8);
             return sigmas.log().to(torch::kFloat32).contiguous();
         }();
-        auto ts_sigma = unwrap(timestep_ptr).to(torch::kFloat32).contiguous();  // CPU scalar
+        auto ts_sigma = unwrap(timestep_ptr).to(torch::kCPU).to(torch::kFloat32).contiguous();  // CPU scalar
         float* ls_p = _cpu_log_sigmas.data_ptr<float>();
         float* s_p = ts_sigma.data_ptr<float>();
         float sigma_val = s_p ? *s_p : 0.0f;
@@ -4578,16 +4578,6 @@ void* torch_std_sdxl_unet_forward(
             float d = std::abs(log_s - ls_p[i]);
             if (d < best_dist) { best_dist = d; best_idx = i; }
         }
-        static int unet_call_count = 0;
-        if (unet_call_count < 8) {
-            float inp_mean = inp.abs().mean().item<float>();
-            float txt_mean = txt.abs().mean().item<float>();
-            char buf[256];
-            int n = snprintf(buf, sizeof(buf), "UNET_CALL=%d sigma=%.4f best_idx=%d inp=%.4f txt=%.4f\n",
-                unet_call_count, sigma_val, best_idx, inp_mean, txt_mean);
-            write(2, buf, n);
-        }
-        unet_call_count++;
         auto ts = at::full({1}, (float)best_idx, at::TensorOptions().dtype(torch::kFloat16).device(dev));
         // Timestep embed
         auto te = timestep_embedding(ts, 320).to(torch::kFloat16);
@@ -4675,17 +4665,6 @@ void* torch_std_sdxl_unet_forward(
         h = sdxl_conv2d(h, d, "out.2", 1, 1);
         log_tensor(h, "out");
         out_fp32 = h.to(torch::kFloat32);
-        {
-            static int eps_call = 0;
-            if (eps_call < 8) {
-                float m = out_fp32.mean().item<float>();
-                float s = out_fp32.std().item<float>();
-                char buf[128];
-                int n = snprintf(buf, sizeof(buf), "EPS_OUT call=%d mean=%.4f std=%.4f abs_mean=%.4f\n", eps_call, m, s, out_fp32.abs().mean().item<float>());
-                write(2, buf, n);
-                eps_call++;
-            }
-        }
         }  // end scope: all intermediate tensors freed
         return wrap(out_fp32);
     } catch (const std::exception& e) {
@@ -4777,6 +4756,85 @@ void* torch_std_sdxl_get_pooled() {
 
 void* torch_std_sdxl_get_pooled_l() {
     return wrap(_sdxl_last_pooled_l);
+}
+
+// ============================================================
+// 完整 SDXL txt2img 管线（torch/JIT 路径）
+// 供 sd.cpp C API 无法覆盖的能力（区域条件 / GLIGEN 等）扩展。
+// 返回 0 成功，负值失败。
+// ============================================================
+extern "C" int torch_std_sdxl_generate(
+    void* unet_dict, void* clip_l_jit, void* clip_g_jit, void* vae_jit, void* tokenizer,
+    const char* prompt, const char* negative_prompt,
+    int width, int height, int steps, double cfg,
+    const char* scheduler, long long seed, const char* output_path) {
+    try {
+        torch::NoGradGuard no_grad;
+        torch::manual_seed((int64_t)seed);
+
+        if (!unet_dict || !clip_l_jit || !clip_g_jit || !vae_jit || !tokenizer) return -1;
+
+        // 1. tokenize + CLIP encode
+        void* pos_tok = torch_std_clip_tokenizer_encode(tokenizer, prompt ? prompt : "");
+        void* neg_tok = torch_std_clip_tokenizer_encode(tokenizer, negative_prompt ? negative_prompt : "");
+        if (!pos_tok || !neg_tok) return -2;
+        void* pos_emb  = torch_std_sdxl_dual_clip(clip_l_jit, clip_g_jit, pos_tok);
+        void* pos_pool = torch_std_sdxl_get_pooled();
+        void* neg_emb  = torch_std_sdxl_dual_clip(clip_l_jit, clip_g_jit, neg_tok);
+        void* neg_pool = torch_std_sdxl_get_pooled();
+        torch_std_delete_tensor(pos_tok);
+        torch_std_delete_tensor(neg_tok);
+        if (!pos_emb || !pos_pool || !neg_emb || !neg_pool) return -3;
+
+        // 2. sigmas（SDXL 默认区间）
+        void* sigmas_p = torch_std_sampler_sigmas(steps, 0.0292, 14.6, scheduler ? scheduler : "karras");
+        if (!sigmas_p) return -4;
+        at::Tensor sigmas = unwrap(sigmas_p).to(torch::kCPU).to(torch::kFloat32);
+
+        // 3. 初始 latent
+        auto x = at::randn({1, 4, height / 8, width / 8},
+                           at::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA));
+        x = x * sigmas[0].item<float>();
+
+        // 4. 采样循环
+        for (int i = 0; i < steps; i++) {
+            float sig_t = sigmas[i].item<float>();
+            float sig_n = sigmas[i + 1].item<float>();
+            auto t_sig  = at::full({1}, sig_t, at::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA));
+            auto t_next = at::full({1}, sig_n, at::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA));
+
+            void* x_p  = wrap(x);
+            void* t_p  = wrap(t_sig);
+            void* tn_p = wrap(t_next);
+            void* cond = torch_std_sdxl_unet_forward(unet_dict, x_p, t_p, pos_emb, pos_pool,
+                                                     height, width, 0, 0, height, width);
+            void* uncond = torch_std_sdxl_unet_forward(unet_dict, x_p, t_p, neg_emb, neg_pool,
+                                                       height, width, 0, 0, height, width);
+            if (!cond || !uncond) return -5;
+            void* x_next = torch_std_euler_step(x_p, t_p, tn_p, cond, uncond, cfg);
+            if (!x_next) return -6;
+            x = unwrap(x_next);
+
+            torch_std_delete_tensor(x_p);
+            torch_std_delete_tensor(t_p);
+            torch_std_delete_tensor(tn_p);
+            torch_std_delete_tensor(cond);
+            torch_std_delete_tensor(uncond);
+            torch_std_delete_tensor(x_next);
+        }
+
+        // 5. VAE decode + 保存
+        void* x_p = wrap(x);
+        void* img = torch_std_vae_decode(vae_jit, x_p);
+        torch_std_delete_tensor(x_p);
+        if (!img) return -7;
+        torch_std_save_image_png(img, output_path);
+        torch_std_delete_tensor(img);
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "sdxl_generate error: " << e.what() << std::endl;
+        return -99;
+    }
 }
 
 // ============================================================

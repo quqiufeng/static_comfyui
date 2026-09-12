@@ -367,6 +367,13 @@ void* torch_std_sdxl_unet_forward(
 // ============================================================
 void* torch_std_sdxl_dual_clip(void* clip1, void* clip2, void* token_ids);
 
+// 完整 SDXL txt2img 管线（JIT 路径）：tokenize + CLIP + UNet + Euler + VAE + PNG
+int torch_std_sdxl_generate(
+    void* unet_jit, void* clip_l_jit, void* clip_g_jit, void* vae_jit, void* tokenizer,
+    const char* prompt, const char* negative_prompt,
+    int width, int height, int steps, double cfg,
+    const char* scheduler, long long seed, const char* output_path);
+
 // ============================================================
 // Flow Matching scheduler
 // ============================================================
