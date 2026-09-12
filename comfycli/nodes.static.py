@@ -918,7 +918,7 @@ register_node("ConditioningAverage", "Conditioning Average",
 
 
 def latent_upscale(inputs):
-    latent = dict_get(inputs, "samples")
+    latent: LatentImage = dict_get(inputs, "samples")
     if latent is None:
         print("LatentUpscale: no samples received")
         return (None,)
@@ -934,7 +934,7 @@ register_node("LatentUpscale", "Latent Upscale",
 
 
 def latent_crop(inputs):
-    latent = dict_get(inputs, "samples")
+    latent: LatentImage = dict_get(inputs, "samples")
     if latent is None:
         print("LatentCrop: no samples received")
         return (None,)
@@ -1144,7 +1144,7 @@ register_node("GLIGENTextBoxApply", "GLIGEN Textbox Apply",
 
 
 def latent_upscale_by(inputs):
-    latent = dict_get(inputs, "samples")
+    latent: LatentImage = dict_get(inputs, "samples")
     if latent is None:
         print("LatentUpscaleBy: no samples received")
         return (None,)
@@ -1248,6 +1248,49 @@ register_node("ModelAttentionBackend", "ModelAttentionBackend",
               "model_passthrough", ("MODEL",), False)
 register_node("ModelNoiseScale", "ModelNoiseScale",
               "model_passthrough", ("MODEL",), False)
+
+
+def save_latent(inputs):
+    latent: LatentImage = dict_get(inputs, "samples")
+    if latent is None:
+        print("SaveLatent: no samples received")
+        return (None,)
+    output_dir = get_str(inputs, "output_dir", "/tmp/comfy_output")
+    prefix = get_str(inputs, "filename_prefix", "latent")
+    sd_ensure_directory(output_dir)
+    path = output_dir + "/" + prefix + ".latent"
+    d = make_dict()
+    dict_set(d, "width", latent.width)
+    dict_set(d, "height", latent.height)
+    dict_set(d, "batch_size", latent.batch_size)
+    dict_set(d, "image_path", latent.image_path)
+    dict_set(d, "mask_path", latent.mask_path)
+    fp = file_open(path, "w")
+    file_write(fp, json_dumps(d))
+    file_close(fp)
+    print("Latent saved to: " + path)
+    return (path,)
+
+
+register_node("SaveLatent", "Save Latent", "save_latent", ("LATENT",), True)
+
+
+def load_latent(inputs):
+    latent_name = get_str(inputs, "latent", "")
+    if latent_name == "":
+        print("LoadLatent: no latent provided")
+        return (None,)
+    path = resolve_model_path(latent_name)
+    fp = file_open(path, "r")
+    content = file_read_all(fp)
+    file_close(fp)
+    d = parse_json(content)
+    return (LatentImage(get_int(d, "width", 1024), get_int(d, "height", 1024),
+                        get_int(d, "batch_size", 1),
+                        get_str(d, "image_path", ""), get_str(d, "mask_path", "")),)
+
+
+register_node("LoadLatent", "Load Latent", "load_latent", ("LATENT",), False)
 
 
 def print_node_list():
@@ -1364,6 +1407,10 @@ def call_node(class_type: str, inputs):
         return clip_merge_passthrough(inputs)
     elif class_type == "ModelSamplingDiscrete" or class_type == "ModelSamplingFlux" or class_type == "ModelSamplingSD3" or class_type == "ModelSamplingContinuousEDM" or class_type == "ModelSamplingContinuousV" or class_type == "ModelSamplingAuraFlow" or class_type == "ModelSamplingStableCascade" or class_type == "RescaleCFG" or class_type == "ModelComputeDtype" or class_type == "ModelAttentionBackend" or class_type == "ModelNoiseScale":
         return model_passthrough(inputs)
+    elif class_type == "SaveLatent":
+        return save_latent(inputs)
+    elif class_type == "LoadLatent":
+        return load_latent(inputs)
     elif class_type == "VAEDecodeTiled":
         return vae_decode(inputs)
     elif class_type == "ConditioningZeroOut":
