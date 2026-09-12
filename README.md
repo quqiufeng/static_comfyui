@@ -128,7 +128,14 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 
 ## 已实现节点
 
-以下 ComfyUI 节点已在 `comfycli/nodes.static.py` 中实现（共 **70 个**），可直接在工作流 JSON 中使用。节点数量持续按需求扩展。
+`comfycli/nodes.static.py` 注册 **132 个节点**，覆盖 ComfyUI 全部 **120 个内置节点名（100%）**。
+
+> **对齐度说明（重要）**：节点**名称**已 100% 对齐，但**行为**分两类：
+>
+> - **真实实现**（有实际语义）：模型加载、采样、VAE、LoRA、ControlNet、IPAdapter、图像算子、`LatentUpscaleBy`、`LoadLatent/SaveLatent` 等
+> - **透传 / 占位**：Conditioning 变体、Latent 变体、`ModelSampling*`、`ModelMerge*`、视频/模型专属节点 —— 因 sd.cpp 后端无对应能力，仅保证工作流可加载运行
+>
+> 即"能跑通的工作流范围"取决于 sd.cpp 的能力边界；核心出图链路（txt2img / img2img / inpainting / ControlNet / HiRes / LoRA / IPAdapter）是真实可用的。
 
 ### 模型加载
 
@@ -193,6 +200,43 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 | `CLIPVisionEncode` | `CLIP_VISION_OUTPUT` | 透传（IPAdapter 直接吃图片路径） |
 | `IPAdapterModelLoader` | `IPADAPTER` | IPAdapter（sd.cpp 原生） |
 | `ControlNetLoader` | `CONTROL_NET` | ControlNet 模型 |
+
+### CLIP 合并 / 旁路
+
+| 节点 | 输出 | 说明 |
+|------|------|------|
+| `CLIPMergeSimple` / `CLIPMergeAdd` / `CLIPMergeSubtract` | `CLIP` | 透传（sd.cpp 单 CLIP） |
+| `LoraLoaderBypass` / `LoraLoaderBypassModelOnly` | `MODEL` | 等价 LoRA 加载 |
+
+### 采样 / 模型配置（透传）
+
+| 节点 | 输出 | 说明 |
+|------|------|------|
+| `ModelSamplingDiscrete` / `Flux` / `SD3` / `ContinuousEDM` / `ContinuousV` / `AuraFlow` / `StableCascade` | `MODEL` | sd.cpp 按模型自动调度 |
+| `RescaleCFG` / `ModelComputeDtype` / `ModelAttentionBackend` / `ModelNoiseScale` | `MODEL` | 透传 |
+| `VideoLinearCFGGuidance` / `VideoTriangleCFGGuidance` | `MODEL` | 透传 |
+
+### Latent 序列化 / 保存
+
+| 节点 | 输出 | 说明 |
+|------|------|------|
+| `LoadLatent` / `SaveLatent` | `LATENT` | `.latent` JSON 往返 |
+| `CheckpointSave` / `VAESave` / `CLIPSave` / `ModelSave` / `ImageOnlyCheckpointSave` | - | 占位（模型在 sd.cpp 内部） |
+
+### 模型合并 / 其他
+
+| 节点 | 输出 | 说明 |
+|------|------|------|
+| `ModelMerge*`（20 变体） | `MODEL` | 透传 model1（不支持运行时合并） |
+| `DiffusersLoader` / `unCLIPCheckpointLoader` / `ImageOnlyCheckpointLoader` | `MODEL`, `CLIP`, `VAE` | 加载器别名 |
+| `ModelPatchLoader` | `MODEL_PATCH` | 返回名称 |
+| `SVD_img2vid_Conditioning` | `CONDITIONING`×2, `LATENT` | 占位 |
+| `QwenImageDiffsynthControlnet` / `ZImageFunControlnet` / `WanUni3CControlnetApply` / `AnimaLLLiteApply` / `SUPIRApply` / `USOStyleReference` / `ConditioningSetAreaPercentageVideo` | `CONDITIONING` | 透传 |
+| `WebcamCapture` | `IMAGE` | 占位 |
+| `ControlNetApplyAdvanced` | `CONDITIONING`×2 | 应用 ControlNet |
+| `LatentUpscaleBy` | `LATENT` | 按倍数缩放 |
+| `InpaintModelConditioning` | `CONDITIONING`×2, `LATENT` | inpainting 条件 |
+| `PreviewAny` | `*` | 预览任意值 |
 
 ### 工具
 
@@ -377,7 +421,7 @@ ComfyUI 是 Python ML 生态中最复杂的纯推理项目之一：
 ```
 [x] cli_args.static.py        CLI 参数解析
 [x] sd_backend.static.py      stable-diffusion.cpp C API FFI 封装（extern fn）
-[x] nodes.static.py           70 个节点定义
+[x] nodes.static.py           132 个节点定义（覆盖 ComfyUI 全部 120 个节点名）
 [x] execution.static.py       DAG 拓扑排序 + 输入链接解析
 [x] main.static.py            CLI 入口（workflow JSON / --checkpoint --prompt）
 [x] comfycli_ffi.scm          共享库加载 + 上游缺失内置
@@ -411,7 +455,9 @@ ComfyUI 是 Python ML 生态中最复杂的纯推理项目之一：
 - 无自定义节点动态加载——自定义节点需编译期注册
 - CLI 先行，无 WebSocket/HTTP UI
 - 同步执行，无 asyncio
-- 已实现 70 个核心节点，完整 ComfyUI 节点集仍在按需扩展中
+- 已实现 132 个节点（ComfyUI 120 个内置节点名全覆盖）；部分为透传/占位，行为对齐取决于 sd.cpp 能力边界
+- 执行引擎为简化版：拓扑排序 + 校验 + 输出缓存，但无 list 输入广播 / lazy 求值 / ExecutionBlocker / 子图
+- 数据类型为占位（LATENT/CONDITIONING/MODEL 非真实张量），节点间无法做张量级操作
 
 ## 项目文件
 
