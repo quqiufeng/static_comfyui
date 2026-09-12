@@ -189,9 +189,9 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 |------|------|------|
 | `LORALoader` / `LoraLoader` / `LoraLoaderModelOnly` | `MODEL` | 加载 LoRA |
 | `IPAdapterApply` | `MODEL` | IPAdapter 风格/人脸参考 |
-| `CLIPVisionLoader` | `CLIP_VISION` | CLIP Vision ONNX |
+| `CLIPVisionLoader` | `CLIP_VISION` | CLIP Vision（sd.cpp 原生） |
 | `CLIPVisionEncode` | `CLIP_VISION_OUTPUT` | 透传（IPAdapter 直接吃图片路径） |
-| `IPAdapterModelLoader` | `IPADAPTER` | IPAdapter ONNX |
+| `IPAdapterModelLoader` | `IPADAPTER` | IPAdapter（sd.cpp 原生） |
 | `ControlNetLoader` | `CONTROL_NET` | ControlNet 模型 |
 
 ### 工具
@@ -401,7 +401,7 @@ ComfyUI 是 Python ML 生态中最复杂的纯推理项目之一：
 [x] img2img（VAEEncode + denoise）/ inpainting（VAEEncodeForInpaint + mask）
 [x] ControlNet 流程 / ImageScale / ImageInvert / EmptyImage
 [x] 执行引擎 validate（未知节点/非法链接/环检测）
-[x] 部署包 GPU 79MB / CPU 35MB（零 Python、零 pip）
+[x] 部署包 GPU 57MB / CPU 35MB（零 Python、零 pip、无 ONNX）
 ```
 
 ## 局限

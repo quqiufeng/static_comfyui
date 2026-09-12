@@ -1,183 +1,100 @@
-# IPAdapter：Static ComfyUI 实现方案
+# IPAdapter：使用 sd.cpp 原生实现
 
 ## 设计目标
 
-- **SDXL IPAdapter Plus**（从 my-img 复用 ONNX 模型）：参考图 → CLIP Vision → Perceiver Resampler → image tokens → 追加到 `c_crossattn`
-- **不修改 CrossAttention**：在 `prepare_image_generation_embeds()` 里拼接 context，最小 patch
-- **无 70 层 per-layer 权重**：不依赖 `ipadapter_unet_weights.bin`
+- 直接使用 **stable-diffusion.cpp 原生 IP-Adapter**（SD1.5 / SDXL，含 Plus / Resampler）
+- 不再自研 ONNX 推理与 `c_crossattn` 注入
+- 移除 ONNX Runtime 依赖（部署包更小）
 
 ## 当前状态
 
-- ✅ 从 my-img 复用 `IPAdapter` 类（ONNX Runtime CLIP Vision + IPAdapter Resampler）
-- ✅ 接入 `sdcpp_adapter` 构建系统
-- ✅ 对 sd.cpp 增加最小 patch：
-  - `include/stable-diffusion.h`: 新增 `sd_ipadapter_params_t` 并加入 `sd_img_gen_params_t`
-  - `src/stable-diffusion.cpp`: 在 `prepare_image_generation_embeds()` 中拼接 IPA tokens 到 `c_crossattn`
-- ✅ sd.cpp + adapter + ELF 编译通过
-- ✅ 端到端测试通过：SDXL Base + IPAdapter Plus（16 tokens，weight=0.8）生成 1024×1024 图片
-- ✅ 与无 IPAdapter 的 baseline 对比：92% 像素不同，确认 IPAdapter 确实影响生成
+- ✅ `sd_ctx_params_t.ip_adapter_path` + `clip_vision_path` 加载（在 ctx 创建时）
+- ✅ `sd_img_gen_params_t.ip_adapter_image` + `ip_adapter_strength` 每代传入
+- ✅ 端到端验证：SDXL Base + IP-Adapter Plus（16 tokens，weight=0.8）出图
+- ✅ 适配层零 ONNX 依赖（`ldd` 无 `libonnxruntime`）
 
-## 测试记录
-
-```bash
-# IPAdapter 测试
-LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin:/data/venv/onnxruntime-linux-x64-gpu-1.20.1/lib:/data/cuda/targets/x86_64-linux/lib \
-  GGML_BACKEND_PATH=/opt/sd/build-dl/bin/libggml-cuda.so \
-  ./comfycli-bin test_ipadapter.json --output-dir /tmp/comfy_output
-
-# 输出
-/tmp/comfy_output/ipadapter_test.png (1024x1024, 3 ch)
-
-# Baseline（无 IPAdapter）
-./comfycli-bin test_baseline.json --output-dir /tmp/comfy_output
-/tmp/comfy_output/baseline_test.png
-
-# 对比
-md5sum:
-  ipadapter_test.png  14cb34881ecdec7dbdba0ee188be1bd7
-  baseline_test.png   aec50aba196ade88004d1174f6fc5a6e
-  92% pixels differ, MSE=28.27
-```
-
-## 运行依赖
-
-本地运行需要把 ONNX Runtime lib 加入 `LD_LIBRARY_PATH`：
-
-```bash
-LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin:/data/venv/onnxruntime-linux-x64-gpu-1.20.1/lib:/data/cuda/targets/x86_64-linux/lib \
-  GGML_BACKEND_PATH=/opt/sd/build-dl/bin/libggml-cuda.so \
-  ./comfycli-bin test_ipadapter.json --output-dir ./output
-```
-
-## 技术方案
-
-### 核心数据流
+## 数据流
 
 ```
-参考图
+参考图（文件路径）
+  ↓ OpenCV 读取 → RGB → sd_image_t
+SDPipeline::set_ipadapter(model_path, clip_vision_path, image_path, weight)
+  ├─ config.ip_adapter_path = model_path          ┐
+  ├─ config.clip_vision_path = clip_vision_path   ├─ 写入 ModelConfig 并重载 ctx
+  └─ load(config)（重载 new_sd_ctx）              ┘
   ↓
-CLIP Vision ONNX (ViT-H/14 hidden states) → [1, 257, 1280]
+KSampler → generate()
+  └─ img_params.ip_adapter_image    = 参考图
+     img_params.ip_adapter_strength = weight
   ↓
-IPAdapter Plus ONNX (Perceiver Resampler)   → [1, 16, 2048]
-  ↓
-C++ IPAdapter 类提取 tokens [16, 2048]
-  ↓
-SDPipeline::generate() 将 tokens 写入 sd_img_gen_params_t.ipadapter
-  ↓
-sd.cpp prepare_image_generation_embeds():
-    cond.c_crossattn  shape: [2048, 77] → [2048, 77+16]
-    uncond.c_crossattn  同上
+sd.cpp 原生：CLIP-Vision(ViT-H/14) → 投影/Resampler → 注入 UNet attn2
 ```
 
-### 数据格式转换
-
-IPAdapter ONNX 输出是 `[num_tokens, token_dim]`（row-major，token 维度优先）。
-sd.cpp 的 `c_crossattn` 形状是 `[context_dim, num_tokens]`（feature 维度优先）。
-
-转换代码（在 `stable-diffusion.cpp` 中）：
-
-```cpp
-for (int t = 0; t < n_ipa; t++) {
-    for (int d = 0; d < copy_dim; d++) {
-        ipa_data[d * n_ipa + t] = ipa.tokens[t * ipa_dim + d] * weight;
-    }
-}
-```
-
-### 架构层级
+## 架构层级
 
 ```
 StaticPy nodes.static.py
-  IPAdapterApply node
+  IPAdapterApply / IPAdapterModelLoader / CLIPVisionLoader
+       ↓ extern fn
+C API（sdcpp_adapter.cpp）
+  sd_pipeline_set_ipadapter(pipeline, ipadapter_path, clip_vision_path, image, weight)
        ↓
-C API (sdcpp_adapter.cpp)
-  sd_pipeline_set_ipadapter()
-  sd_pipeline_set_ipadapter_enabled()
+SDPipeline（写 ModelConfig → 重载 ctx；加载参考图）
        ↓
-SDPipeline::Impl
-  std::unique_ptr<IPAdapter> ipadapter
-       ↓
-IPAdapter (adapters/ipadapter.cpp)
-  ONNX Runtime CLIP Vision + IPAdapter Resampler
-       ↓
-sd.cpp generate_image()
-  sd_img_gen_params_t.ipadapter.*
-       ↓
-prepare_image_generation_embeds()
-  拼接 image tokens 到 c_crossattn
+sd.cpp 原生 IP-Adapter（sd_ctx_params_t.ip_adapter_path）
 ```
 
-## 与 my-img 方案的关键差异
+## 所需模型（sd.cpp 格式，非 ONNX）
 
-| 维度 | my-img（已放弃） | 我们 |
-|------|-----------------|------|
-| CLIP Vision | ONNX Runtime 2.4GB | ONNX Runtime（从 my-img 复用）✅ |
-| IPAdapter 模型 | ONNX Runtime | ONNX Runtime（从 my-img 复用）✅ |
-| UNet 注入 | 70 层 per-layer k/v，改 `common_block.hpp` | c_crossattn 拼接，只改 `stable-diffusion.cpp` ✅ |
-| 代码侵入 | 改 6 个 sd.cpp 文件 | 2 个 sd.cpp 文件（header + cpp）✅ |
-| 依赖 | ONNX Runtime + 70 层 `.bin` 权重（1.3GB） | ONNX Runtime + 原始 onnx 模型 ✅ |
-| DiT 支持 | 需要额外 2048→2560 投影 | 不优先支持 |
+| 文件 | 说明 | 来源 |
+|------|------|------|
+| base SD1.5 / SDXL | 主模型 | — |
+| `clip_vision_h.safetensors` | CLIP-Vision ViT-H/14 编码器 | h94/IP-Adapter 或 Comfy-Org 重打包 |
+| `ip-adapter-plus_sdxl_vit-h.safetensors` | SDXL Plus IP-Adapter | h94/IP-Adapter |
 
-## 关键依赖
-
-- ONNX Runtime：`/data/venv/onnxruntime-linux-x64-gpu-1.20.1/`
-- OpenCV：用于图像预处理（resize / BGR→RGB / normalize）
-- sd.cpp 需重新编译以包含 IPAdapter 字段
-
-## 模型文件
-
-从 my-img / ComfyUI 的 IPAdapter 生态获取：
-
-```
-/data/models/image/
-├── clip_vision_vit_h_hidden.onnx      # ViT-H/14 hidden states [1, 257, 1280]
-├── ipadapter_sdxl_plus_v3.onnx        # Perceiver Resampler [257, 1280] → [16, 2048]
-├── ip-adapter_sdxl_vit-h.safetensors  # 源 PyTorch 权重
-└── ...
-```
-
-## 验证方法
-
-```bash
-# 1. CLIP Vision + IPAdapter ONNX 推理（C++ 侧验证）
-# 2. IPAdapter 字段成功传递到 sd.cpp
-# 3. c_crossattn shape 变大（77 → 77+16）
-# 4. 端到端：参考图 + weight=0.8 生成效果有明显构图参考
-# 5. CLIP 相似度量化：生成图 vs 参考图 > 无 IPA 的 baseline
-```
+本机可用：
+- `/data/models/image/clip_vision_sd15.safetensors`（ViT-H，键 `vision_model.*`）
+- `/data/models/image/ip-adapter-plus_sdxl_vit-h.safetensors`（SDXL Plus）
 
 ## 节点用法
 
 ```json
 {
-  "1": {
-    "class_type": "CheckpointLoaderSimple",
-    "inputs": {
-      "ckpt_name": "sd_xl_base_1.0.safetensors"
-    }
-  },
-  "2": {
-    "class_type": "IPAdapterApply",
-    "inputs": {
-      "model": ["1", 0],
-      "ipadapter_model": "ipadapter_sdxl_plus_v3.onnx",
-      "clip_vision_model": "clip_vision_vit_h_hidden.onnx",
-      "image_path": "/path/to/ref.png",
-      "weight": 0.8
-    }
-  },
-  "3": {
-    "class_type": "CLIPTextEncode",
-    "inputs": {
-      "text": "a red apple"
-    }
-  },
-  "4": {
-    "class_type": "KSampler",
-    "inputs": {
-      "model": ["2", 0],
-      "positive": ["3", 0]
-    }
-  }
+  "1": { "class_type": "CheckpointLoaderSimple", "inputs": { "ckpt_name": "sd_xl_base_1.0.safetensors" } },
+  "2": { "class_type": "IPAdapterModelLoader", "inputs": { "ipadapter_file": "ip-adapter-plus_sdxl_vit-h.safetensors" } },
+  "3": { "class_type": "CLIPVisionLoader", "inputs": { "clip_name": "clip_vision_sd15.safetensors" } },
+  "4": { "class_type": "IPAdapterApply", "inputs": {
+           "model": ["1", 0], "ipadapter": ["2", 0], "clip_vision": ["3", 0],
+           "image_path": "/path/to/ref.png", "weight": 0.8 } },
+  "5": { "class_type": "CLIPTextEncode", "inputs": { "text": "a woman", "clip": ["1", 0] } },
+  "6": { "class_type": "EmptyLatentImage", "inputs": { "width": 512, "height": 512 } },
+  "7": { "class_type": "KSampler", "inputs": {
+           "model": ["4", 0], "positive": ["5", 0], "negative": ["5", 0],
+           "latent_image": ["6", 0], "steps": 20, "cfg": 6.0, "seed": 42,
+           "sampler_name": "dpm++2m", "scheduler": "karras" } }
 }
+```
+
+## 运行
+
+```bash
+LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
+  GGML_BACKEND_PATH=/opt/sd/build-dl/bin/libggml-cuda.so \
+  ./comfycli-bin workflow.json --output-dir ./output
+```
+
+启动日志会显示 `IP-Adapter: 16 image tokens`（Plus）或 `4`（经典）。
+
+## 依赖的上游修复
+
+sd.cpp `7f410a3` 有两个回归会破坏原生 IP-Adapter，已在本项目 patch 修复（见 `cpp/sd/design.md` §4.6/§4.7）：
+
+1. `model_loader.cpp`：`unused_tensors` 含 `"vision_model."` → 过滤掉独立 CLIP vision 文件（#1935 引入）
+2. `diffusion_engine.cpp`：clip vision 加载前缀被误改为 `"clip_vision."`（#1957），应为 `"cond_stage_model.transformer."`
+
+## 验证方法
+
+```bash
+# 端到端：参考图 + weight=0.8 出图
+# 与无 IPAdapter 的 baseline 对比像素差异（应显著不同）
 ```

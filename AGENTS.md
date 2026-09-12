@@ -62,7 +62,7 @@ ssh user@remote_host "bash /opt/comfycli/run.sh workflow.json --output-dir ./out
 注意：`build.sh` 只编译不部署，`deploy.sh` 负责打包 + 传输，职责分离。
 后端已切换为动态加载模式：`libsdcpp_adapter.so` 只含适配层，运行时在可执行文件目录或当前目录查找 `libggml-cuda.so` / `libggml-cpu-*.so`。
 `WITH_CUDA=1` 会把 `libcudart.so.12` / `libcublas.so.12` / `libcublasLt.so.12` 一起打包；默认只打包 CUDA 后端插件，不打包 CUDA Runtime。
-`WITH_ONNX_CUDA=1` 会把 ONNX Runtime CUDA provider（约 663MB）一起打包；默认只打包 `libonnxruntime.so`，IPAdapter 的 CLIP Vision 用 CPU 推理，部署包约 79MB。
+IPAdapter 已改用 sd.cpp 原生实现，不再依赖 ONNX Runtime；部署包约 57MB。
 
 ## 了解最近开发日志
 
@@ -170,7 +170,7 @@ comfycli-bin workflow.json --output-dir ./output
 - [x] `execution.static.py`      PromptExecutor（拓扑排序 + 输入链接解析）
 - [x] `main.static.py`           CLI 入口（workflow JSON + prompt-only 模式已通）
 - [x] `cli_args.static.py`       扩展 CLI 参数：--width/--height/--steps/--seed/--cfg/--sampler/--scheduler
-- [x] `deploy.sh`                支持动态后端拆分：CPU-only 35MB，GPU 79MB（远程有 CUDA Runtime，含 IPAdapter 默认 ONNX CPU 推理），`WITH_CUDA=1` 含 CUDA Runtime，`WITH_ONNX_CUDA=1` 含 ONNX CUDA provider
+- [x] `deploy.sh`                支持动态后端拆分：CPU-only 35MB，GPU 57MB（远程有 CUDA Runtime，IPAdapter 用 sd.cpp 原生），`WITH_CUDA=1` 含 CUDA Runtime
 - [x] `cpp/sd/CMakeLists.txt`      支持 `SD_BACKEND_DL=ON`：CUDA 后端以 `libggml-cuda.so` 插件形式独立加载
 - [x] `comfycli_remote.sh`       远程 GPU 实例一键部署脚本（Xiangongyun + scp + run）
 - [ ] 200+ 完整节点集（按需逐步补充）
