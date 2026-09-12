@@ -4888,7 +4888,7 @@ extern "C" int torch_std_sdxl_generate_areas(
             if (area_prompts && *area_prompts) {
                 std::string cur;
                 for (const char* p = area_prompts; *p; p++) {
-                    if (*p == '\x1f') { ps.push_back(cur); cur.clear(); }
+                    if (*p == '\n') { ps.push_back(cur); cur.clear(); }
                     else cur += *p;
                 }
                 ps.push_back(cur);

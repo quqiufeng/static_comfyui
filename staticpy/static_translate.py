@@ -924,15 +924,26 @@ def collect_function_types(node):
         t = parse_type_annotation(arg)
         if t:
             TYPE_ENV[mangle_name(arg.arg)] = t
-    # 遍历函数体收集 AnnAssign
-    for stmt in node.body:
-        if isinstance(stmt, ast.AnnAssign):
-            target = mangle_name(stmt.target.id) if isinstance(stmt.target, ast.Name) else None
-            t = parse_type_annotation(stmt)
-            if target and t:
-                TYPE_ENV[target] = t
-        elif isinstance(stmt, ast.FunctionDef):
-            collect_function_types(stmt)
+    # 遍历函数体收集 AnnAssign（递归进 while/if/for/with 体）
+    def scan(stmts):
+        for stmt in stmts:
+            if isinstance(stmt, ast.AnnAssign):
+                target = mangle_name(stmt.target.id) if isinstance(stmt.target, ast.Name) else None
+                t = parse_type_annotation(stmt)
+                if target and t:
+                    TYPE_ENV[target] = t
+            elif isinstance(stmt, ast.FunctionDef):
+                collect_function_types(stmt)
+            elif isinstance(stmt, (ast.While, ast.For)):
+                scan(stmt.body)
+                scan(getattr(stmt, "orelse", []) or [])
+            elif isinstance(stmt, ast.If):
+                scan(stmt.body)
+                scan(stmt.orelse)
+            elif isinstance(stmt, ast.With):
+                for w in stmt.items:
+                    scan(w.body)
+    scan(node.body)
 
 
 def collect_assigned_names(stmts):

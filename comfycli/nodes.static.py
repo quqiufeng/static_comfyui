@@ -15,11 +15,71 @@ class SDPipelineHandle:
 
 
 @dataclass
-class Conditioning:
+class CondEntry:
     text: str
+    area_x: int
+    area_y: int
+    area_w: int
+    area_h: int
+    strength: float
+    area_percent: bool
+
+
+@dataclass
+class Conditioning:
+    entries: list
     control_net_path: str
     control_image_path: str
     control_strength: float
+
+
+def make_cond_entry(text: str) -> CondEntry:
+    return CondEntry(text, 0, 0, 0, 0, 1.0, False)
+
+
+def make_conditioning(text: str) -> Conditioning:
+    return Conditioning([make_cond_entry(text)], "", "", 0.0)
+
+
+def cond_text(c: Conditioning) -> str:
+    if c is None:
+        return ""
+    result = ""
+    i = 0
+    n = list_length(c.entries)
+    while i < n:
+        e: CondEntry = c.entries[i]
+        if i > 0:
+            result = result + ", "
+        result = result + e.text
+        i = i + 1
+    return result
+
+
+def concat_entries(a, b) -> list:
+    result = []
+    i = 0
+    while i < list_length(a):
+        result = result + [a[i]]
+        i = i + 1
+    i = 0
+    while i < list_length(b):
+        result = result + [b[i]]
+        i = i + 1
+    return result
+
+
+def cond_has_area(c: Conditioning) -> bool:
+    if c is None:
+        return False
+    i = 0
+    n = list_length(c.entries)
+    while i < n:
+        e: CondEntry = c.entries[i]
+        if e.area_w > 0 and e.area_h > 0:
+            return True
+        i = i + 1
+    return False
 
 
 @dataclass
@@ -66,14 +126,12 @@ def resolve_model_path(name: str) -> str:
 def resolve_prompt_text(inputs, key: str, fallback_key: str) -> str:
     c: Conditioning = dict_get(inputs, key)
     if c is not None:
-        return c.text
+        return cond_text(c)
     return get_str(inputs, fallback_key, "")
 
 
 def conditioning_text(c: Conditioning) -> str:
-    if c is None:
-        return ""
-    return c.text
+    return cond_text(c)
 
 
 def merge_conditioning_text(a: str, b: str) -> str:
@@ -275,7 +333,7 @@ def clip_text_encode(inputs):
     text = get_str(inputs, "text", "")
     clip = dict_get(inputs, "clip")
     # clip is ignored here because sd.cpp handles CLIP encode internally.
-    return (Conditioning(text, "", "", 0.0),)
+    return (make_conditioning(text),)
 
 
 register_node("CLIPTextEncode", "CLIP Text Encode",
@@ -321,14 +379,67 @@ def apply_latent_extras(model: SDPipelineHandle, inputs, latent: LatentImage):
         sd_set_control_image(model.pipeline, cn_image, cn_strength)
 
 
+def torch_jit_path(name: str) -> str:
+    d = os_getenv("COMFYCLI_TORCH_DIR")
+    if str_length(d) == 0:
+        d = model_root()
+    return d + "/" + name
+
+
+def ksampler_torch(model: SDPipelineHandle, pos_c: Conditioning, neg_c: Conditioning,
+                   width: int, height: int, opts, output_dir: str, output_path: str) -> int:
+    pos_text = ""
+    area_prompts = ""
+    area_rects = ""
+    area_strengths = ""
+    first_area = True
+    i = 0
+    while i < list_length(pos_c.entries):
+        e: CondEntry = pos_c.entries[i]
+        if e.area_w > 0 and e.area_h > 0:
+            if not first_area:
+                area_prompts = area_prompts + "\n"
+                area_rects = area_rects + ","
+                area_strengths = area_strengths + ","
+            first_area = False
+            area_prompts = area_prompts + e.text
+            ax = e.area_x
+            ay = e.area_y
+            aw = e.area_w
+            ah = e.area_h
+            if e.area_percent:
+                ax = e.area_x * (width // 8) // 1000
+                ay = e.area_y * (height // 8) // 1000
+                aw = e.area_w * (width // 8) // 1000
+                ah = e.area_h * (height // 8) // 1000
+            area_rects = area_rects + string_of_int(ax) + "," + string_of_int(ay) + "," + string_of_int(aw) + "," + string_of_int(ah)
+            area_strengths = area_strengths + format_float(e.strength, 4)
+        else:
+            pos_text = merge_conditioning_text(pos_text, e.text)
+        i = i + 1
+
+    rc = sd_ensure_directory(output_dir)
+    if rc != 0:
+        print("torch: failed to create output dir: " + output_dir)
+        return -1
+
+    return torch_std_sdxl_generate_areas_paths(
+        model.model_path,
+        torch_jit_path("clip_l_jit.pt"), torch_jit_path("clip_g_jit.pt"), torch_jit_path("vae_jit.pt"),
+        torch_jit_path("clip_l_vocab.json"), torch_jit_path("clip_l_merges.txt"),
+        pos_text, cond_text(neg_c), width, height,
+        dict_get(opts, "steps"), dict_get(opts, "cfg"), dict_get(opts, "sampler_name"),
+        dict_get(opts, "seed"), area_prompts, area_rects, area_strengths, output_path)
+
+
 def ksampler(inputs):
     model: SDPipelineHandle = dict_get(inputs, "model")
     if model is None:
         print("KSampler: model is missing")
         return (None,)
 
-    prompt = resolve_prompt_text(inputs, "positive", "prompt")
-    negative_prompt = resolve_prompt_text(inputs, "negative", "negative_prompt")
+    pos_c: Conditioning = dict_get(inputs, "positive")
+    neg_c: Conditioning = dict_get(inputs, "negative")
 
     latent: LatentImage = dict_get(inputs, "latent_image")
     if latent is None:
@@ -338,10 +449,22 @@ def ksampler(inputs):
         width = latent.width
         height = latent.height
 
-    apply_latent_extras(model, inputs, latent)
-
     opts = parse_sampler_opts(inputs)
     out = sampler_output(inputs)
+
+    # 带区域条件的正向 → 走 torch 管线（sd.cpp C API 无区域条件能力）
+    if cond_has_area(pos_c):
+        rc = ksampler_torch(model, pos_c, neg_c, width, height, opts, out[0], out[1])
+        if rc != 0:
+            print("torch generate failed, rc=" + string_of_int(rc))
+            return (None,)
+        return (out[1],)
+
+    prompt = cond_text(pos_c)
+    negative_prompt = cond_text(neg_c)
+
+    apply_latent_extras(model, inputs, latent)
+
     rc = run_sampler(model, prompt, negative_prompt, width, height, opts, out[0], out[1])
     if rc != 0:
         print("SD generate failed, rc=" + string_of_int(rc))
@@ -891,10 +1014,15 @@ register_node("CLIPSetLastLayer", "CLIP Set Last Layer",
 
 
 def conditioning_combine(inputs):
-    text = merge_conditioning_text(
-        conditioning_text(dict_get(inputs, "conditioning_1")),
-        conditioning_text(dict_get(inputs, "conditioning_2")))
-    return (Conditioning(text, "", "", 0.0),)
+    c1: Conditioning = dict_get(inputs, "conditioning_1")
+    c2: Conditioning = dict_get(inputs, "conditioning_2")
+    if c1 is None:
+        return (c2,)
+    if c2 is None:
+        return (c1,)
+    # 拼接条目，保留各自的 area/strength（torch 管线按区域合成）
+    return (Conditioning(concat_entries(c1.entries, c2.entries), c1.control_net_path,
+                         c1.control_image_path, c1.control_strength),)
 
 
 register_node("ConditioningCombine", "Conditioning Combine",
@@ -905,7 +1033,7 @@ def conditioning_concat(inputs):
     text = merge_conditioning_text(
         conditioning_text(dict_get(inputs, "conditioning_to")),
         conditioning_text(dict_get(inputs, "conditioning_from")))
-    return (Conditioning(text, "", "", 0.0),)
+    return (make_conditioning(text),)
 
 
 register_node("ConditioningConcat", "Conditioning Concat",
@@ -918,8 +1046,8 @@ def conditioning_average(inputs):
     strength = get_float(inputs, "conditioning_to_strength", 0.5)
     # Simple strength-aware combination: stronger text goes first.
     if strength >= 0.5:
-        return (Conditioning(merge_conditioning_text(c_to, c_from), "", "", 0.0),)
-    return (Conditioning(merge_conditioning_text(c_from, c_to), "", "", 0.0),)
+        return (make_conditioning(merge_conditioning_text(c_to, c_from)),)
+    return (make_conditioning(merge_conditioning_text(c_from, c_to)),)
 
 
 register_node("ConditioningAverage", "Conditioning Average",
@@ -1001,7 +1129,7 @@ register_node("KSamplerAdvanced", "KSampler Advanced",
 
 def conditioning_zero_out(inputs):
     # 空条件（ComfyUI ConditioningZeroOut）
-    return (Conditioning("", "", "", 0.0),)
+    return (make_conditioning(""),)
 
 
 register_node("ConditioningZeroOut", "Conditioning Zero Out",
@@ -1033,7 +1161,7 @@ def controlnet_apply(inputs):
         cn_path = cn.name
     image_path = get_str(inputs, "image", "")
     strength = get_float(inputs, "strength", 1.0)
-    return (Conditioning(c.text, cn_path, image_path, strength),)
+    return (Conditioning(c.entries, cn_path, image_path, strength),)
 
 
 register_node("ControlNetApply", "Apply ControlNet",
@@ -1052,8 +1180,85 @@ register_node("VAEDecodeTiled", "VAE Decode (Tiled)",
               "vae_decode", ("IMAGE",), False)
 
 
-def conditioning_passthrough(inputs):
-    # area/mask/timestep 等条件修饰在 sd.cpp 后端无对应能力，透传原条件
+def to_milli(f: float) -> int:
+    return string_to_int(format_float(f * 1000.0, 0))
+
+
+def cond_with_area(c: Conditioning, x: int, y: int, w: int, h: int, strength: float, percent: bool) -> Conditioning:
+    new_entries = []
+    i = 0
+    n = list_length(c.entries)
+    while i < n:
+        e: CondEntry = c.entries[i]
+        new_entries = new_entries + [CondEntry(e.text, x, y, w, h, strength, percent)]
+        i = i + 1
+    return Conditioning(new_entries, c.control_net_path, c.control_image_path, c.control_strength)
+
+
+def conditioning_set_area(inputs):
+    c: Conditioning = dict_get(inputs, "conditioning")
+    if c is None:
+        return (None,)
+    width = get_int(inputs, "width", 0)
+    height = get_int(inputs, "height", 0)
+    x = get_int(inputs, "x", 0)
+    y = get_int(inputs, "y", 0)
+    strength = get_float(inputs, "strength", 1.0)
+    return (cond_with_area(c, x // 8, y // 8, width // 8, height // 8, strength, False),)
+
+
+def conditioning_set_area_percentage(inputs):
+    c: Conditioning = dict_get(inputs, "conditioning")
+    if c is None:
+        return (None,)
+    width = get_float(inputs, "width", 1.0)
+    height = get_float(inputs, "height", 1.0)
+    x = get_float(inputs, "x", 0.0)
+    y = get_float(inputs, "y", 0.0)
+    strength = get_float(inputs, "strength", 1.0)
+    return (cond_with_area(c, to_milli(x), to_milli(y), to_milli(width), to_milli(height), strength, True),)
+
+
+def cond_map_strength(c: Conditioning, mode: int, value: float) -> Conditioning:
+    new_entries = []
+    i = 0
+    n = list_length(c.entries)
+    while i < n:
+        e: CondEntry = c.entries[i]
+        s = value
+        if mode == 1:
+            s = e.strength * value
+        new_entries = new_entries + [CondEntry(e.text, e.area_x, e.area_y, e.area_w, e.area_h, s, e.area_percent)]
+        i = i + 1
+    return Conditioning(new_entries, c.control_net_path, c.control_image_path, c.control_strength)
+
+
+def conditioning_set_area_strength(inputs):
+    c: Conditioning = dict_get(inputs, "conditioning")
+    if c is None:
+        return (None,)
+    strength = get_float(inputs, "strength", 1.0)
+    return (cond_map_strength(c, 0, strength),)
+
+
+def conditioning_multiply(inputs):
+    c: Conditioning = dict_get(inputs, "conditioning")
+    if c is None:
+        return (None,)
+    multiplier = get_float(inputs, "multiplier", 1.0)
+    return (cond_map_strength(c, 1, multiplier),)
+
+
+def conditioning_set_timestep_range(inputs):
+    # 时间步范围在 torch 管线中暂未分段处理，透传
+    c: Conditioning = dict_get(inputs, "conditioning")
+    if c is None:
+        return (None,)
+    return (c,)
+
+
+def conditioning_set_mask(inputs):
+    # 掩码条件暂按区域矩形处理（set_cond_area=mask bounds 未实现），透传
     c: Conditioning = dict_get(inputs, "conditioning")
     if c is None:
         return (None,)
@@ -1061,17 +1266,17 @@ def conditioning_passthrough(inputs):
 
 
 register_node("ConditioningSetArea", "ConditioningSetArea",
-              "conditioning_passthrough", ("CONDITIONING",), False)
+              "conditioning_set_area", ("CONDITIONING",), False)
 register_node("ConditioningSetAreaPercentage", "ConditioningSetAreaPercentage",
-              "conditioning_passthrough", ("CONDITIONING",), False)
+              "conditioning_set_area_percentage", ("CONDITIONING",), False)
 register_node("ConditioningSetAreaStrength", "ConditioningSetAreaStrength",
-              "conditioning_passthrough", ("CONDITIONING",), False)
+              "conditioning_set_area_strength", ("CONDITIONING",), False)
 register_node("ConditioningSetMask", "ConditioningSetMask",
-              "conditioning_passthrough", ("CONDITIONING",), False)
+              "conditioning_set_mask", ("CONDITIONING",), False)
 register_node("ConditioningMultiply", "ConditioningMultiply",
-              "conditioning_passthrough", ("CONDITIONING",), False)
+              "conditioning_multiply", ("CONDITIONING",), False)
 register_node("ConditioningSetTimestepRange", "ConditioningSetTimestepRange",
-              "conditioning_passthrough", ("CONDITIONING",), False)
+              "conditioning_set_timestep_range", ("CONDITIONING",), False)
 
 
 def latent_rotate(inputs):
@@ -1264,7 +1469,7 @@ def controlnet_apply_advanced(inputs):
     strength = get_float(inputs, "strength", 1.0)
     if pos is None:
         return (None, None)
-    new_pos = Conditioning(pos.text, cn_path, image_path, strength)
+    new_pos = Conditioning(pos.entries, cn_path, image_path, strength)
     return (new_pos, neg)
 
 
@@ -1906,8 +2111,18 @@ def call_node(class_type: str, inputs):
         return latent_upscale_by(inputs)
     elif class_type == "PreviewAny":
         return preview_any(inputs)
-    elif class_type == "ConditioningSetArea" or class_type == "ConditioningSetAreaPercentage" or class_type == "ConditioningSetAreaStrength" or class_type == "ConditioningSetMask" or class_type == "ConditioningMultiply" or class_type == "ConditioningSetTimestepRange":
-        return conditioning_passthrough(inputs)
+    elif class_type == "ConditioningSetArea":
+        return conditioning_set_area(inputs)
+    elif class_type == "ConditioningSetAreaPercentage":
+        return conditioning_set_area_percentage(inputs)
+    elif class_type == "ConditioningSetAreaStrength":
+        return conditioning_set_area_strength(inputs)
+    elif class_type == "ConditioningSetMask":
+        return conditioning_set_mask(inputs)
+    elif class_type == "ConditioningMultiply":
+        return conditioning_multiply(inputs)
+    elif class_type == "ConditioningSetTimestepRange":
+        return conditioning_set_timestep_range(inputs)
     elif class_type == "LatentRotate":
         return latent_rotate(inputs)
     elif class_type == "LatentFlip":
