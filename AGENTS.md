@@ -122,8 +122,10 @@ comfycli-bin workflow.json --output-dir ./output
 
 ## 已搭建的基础设施
 - `staticpy/` — StaticPy 工具链（上游 `/opt/ReScheme` 原样拷贝）+ `static_build_comfycli.sh` 本地构建胶水
-- `comfycli/comfycli_ffi.scm` — sd.cpp 共享库加载 + 上游缺失的内置（`dict_keys`/`is_none`/`is_link`/`path_dirname` 等）
-- `cpp/sd/` — stable-diffusion.cpp 推理后端封装 (`sdcpp_adapter.h/.cpp` + `build.sh` / `build_sd_dl.sh`)
+- `comfycli/comfycli_ffi.scm` — sd.cpp 共享库加载 + 上游缺失的内置（`dict_keys`/`is_none`/`is_link`/`path_dirname` 等）；可选库 `libcomfycli_torch.so` 按是否加载定义 torch 绑定（否则报错桩，避免 AOT 载入期符号缺失）
+- `cpp/sd/` — stable-diffusion.cpp 推理后端封装 (`sdcpp_adapter.h/.cpp` + `build.sh` / `build_sd_dl.sh`)；`patches/sdcpp-freeu-sag-v2.patch` 为上游补丁（FreeU/SAG/DynCFG/RescaleCFG/video CFG/sigma 区间/区域条件/GLIGEN 注入等）
+- `cpp/libtorch_std_helper.cpp` + `cpp/build_torch_std_helper.sh` — 可选 torch helper（`libcomfycli_torch.so`），仅用于 ggml 没有的**权重级**操作（模型/CLIP 合并、权重导出）与备用独立管线
+- `TODO.md` — 待验证节点与所需模型清单
 - `build.sh` — 编译 ELF + `libsdcpp_adapter.so`
 - `deploy.sh` — 打包依赖 .so + GLIBC 兼容层 + 动态后端插件 + 可选 CUDA Runtime
 - `comfycli_remote.sh` + `xgc_ctl.py` + `.env` + `remote_server.md` — Xiangongyun 远程 GPU 部署
@@ -166,7 +168,7 @@ comfycli-bin workflow.json --output-dir ./output
 - [ ] 如需在 StaticPy 层暴露更多采样参数/ControlNet 节点，可继续扩展
 
 ### Phase 4: 节点 → DAG → 入口（MVP 已通）
-- [x] `nodes.static.py`          节点集：CheckpointLoaderSimple / DualCLIPLoader / CLIPTextEncode / CLIPSetLastLayer / ConditioningCombine / ConditioningConcat / ConditioningAverage / EmptyLatentImage / LatentUpscale / LatentCrop / KSampler / KSamplerAdvanced / LORALoader / DiffusionModelLoader / HiResFix / ADetailer / IPAdapterApply / CLIPVisionLoader / IPAdapterModelLoader / LoadImage / PreviewImage / Reroute / VAEDecode / SaveImage
+- [x] `nodes.static.py`          132 个节点，覆盖 ComfyUI 全部 120 个内置节点名（100%）；**115 真实实现 / 17 透传**（详见 README「对齐度说明」与 `TODO.md`）
 - [x] `execution.static.py`      PromptExecutor（拓扑排序 + 输入链接解析）
 - [x] `main.static.py`           CLI 入口（workflow JSON + prompt-only 模式已通）
 - [x] `cli_args.static.py`       扩展 CLI 参数：--width/--height/--steps/--seed/--cfg/--sampler/--scheduler

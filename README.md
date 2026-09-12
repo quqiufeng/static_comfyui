@@ -130,15 +130,18 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 
 `comfycli/nodes.static.py` 注册 **132 个节点**，覆盖 ComfyUI 全部 **120 个内置节点名（100%）**。
 
-> **对齐度说明（重要）**：节点**名称**已 100% 对齐，但**行为**分三类：
+> **对齐度说明（重要）**：节点**名称**已 100% 对齐（132 注册 / 120 内置名）。**行为：115 真实实现 / 17 透传**。
 >
-> - **真实实现**（有实际语义）：模型加载、采样、VAE、LoRA、ControlNet、IPAdapter、图像算子、`LatentUpscaleBy`、`LoadLatent/SaveLatent`、`CLIPSetLastLayer`（clip_skip）、`ModelSamplingFlux/SD3/AuraFlow`（flow_shift）、`ModelComputeDtype`（wtype）、`ModelAttentionBackend`（flash_attn）、`LatentRotate/Flip/Composite/Blend`、`RepeatLatentBatch/LatentFromBatch/SetLatentNoiseMask`、`RescaleCFG`、`VideoLinearCFGGuidance/VideoTriangleCFGGuidance`、`ModelSamplingContinuousEDM/ContinuousV`（sigma 区间，改 sd.cpp patch）
-> - **sd.cpp patch（ggml，保持优化推理路径）**：`ConditioningSetArea`/`SetAreaPercentage`/`SetAreaStrength`/`Multiply` —— 区域条件在 sd.cpp 采样循环内逐区合成（复刻 ComfyUI `calc_cond_batch`），出图仍走 ggml，显存 ~2.7GB
-> - **libtorch helper 覆盖**（纯权重级张量操作）：`ModelMerge*`（20 变体）、`CLIPMerge*`（3 变体，合并 CLIP 权重段）、`CheckpointSave`/`VAESave`/`CLIPSave`/`ModelSave`/`ImageOnlyCheckpointSave`（权重导出）—— 依赖可选库 `libcomfycli_torch.so`（缺失时相关节点不可用，其余功能不受影响）
-> - **后端能力边界内不可实现**（sd.cpp 无对应 C API，且非纯权重操作）：Conditioning 掩码/时间步变体（`SetMask`/`SetTimestepRange`）、`GLIGEN*`、`StyleModel*`、`SVD_img2vid_Conditioning` —— 这些仅保证工作流可加载运行，透传语义与 ComfyUI 不同
+> **推理后端原则**：出图一律走 sd.cpp/ggml（专为推理优化：量化、算子融合、低显存）。torch helper 仅用于 ggml 没有的**权重级**操作（合并/导出），不在主出图路径上。
 >
-> **推理后端原则**：出图一律走 sd.cpp/ggml（专为推理优化：量化、算子融合、低显存）。torch helper 仅用于 ggml 没有的**权重级**操作（合并/导出）。`torch_std_sdxl_generate[_areas]`（独立 torch 管线）保留作为 GLIGEN/StyleModel/unCLIP 等需额外模型组件的备用路径，不在主出图路径上。
-> - **部分映射**：`ModelAttentionBackend` 仅 `flash_attn` 有语义；`ModelSamplingContinuousEDM/ContinuousV` 仅对使用 sigma 区间的调度器（`exponential`/`karras` 等）生效，`discrete` 用模型内置 sigma 表、天然忽略区间
+> **真实实现**（主要来源）：
+> - sd.cpp 原生能力：模型加载、采样、VAE、LoRA、ControlNet、IPAdapter、图像算子、`LoadLatent/SaveLatent`、`PreviewAny`、`Reroute`
+> - **sd.cpp patch**：`CLIPSetLastLayer`(clip_skip)、`ModelSamplingFlux/SD3/AuraFlow`(flow_shift)、`ModelComputeDtype`(wtype)、`ModelAttentionBackend`(flash_attn)、`ModelSamplingContinuousEDM/ContinuousV`(sigma 区间)、`RescaleCFG`、`VideoLinear/TriangleCFGGuidance`、`ModelNoiseScale`、`ModelSamplingDiscrete`、区域条件 `ConditioningSetArea/SetAreaPercentage/SetAreaStrength/Multiply`（采样循环逐区合成，显存 ~2.7GB）、`LatentRotate/Flip/Composite/Blend`、`RepeatLatentBatch/LatentFromBatch/SetLatentNoiseMask`
+> - **libtorch helper（权重级）**：`ModelMerge*`(20)、`CLIPMerge*`(3)、`CheckpointSave/VAESave/CLIPSave/ModelSave/ImageOnlyCheckpointSave`（可选库 `libcomfycli_torch.so`，缺失时相关节点不可用、其余功能不受影响）
+>
+> **仍透传/占位（17）**：`ConditioningSetMask`/`SetTimestepRange`、模型专属 conditioning（`AnimaLLLiteApply`/`QwenImageDiffsynthControlnet`/`ZImageFunControlnet`/`WanUni3CControlnetApply`/`SUPIRApply`/`USOStyleReference`/`ConditioningSetAreaPercentageVideo`）、`CLIPVisionEncode`、`StyleModel*`(2)、`unCLIPConditioning`、`GLIGEN*`(2，模块/注入已实现，加载器待完成)、`ModelSamplingStableCascade`、`ModelPatchLoader`、`SVD_img2vid_Conditioning`、`WebcamCapture`。待验证清单见 `TODO.md`。
+>
+> **部分映射**：`ModelAttentionBackend` 仅 `flash_attn` 有语义；`ModelSamplingContinuousEDM/ContinuousV` 仅对使用 sigma 区间的调度器（`exponential`/`karras` 等）生效，`discrete` 用模型内置 sigma 表、天然忽略区间。
 >
 > 即"能跑通的工作流范围"取决于 sd.cpp 的能力边界；核心出图链路（txt2img / img2img / inpainting / ControlNet / HiRes / LoRA / IPAdapter）是真实可用的。
 
