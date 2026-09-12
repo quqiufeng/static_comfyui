@@ -4837,6 +4837,56 @@ extern "C" int torch_std_sdxl_generate(
     }
 }
 
+// 路径级便捷入口：内部缓存 dict / JIT 模块 / tokenizer，重复调用不再重载。
+extern "C" int torch_std_sdxl_generate_paths(
+    const char* model_path, const char* clip_l_jit, const char* clip_g_jit, const char* vae_jit,
+    const char* vocab_path, const char* merges_path,
+    const char* prompt, const char* negative_prompt,
+    int width, int height, int steps, double cfg, const char* scheduler,
+    long long seed, const char* output_path) {
+    static std::unordered_map<std::string, void*> mod_cache;
+    static std::unordered_map<std::string, void*> dict_cache;
+    static std::unordered_map<std::string, void*> tok_cache;
+    auto getmod = [&](const char* p) -> void* {
+        std::string k = p ? p : "";
+        auto it = mod_cache.find(k);
+        if (it == mod_cache.end()) {
+            void* m = torch_std_jit_load(p);
+            mod_cache[k] = m;
+            return m;
+        }
+        return it->second;
+    };
+    auto getdict = [&](const char* p) -> void* {
+        std::string k = p ? p : "";
+        auto it = dict_cache.find(k);
+        if (it == dict_cache.end()) {
+            void* d = torch_std_safetensors_load(p);
+            dict_cache[k] = d;
+            return d;
+        }
+        return it->second;
+    };
+    auto gettok = [&](const char* v, const char* m) -> void* {
+        std::string k = std::string(v ? v : "") + "|" + std::string(m ? m : "");
+        auto it = tok_cache.find(k);
+        if (it == tok_cache.end()) {
+            void* t = torch_std_clip_tokenizer_create(v, m);
+            tok_cache[k] = t;
+            return t;
+        }
+        return it->second;
+    };
+    void* unet = getdict(model_path);
+    void* cl   = getmod(clip_l_jit);
+    void* cg   = getmod(clip_g_jit);
+    void* vae  = getmod(vae_jit);
+    void* tok  = gettok(vocab_path, merges_path);
+    if (!unet || !cl || !cg || !vae || !tok) return -100;
+    return torch_std_sdxl_generate(unet, cl, cg, vae, tok, prompt, negative_prompt,
+                                   width, height, steps, cfg, scheduler, seed, output_path);
+}
+
 // ============================================================
 // Flow Matching scheduler (for FLUX / SD3)
 // ============================================================
