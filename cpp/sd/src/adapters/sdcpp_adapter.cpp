@@ -79,6 +79,10 @@ public:
     // ModelNoiseScale
     float noise_scale = 1.0f;
 
+    // HiRes Fix 放大器（默认 model + 2x_ESRGAN，对齐旧 backup.sh）
+    std::string hires_upscaler       = "model";
+    std::string hires_upscaler_model;
+
     ~Impl() {
         if (ctx) {
             free_sd_ctx(ctx);
@@ -86,6 +90,24 @@ public:
         }
     }
 };
+
+// sd.cpp 的 hires upscaler 字符串是精确匹配（"Model"/"Latent"/"Latent (bicubic)"...），
+// 这里把常见的 kebab/lower 写法归一化，避免节点传 "model" 匹配失败回退 latent。
+static std::string normalize_hires_upscaler(const std::string& s) {
+    std::string l = s;
+    for (auto& c : l) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (l == "model" || l == "esrgan") return "Model";
+    if (l == "none") return "None";
+    if (l == "latent") return "Latent";
+    if (l == "latent-nearest") return "Latent (nearest)";
+    if (l == "latent-nearest-exact") return "Latent (nearest-exact)";
+    if (l == "latent-antialiased") return "Latent (antialiased)";
+    if (l == "latent-bicubic") return "Latent (bicubic)";
+    if (l == "latent-bicubic-antialiased") return "Latent (bicubic antialiased)";
+    if (l == "lanczos") return "Lanczos";
+    if (l == "nearest") return "Nearest";
+    return s;
+}
 
 SDPipeline::SDPipeline() : impl_(std::make_unique<Impl>()) {
     sd_set_log_callback(sdcpp_log_cb, nullptr);
@@ -342,6 +364,12 @@ void SDPipeline::set_noise_scale(float noise_scale) {
     impl_->noise_scale = noise_scale;
 }
 
+void SDPipeline::set_hires_upscaler(const std::string& upscaler, const std::string& model_path) {
+    if (!impl_) return;
+    impl_->hires_upscaler       = upscaler;
+    impl_->hires_upscaler_model = model_path;
+}
+
 void SDPipeline::set_prediction(int pred) {
     if (!impl_ || !impl_->ctx) return;
     prediction_t p = EPS_PRED;
@@ -553,10 +581,15 @@ std::vector<Image> SDPipeline::generate(const ImageGenerationParams& params) {
 
     // HiRes Fix
     if (params.hires_enabled) {
-        img_params.hires.enabled             = true;
-        img_params.hires.upscaler            = str_to_sd_hires_upscaler(params.hires_upscaler.c_str());
+        img_params.hires.enabled = true;
+        // 优先用 Impl 覆盖（节点可显式指定放大器）；否则用 GenerateParams
+        std::string upscaler_name = impl_->hires_upscaler.empty() ? params.hires_upscaler : impl_->hires_upscaler;
+        img_params.hires.upscaler = str_to_sd_hires_upscaler(normalize_hires_upscaler(upscaler_name).c_str());
         if (img_params.hires.upscaler == SD_HIRES_UPSCALER_COUNT) {
             img_params.hires.upscaler = SD_HIRES_UPSCALER_LATENT;
+        }
+        if (!impl_->hires_upscaler_model.empty()) {
+            img_params.hires.model_path = impl_->hires_upscaler_model.c_str();
         }
         img_params.hires.target_width        = params.hires_width;
         img_params.hires.target_height       = params.hires_height;
@@ -1255,6 +1288,13 @@ int sd_pipeline_clip_vision_encode(sd_pipeline_t pipeline, const char* image_pat
 int sd_pipeline_set_noise_scale(sd_pipeline_t pipeline, float noise_scale) {
     if (!pipeline) return -1;
     static_cast<sd::SDPipeline*>(pipeline)->set_noise_scale(noise_scale);
+    return 0;
+}
+
+int sd_pipeline_set_hires_upscaler(sd_pipeline_t pipeline, const char* upscaler, const char* model_path) {
+    if (!pipeline) return -1;
+    static_cast<sd::SDPipeline*>(pipeline)->set_hires_upscaler(upscaler ? upscaler : "model",
+                                                                model_path ? model_path : "");
     return 0;
 }
 

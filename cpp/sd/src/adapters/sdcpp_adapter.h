@@ -200,6 +200,9 @@ public:
     // ModelNoiseScale
     void set_noise_scale(float noise_scale);
 
+    // HiRes Fix upscaler ("model"/"latent"/... + optional upscaler model path)
+    void set_hires_upscaler(const std::string& upscaler, const std::string& model_path);
+
     // ModelSamplingDiscrete: force prediction type (eps=0, v_pred=1)
     void set_prediction(int pred);
 
@@ -446,6 +449,9 @@ int sd_pipeline_clip_vision_encode(sd_pipeline_t pipeline, const char* image_pat
 
 /** ModelNoiseScale: scale ancestral noise. */
 int sd_pipeline_set_noise_scale(sd_pipeline_t pipeline, float noise_scale);
+
+/** HiRes Fix upscaler: e.g. "model" + 2x_ESRGAN path, or "latent". */
+int sd_pipeline_set_hires_upscaler(sd_pipeline_t pipeline, const char* upscaler, const char* model_path);
 
 /** ModelSamplingDiscrete: force prediction type (0=eps, 1=v_prediction). */
 int sd_pipeline_set_prediction(sd_pipeline_t pipeline, int pred);

@@ -1,4 +1,4 @@
-from sd_backend import sd_create, sd_free, sd_load, sd_load_ex, sd_load_lora, sd_generate_full, sd_ensure_directory, sd_set_ipadapter, sd_set_ipadapter_enabled, sd_set_init_image, sd_load_control_net, sd_set_control_image, sd_set_area_conds, sd_set_noise_scale, sd_set_prediction, SD_WTYPE_AUTO
+from sd_backend import sd_create, sd_free, sd_load, sd_load_ex, sd_load_lora, sd_generate_full, sd_ensure_directory, sd_set_ipadapter, sd_set_ipadapter_enabled, sd_set_init_image, sd_load_control_net, sd_set_control_image, sd_set_area_conds, sd_set_noise_scale, sd_set_prediction, sd_set_hires_upscaler, SD_WTYPE_AUTO
 
 
 NODE_CLASS_MAPPINGS: dict = make_dict()
@@ -593,6 +593,14 @@ def hires_fix(inputs):
     if seed == 0:
         seed = -1
 
+    # HiRes 放大器：默认 model + 2x_ESRGAN（对齐旧 backup.sh），可选 latent 等
+    upscaler = get_str(inputs, "upscaler", "model")
+    upscaler_model = get_str(inputs, "upscaler_model", "2x_ESRGAN.gguf")
+    upscaler_path = ""
+    if upscaler == "model" and upscaler_model != "":
+        upscaler_path = resolve_model_path(upscaler_model)
+    sd_set_hires_upscaler(model.pipeline, upscaler, upscaler_path)
+
     opts = parse_sampler_opts(inputs)
     dict_set(opts, "cfg", get_float(inputs, "cfg", 2.5))
     dict_set(opts, "scheduler", get_str(inputs, "scheduler", "discrete"))
@@ -608,12 +616,13 @@ def hires_fix(inputs):
     dict_set(opts, "freeu_b2", get_float(inputs, "freeu_b2", 1.4))
     dict_set(opts, "sag", get_int(inputs, "sag", 0))
     dict_set(opts, "sag_scale", get_float(inputs, "sag_scale", 1.0))
-    dict_set(opts, "clarity", get_float(inputs, "clarity", 0.2))
-    dict_set(opts, "sharpen", get_float(inputs, "sharpen", 0.3))
+    # 后处理默认关闭（旧 backup.sh 不做后处理，避免过锐/振铃）
+    dict_set(opts, "clarity", get_float(inputs, "clarity", 0.0))
+    dict_set(opts, "sharpen", get_float(inputs, "sharpen", 0.0))
     dict_set(opts, "sharpen_radius", get_int(inputs, "sharpen_radius", 1))
-    dict_set(opts, "smart_sharpen", get_float(inputs, "smart_sharpen", 0.5))
+    dict_set(opts, "smart_sharpen", get_float(inputs, "smart_sharpen", 0.0))
     dict_set(opts, "smart_sharpen_radius", get_int(inputs, "smart_sharpen_radius", 2))
-    dict_set(opts, "edge_sharpen", get_float(inputs, "edge_sharpen", 1.5))
+    dict_set(opts, "edge_sharpen", get_float(inputs, "edge_sharpen", 0.0))
     dict_set(opts, "edge_sharpen_radius", get_int(inputs, "edge_sharpen_radius", 2))
     dict_set(opts, "edge_sharpen_threshold", get_float(inputs, "edge_sharpen_threshold", 0.3))
 
