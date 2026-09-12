@@ -374,6 +374,23 @@ int torch_std_sdxl_generate(
     int width, int height, int steps, double cfg,
     const char* scheduler, long long seed, const char* output_path);
 
+// 区域条件版（area_prompts 以 0x1f 分隔；rects/strengths 为 CSV）
+int torch_std_sdxl_generate_areas(
+    void* unet_dict, void* clip_l_jit, void* clip_g_jit, void* vae_jit, void* tokenizer,
+    const char* prompt, const char* negative_prompt,
+    int width, int height, int steps, double cfg, const char* scheduler, long long seed,
+    const char* area_prompts, const char* area_rects_csv, const char* area_strengths_csv,
+    const char* output_path);
+
+// 区域条件版路径入口（内部缓存）
+int torch_std_sdxl_generate_areas_paths(
+    const char* model_path, const char* clip_l_jit, const char* clip_g_jit, const char* vae_jit,
+    const char* vocab_path, const char* merges_path,
+    const char* prompt, const char* negative_prompt,
+    int width, int height, int steps, double cfg, const char* scheduler, long long seed,
+    const char* area_prompts, const char* area_rects_csv, const char* area_strengths_csv,
+    const char* output_path);
+
 // 路径级便捷入口（内部缓存）
 int torch_std_sdxl_generate_paths(
     const char* model_path, const char* clip_l_jit, const char* clip_g_jit, const char* vae_jit,

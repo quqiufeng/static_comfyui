@@ -4837,6 +4837,202 @@ extern "C" int torch_std_sdxl_generate(
     }
 }
 
+// ---- 区域条件辅助 ----
+struct SdxlAreaCond {
+    std::string prompt;
+    int x = 0, y = 0, w = 0, h = 0;
+    float strength = 1.0f;
+};
+
+// 单次 UNet 前向，返回 eps（at::Tensor）
+static at::Tensor sdxl_unet_pred(void* unet_dict, const at::Tensor& x, float sigma,
+                                 void* emb, void* pool, int h, int w) {
+    auto t_sig = at::full({1}, sigma, at::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA));
+    void* x_p  = wrap(x);
+    void* t_p  = wrap(t_sig);
+    void* out  = torch_std_sdxl_unet_forward(unet_dict, x_p, t_p, emb, pool,
+                                             (double)h, (double)w, 0, 0, (double)h, (double)w);
+    torch_std_delete_tensor(x_p);
+    torch_std_delete_tensor(t_p);
+    if (!out) return at::Tensor();
+    at::Tensor r = unwrap(out);
+    torch_std_delete_tensor(out);
+    return r;
+}
+
+// 区域条件版 SDXL 生成。area_prompts 以 0x1f 分隔；area_rects/strengths 为 CSV。
+extern "C" int torch_std_sdxl_generate_areas(
+    void* unet_dict, void* clip_l_jit, void* clip_g_jit, void* vae_jit, void* tokenizer,
+    const char* prompt, const char* negative_prompt,
+    int width, int height, int steps, double cfg, const char* scheduler, long long seed,
+    const char* area_prompts, const char* area_rects_csv, const char* area_strengths_csv,
+    const char* output_path) {
+    try {
+        torch::NoGradGuard no_grad;
+        torch::manual_seed((int64_t)seed);
+        if (!unet_dict || !clip_l_jit || !clip_g_jit || !vae_jit || !tokenizer) return -1;
+
+        auto encode = [&](const char* text) -> std::pair<void*, void*> {
+            void* tk = torch_std_clip_tokenizer_encode(tokenizer, text ? text : "");
+            if (!tk) return {nullptr, nullptr};
+            void* emb  = torch_std_sdxl_dual_clip(clip_l_jit, clip_g_jit, tk);
+            void* pool = torch_std_sdxl_get_pooled();
+            torch_std_delete_tensor(tk);
+            return {emb, pool};
+        };
+
+        // 解析区域条件
+        std::vector<SdxlAreaCond> areas;
+        {
+            std::vector<std::string> ps;
+            if (area_prompts && *area_prompts) {
+                std::string cur;
+                for (const char* p = area_prompts; *p; p++) {
+                    if (*p == '\x1f') { ps.push_back(cur); cur.clear(); }
+                    else cur += *p;
+                }
+                ps.push_back(cur);
+            }
+            std::vector<std::string> rects = split_csv(area_rects_csv);
+            std::vector<std::string> strg  = split_csv(area_strengths_csv);
+            for (size_t i = 0; i < ps.size(); i++) {
+                SdxlAreaCond a;
+                a.prompt = ps[i];
+                if (i * 4 + 3 < rects.size()) {
+                    a.x = atoi(rects[i * 4 + 0].c_str());
+                    a.y = atoi(rects[i * 4 + 1].c_str());
+                    a.w = atoi(rects[i * 4 + 2].c_str());
+                    a.h = atoi(rects[i * 4 + 3].c_str());
+                }
+                if (i < strg.size() && !strg[i].empty()) a.strength = atof(strg[i].c_str());
+                areas.push_back(a);
+            }
+        }
+
+        // 编码
+        auto neg = encode(negative_prompt);
+        auto pos = encode(prompt);
+        if (!neg.first || !pos.first) return -2;
+        std::vector<std::pair<void*, void*>> aenc;
+        for (auto& a : areas) {
+            auto e = encode(a.prompt.c_str());
+            if (!e.first) return -3;
+            aenc.push_back(e);
+        }
+
+        void* sigmas_p = torch_std_sampler_sigmas(steps, 0.0292, 14.6, scheduler ? scheduler : "karras");
+        if (!sigmas_p) return -4;
+        at::Tensor sigmas = unwrap(sigmas_p).to(torch::kCPU).to(torch::kFloat32);
+
+        auto x = at::randn({1, 4, height / 8, width / 8},
+                           at::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA));
+        x = x * sigmas[0].item<float>();
+
+        for (int i = 0; i < steps; i++) {
+            float sig_t = sigmas[i].item<float>();
+            float sig_n = sigmas[i + 1].item<float>();
+
+            at::Tensor uncond = sdxl_unet_pred(unet_dict, x, sig_t, neg.first, neg.second, height, width);
+            if (!uncond.defined()) return -5;
+
+            // 正向：base + 区域条件加权合成
+            at::Tensor out_pos = at::zeros_like(uncond);
+            at::Tensor counts  = at::zeros_like(uncond);
+            at::Tensor base    = sdxl_unet_pred(unet_dict, x, sig_t, pos.first, pos.second, height, width);
+            if (!base.defined()) return -6;
+            out_pos = out_pos + base;
+            counts  = counts + 1.0f;
+            for (size_t ai = 0; ai < areas.size(); ai++) {
+                auto& a = areas[ai];
+                at::Tensor pred = sdxl_unet_pred(unet_dict, x, sig_t, aenc[ai].first, aenc[ai].second, height, width);
+                if (!pred.defined()) return -7;
+                int y0 = a.y, x0 = a.x, hh = a.h, ww = a.w;
+                if (y0 < 0) y0 = 0;
+                if (x0 < 0) x0 = 0;
+                if (y0 + hh > height / 8) hh = height / 8 - y0;
+                if (x0 + ww > width / 8) ww = width / 8 - x0;
+                if (hh <= 0 || ww <= 0) continue;
+                auto region = at::indexing::Slice(y0, y0 + hh);
+                auto rcol   = at::indexing::Slice(x0, x0 + ww);
+                out_pos.index_put_({0, at::indexing::Slice(), region, rcol},
+                                   out_pos.index({0, at::indexing::Slice(), region, rcol}) + pred.index({0, at::indexing::Slice(), region, rcol}) * a.strength);
+                counts.index_put_({0, at::indexing::Slice(), region, rcol},
+                                  counts.index({0, at::indexing::Slice(), region, rcol}) + a.strength);
+            }
+            out_pos = out_pos / counts.clamp_min(1e-6f);
+
+            // CFG + Euler
+            auto t_sig  = at::full({1}, sig_t, at::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA));
+            auto t_next = at::full({1}, sig_n, at::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA));
+            void* x_p  = wrap(x);
+            void* ts_p = wrap(t_sig);
+            void* tn_p = wrap(t_next);
+            void* cond_p   = wrap(out_pos);
+            void* uncond_p = wrap(uncond);
+            void* x_next   = torch_std_euler_step(x_p, ts_p, tn_p, cond_p, uncond_p, cfg);
+            if (!x_next) return -8;
+            x = unwrap(x_next);
+            torch_std_delete_tensor(x_p);
+            torch_std_delete_tensor(ts_p);
+            torch_std_delete_tensor(tn_p);
+            torch_std_delete_tensor(cond_p);
+            torch_std_delete_tensor(uncond_p);
+            torch_std_delete_tensor(x_next);
+        }
+
+        void* x_p = wrap(x);
+        void* img = torch_std_vae_decode(vae_jit, x_p);
+        torch_std_delete_tensor(x_p);
+        if (!img) return -9;
+        torch_std_save_image_png(img, output_path);
+        torch_std_delete_tensor(img);
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "sdxl_generate_areas error: " << e.what() << std::endl;
+        return -99;
+    }
+}
+
+// 区域条件版路径入口（内部缓存）
+extern "C" int torch_std_sdxl_generate_areas_paths(
+    const char* model_path, const char* clip_l_jit, const char* clip_g_jit, const char* vae_jit,
+    const char* vocab_path, const char* merges_path,
+    const char* prompt, const char* negative_prompt,
+    int width, int height, int steps, double cfg, const char* scheduler, long long seed,
+    const char* area_prompts, const char* area_rects_csv, const char* area_strengths_csv,
+    const char* output_path) {
+    static std::unordered_map<std::string, void*> mod_cache;
+    static std::unordered_map<std::string, void*> dict_cache;
+    static std::unordered_map<std::string, void*> tok_cache;
+    auto getmod = [&](const char* p) -> void* {
+        std::string k = p ? p : "";
+        auto it = mod_cache.find(k);
+        if (it == mod_cache.end()) { void* m = torch_std_jit_load(p); mod_cache[k] = m; return m; }
+        return it->second;
+    };
+    auto getdict = [&](const char* p) -> void* {
+        std::string k = p ? p : "";
+        auto it = dict_cache.find(k);
+        if (it == dict_cache.end()) { void* d = torch_std_safetensors_load(p); dict_cache[k] = d; return d; }
+        return it->second;
+    };
+    auto gettok = [&](const char* v, const char* m) -> void* {
+        std::string k = std::string(v ? v : "") + "|" + std::string(m ? m : "");
+        auto it = tok_cache.find(k);
+        if (it == tok_cache.end()) { void* t = torch_std_clip_tokenizer_create(v, m); tok_cache[k] = t; return t; }
+        return it->second;
+    };
+    void* unet = getdict(model_path);
+    void* cl   = getmod(clip_l_jit);
+    void* cg   = getmod(clip_g_jit);
+    void* vae  = getmod(vae_jit);
+    void* tok  = gettok(vocab_path, merges_path);
+    if (!unet || !cl || !cg || !vae || !tok) return -100;
+    return torch_std_sdxl_generate_areas(unet, cl, cg, vae, tok, prompt, negative_prompt,
+                                         width, height, steps, cfg, scheduler, seed,
+                                         area_prompts, area_rects_csv, area_strengths_csv, output_path);
+}
+
 // 路径级便捷入口：内部缓存 dict / JIT 模块 / tokenizer，重复调用不再重载。
 extern "C" int torch_std_sdxl_generate_paths(
     const char* model_path, const char* clip_l_jit, const char* clip_g_jit, const char* vae_jit,
