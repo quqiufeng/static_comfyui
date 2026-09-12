@@ -322,6 +322,13 @@ void SDPipeline::set_wtype(int wtype) {
     load(impl_->config);  // wtype 是加载期参数 → 重载
 }
 
+void SDPipeline::set_flash_attn(bool enabled) {
+    if (!impl_) return;
+    if (impl_->config.diffusion_flash_attn == enabled) return;
+    impl_->config.diffusion_flash_attn = enabled;
+    load(impl_->config);  // flash_attn 是加载期参数 → 重载
+}
+
 std::vector<Image> SDPipeline::generate(const ImageGenerationParams& params) {
     std::vector<Image> results;
     if (!impl_ || !impl_->ctx) {
@@ -1068,6 +1075,12 @@ int sd_pipeline_set_flow_shift(sd_pipeline_t pipeline, float shift) {
 int sd_pipeline_set_wtype(sd_pipeline_t pipeline, int wtype) {
     if (!pipeline) return -1;
     static_cast<sd::SDPipeline*>(pipeline)->set_wtype(wtype);
+    return 0;
+}
+
+int sd_pipeline_set_flash_attn(sd_pipeline_t pipeline, int enabled) {
+    if (!pipeline) return -1;
+    static_cast<sd::SDPipeline*>(pipeline)->set_flash_attn(enabled != 0);
     return 0;
 }
 

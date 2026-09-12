@@ -1365,8 +1365,18 @@ def model_compute_dtype(inputs):
 
 register_node("ModelComputeDtype", "ModelComputeDtype",
               "model_compute_dtype", ("MODEL",), False)
+def model_attention_backend(inputs):
+    m: SDPipelineHandle = dict_get(inputs, "model")
+    if m is None:
+        return (None,)
+    backend = get_str(inputs, "backend", "default")
+    # sd.cpp 仅暴露 diffusion flash attention 开关
+    sd_set_flash_attn(m.pipeline, backend == "flash_attn")
+    return (m,)
+
+
 register_node("ModelAttentionBackend", "ModelAttentionBackend",
-              "model_passthrough", ("MODEL",), False)
+              "model_attention_backend", ("MODEL",), False)
 register_node("ModelNoiseScale", "ModelNoiseScale",
               "model_passthrough", ("MODEL",), False)
 
@@ -1620,7 +1630,9 @@ def call_node(class_type: str, inputs):
         return model_sampling_flow(inputs)
     elif class_type == "ModelComputeDtype":
         return model_compute_dtype(inputs)
-    elif class_type == "ModelSamplingDiscrete" or class_type == "ModelSamplingContinuousEDM" or class_type == "ModelSamplingContinuousV" or class_type == "ModelSamplingStableCascade" or class_type == "RescaleCFG" or class_type == "ModelAttentionBackend" or class_type == "ModelNoiseScale":
+    elif class_type == "ModelAttentionBackend":
+        return model_attention_backend(inputs)
+    elif class_type == "ModelSamplingDiscrete" or class_type == "ModelSamplingContinuousEDM" or class_type == "ModelSamplingContinuousV" or class_type == "ModelSamplingStableCascade" or class_type == "RescaleCFG" or class_type == "ModelNoiseScale":
         return model_passthrough(inputs)
     elif class_type == "SaveLatent":
         return save_latent(inputs)

@@ -24,6 +24,7 @@ extern fn sd_pipeline_get_model_version_name(pipeline: ptr) -> str from "sdcpp_a
 extern fn sd_pipeline_set_clip_skip(pipeline: ptr, n: int) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_flow_shift(pipeline: ptr, shift: float) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_wtype(pipeline: ptr, wtype: int) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_set_flash_attn(pipeline: ptr, enabled: int) -> int from "sdcpp_adapter"
 extern fn sd_rotate_image(input_path: str, output_path: str, degrees: int) -> int from "sdcpp_adapter"
 extern fn sd_flip_image(input_path: str, output_path: str, method: int) -> int from "sdcpp_adapter"
 extern fn sd_blend_images(path1: str, path2: str, output_path: str, factor: float) -> int from "sdcpp_adapter"
@@ -158,6 +159,12 @@ def sd_set_flow_shift(pipeline: ptr, shift: float) -> int:
 
 def sd_set_wtype(pipeline: ptr, wtype: int) -> int:
     return sd_pipeline_set_wtype(pipeline, wtype)
+
+
+def sd_set_flash_attn(pipeline: ptr, enabled: bool) -> int:
+    if enabled:
+        return sd_pipeline_set_flash_attn(pipeline, 1)
+    return sd_pipeline_set_flash_attn(pipeline, 0)
 
 
 def sd_ensure_directory(path: str) -> int:

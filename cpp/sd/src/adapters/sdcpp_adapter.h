@@ -188,6 +188,9 @@ public:
     // Model weight type override (requires reload); wtype < 0 keeps current
     void set_wtype(int wtype);
 
+    // Enable diffusion flash attention (requires reload)
+    void set_flash_attn(bool enabled);
+
 private:
     class Impl;
     std::unique_ptr<Impl> impl_;
@@ -410,6 +413,9 @@ int sd_pipeline_set_flow_shift(sd_pipeline_t pipeline, float shift);
 
 /** Override model weight type (reloads the context). wtype < 0 keeps current. */
 int sd_pipeline_set_wtype(sd_pipeline_t pipeline, int wtype);
+
+/** Enable/disable diffusion flash attention (reloads the context). */
+int sd_pipeline_set_flash_attn(sd_pipeline_t pipeline, int enabled);
 
 /** Rotate an image by 90/180/270 degrees (counter-clockwise) and save as PNG. */
 int sd_rotate_image(const char* input_path, const char* output_path, int degrees);
