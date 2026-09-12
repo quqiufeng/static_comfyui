@@ -172,6 +172,7 @@ extern fn sd_pipeline_set_flash_attn(pipeline: ptr, enabled: int) -> int from "s
 extern fn sd_pipeline_set_rescale_cfg(pipeline: ptr, enabled: int, multiplier: float) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_area_conds(pipeline: ptr, prompts_sep: str, rects_csv: str, strengths_csv: str) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_noise_scale(pipeline: ptr, noise_scale: float) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_set_prediction(pipeline: ptr, pred: int) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_video_cfg(pipeline: ptr, enabled: int, mode: int, min_cfg: float) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_sigma_range(pipeline: ptr, enabled: int, sigma_min: float, sigma_max: float) -> int from "sdcpp_adapter"
 extern fn sd_rotate_image(input_path: str, output_path: str, degrees: int) -> int from "sdcpp_adapter"
@@ -326,6 +327,10 @@ def sd_set_area_conds(pipeline: ptr, prompts_sep: str, rects_csv: str, strengths
 
 def sd_set_noise_scale(pipeline: ptr, noise_scale: float) -> int:
     return sd_pipeline_set_noise_scale(pipeline, noise_scale)
+
+
+def sd_set_prediction(pipeline: ptr, pred: int) -> int:
+    return sd_pipeline_set_prediction(pipeline, pred)
 
 
 def sd_set_video_cfg(pipeline: ptr, mode: int, min_cfg: float) -> int:
@@ -1926,8 +1931,20 @@ def model_sampling_flow(inputs):
     return (m,)
 
 
+def model_sampling_discrete(inputs):
+    m: SDPipelineHandle = dict_get(inputs, "model")
+    if m is None:
+        return (None,)
+    sampling = get_str(inputs, "sampling", "eps")
+    pred = 0
+    if sampling == "v_prediction" or sampling == "v_prediction_zsnr":
+        pred = 1
+    sd_set_prediction(m.pipeline, pred)
+    return (m,)
+
+
 register_node("ModelSamplingDiscrete", "ModelSamplingDiscrete",
-              "model_passthrough", ("MODEL",), False)
+              "model_sampling_discrete", ("MODEL",), False)
 register_node("ModelSamplingFlux", "ModelSamplingFlux",
               "model_sampling_flow", ("MODEL",), False)
 register_node("ModelSamplingSD3", "ModelSamplingSD3",
@@ -2456,7 +2473,9 @@ def call_node(class_type: str, inputs):
         return model_sampling_sigma_range(inputs)
     elif class_type == "ModelNoiseScale":
         return model_noise_scale(inputs)
-    elif class_type == "ModelSamplingDiscrete" or class_type == "ModelSamplingStableCascade":
+    elif class_type == "ModelSamplingDiscrete":
+        return model_sampling_discrete(inputs)
+    elif class_type == "ModelSamplingStableCascade":
         return model_passthrough(inputs)
     elif class_type == "SaveLatent":
         return save_latent(inputs)

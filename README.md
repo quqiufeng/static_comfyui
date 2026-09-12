@@ -221,7 +221,8 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 |------|------|------|
 | `ModelSamplingFlux` / `SD3` / `AuraFlow` | `MODEL` | 真实实现（映射 sd.cpp `flow_shift`） |
 | `ModelSamplingContinuousEDM` / `ContinuousV` | `MODEL` | 真实实现（覆盖 denoiser sigma 区间；`discrete` 调度器忽略） |
-| `ModelSamplingDiscrete` / `StableCascade` | `MODEL` | 透传（sd.cpp 按模型自动调度） |
+| `ModelSamplingDiscrete` | `MODEL` | 真实实现（sd.cpp patch 强制预测类型 eps/v_prediction） |
+| `ModelSamplingStableCascade` | `MODEL` | 透传（sd.cpp 按模型自动调度） |
 | `ModelComputeDtype` | `MODEL` | 真实实现（映射 sd.cpp `wtype`，重载 ctx） |
 | `ModelAttentionBackend` | `MODEL` | 部分实现（`flash_attn` → sd.cpp diffusion flash attention） |
 | `RescaleCFG` | `MODEL` | 真实实现（sd.cpp patch 采样循环，1:1 复刻 ComfyUI） |

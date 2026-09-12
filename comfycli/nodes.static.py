@@ -1,4 +1,4 @@
-from sd_backend import sd_create, sd_free, sd_load, sd_load_ex, sd_load_lora, sd_generate_full, sd_ensure_directory, sd_set_ipadapter, sd_set_ipadapter_enabled, sd_set_init_image, sd_load_control_net, sd_set_control_image, sd_set_area_conds, sd_set_noise_scale, SD_WTYPE_AUTO
+from sd_backend import sd_create, sd_free, sd_load, sd_load_ex, sd_load_lora, sd_generate_full, sd_ensure_directory, sd_set_ipadapter, sd_set_ipadapter_enabled, sd_set_init_image, sd_load_control_net, sd_set_control_image, sd_set_area_conds, sd_set_noise_scale, sd_set_prediction, SD_WTYPE_AUTO
 
 
 NODE_CLASS_MAPPINGS: dict = make_dict()
@@ -1518,8 +1518,20 @@ def model_sampling_flow(inputs):
     return (m,)
 
 
+def model_sampling_discrete(inputs):
+    m: SDPipelineHandle = dict_get(inputs, "model")
+    if m is None:
+        return (None,)
+    sampling = get_str(inputs, "sampling", "eps")
+    pred = 0
+    if sampling == "v_prediction" or sampling == "v_prediction_zsnr":
+        pred = 1
+    sd_set_prediction(m.pipeline, pred)
+    return (m,)
+
+
 register_node("ModelSamplingDiscrete", "ModelSamplingDiscrete",
-              "model_passthrough", ("MODEL",), False)
+              "model_sampling_discrete", ("MODEL",), False)
 register_node("ModelSamplingFlux", "ModelSamplingFlux",
               "model_sampling_flow", ("MODEL",), False)
 register_node("ModelSamplingSD3", "ModelSamplingSD3",
@@ -2048,7 +2060,9 @@ def call_node(class_type: str, inputs):
         return model_sampling_sigma_range(inputs)
     elif class_type == "ModelNoiseScale":
         return model_noise_scale(inputs)
-    elif class_type == "ModelSamplingDiscrete" or class_type == "ModelSamplingStableCascade":
+    elif class_type == "ModelSamplingDiscrete":
+        return model_sampling_discrete(inputs)
+    elif class_type == "ModelSamplingStableCascade":
         return model_passthrough(inputs)
     elif class_type == "SaveLatent":
         return save_latent(inputs)

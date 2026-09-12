@@ -342,6 +342,17 @@ void SDPipeline::set_noise_scale(float noise_scale) {
     impl_->noise_scale = noise_scale;
 }
 
+void SDPipeline::set_prediction(int pred) {
+    if (!impl_ || !impl_->ctx) return;
+    prediction_t p = EPS_PRED;
+    if (pred == 1) {
+        p = V_PRED;
+    } else if (pred == 2) {
+        p = EDM_V_PRED;
+    }
+    sd_set_prediction(impl_->ctx, p);
+}
+
 int SDPipeline::clip_vision_encode(const std::string& image_path) {
     if (!impl_ || !impl_->ctx) return -1;
     cv::Mat img = cv::imread(image_path, cv::IMREAD_COLOR);
@@ -1244,6 +1255,12 @@ int sd_pipeline_clip_vision_encode(sd_pipeline_t pipeline, const char* image_pat
 int sd_pipeline_set_noise_scale(sd_pipeline_t pipeline, float noise_scale) {
     if (!pipeline) return -1;
     static_cast<sd::SDPipeline*>(pipeline)->set_noise_scale(noise_scale);
+    return 0;
+}
+
+int sd_pipeline_set_prediction(sd_pipeline_t pipeline, int pred) {
+    if (!pipeline) return -1;
+    static_cast<sd::SDPipeline*>(pipeline)->set_prediction(pred);
     return 0;
 }
 
