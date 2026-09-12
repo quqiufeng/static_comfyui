@@ -1652,6 +1652,36 @@ register_node("CLIPSave", "CLIPSave", "save_noop", ("*",), True)
 register_node("ModelSave", "ModelSave", "save_noop", ("*",), True)
 
 
+def model_merge_passthrough(inputs):
+    # sd.cpp 不支持运行时模型合并 → 透传 model1
+    m = dict_get(inputs, "model1")
+    if m is None:
+        return (None,)
+    return (m,)
+
+
+register_node("ModelMergeSimple", "ModelMergeSimple", "model_merge_passthrough", ("MODEL",), False)
+register_node("ModelMergeBlocks", "ModelMergeBlocks", "model_merge_passthrough", ("MODEL",), False)
+register_node("ModelMergeAdd", "ModelMergeAdd", "model_merge_passthrough", ("MODEL",), False)
+register_node("ModelMergeSubtract", "ModelMergeSubtract", "model_merge_passthrough", ("MODEL",), False)
+register_node("ModelMergeSD1", "ModelMergeSD1", "model_merge_passthrough", ("MODEL",), False)
+register_node("ModelMergeSD2", "ModelMergeSD2", "model_merge_passthrough", ("MODEL",), False)
+register_node("ModelMergeSDXL", "ModelMergeSDXL", "model_merge_passthrough", ("MODEL",), False)
+register_node("ModelMergeSD3_2B", "ModelMergeSD3_2B", "model_merge_passthrough", ("MODEL",), False)
+register_node("ModelMergeSD35_Large", "ModelMergeSD35_Large", "model_merge_passthrough", ("MODEL",), False)
+register_node("ModelMergeFlux1", "ModelMergeFlux1", "model_merge_passthrough", ("MODEL",), False)
+register_node("ModelMergeMochiPreview", "ModelMergeMochiPreview", "model_merge_passthrough", ("MODEL",), False)
+register_node("ModelMergeLTXV", "ModelMergeLTXV", "model_merge_passthrough", ("MODEL",), False)
+register_node("ModelMergeCosmos7B", "ModelMergeCosmos7B", "model_merge_passthrough", ("MODEL",), False)
+register_node("ModelMergeCosmos14B", "ModelMergeCosmos14B", "model_merge_passthrough", ("MODEL",), False)
+register_node("ModelMergeCosmosPredict2_2B", "ModelMergeCosmosPredict2_2B", "model_merge_passthrough", ("MODEL",), False)
+register_node("ModelMergeCosmosPredict2_14B", "ModelMergeCosmosPredict2_14B", "model_merge_passthrough", ("MODEL",), False)
+register_node("ModelMergeAuraflow", "ModelMergeAuraflow", "model_merge_passthrough", ("MODEL",), False)
+register_node("ModelMergeQwenImage", "ModelMergeQwenImage", "model_merge_passthrough", ("MODEL",), False)
+register_node("ModelMergeKrea2", "ModelMergeKrea2", "model_merge_passthrough", ("MODEL",), False)
+register_node("ModelMergeWAN2_1", "ModelMergeWAN2_1", "model_merge_passthrough", ("MODEL",), False)
+
+
 def print_node_list():
     keys = dict_keys(NODE_CLASS_MAPPINGS)
     i = 0
@@ -1772,6 +1802,8 @@ def call_node(class_type: str, inputs):
         return load_latent(inputs)
     elif class_type == "CheckpointSave" or class_type == "VAESave" or class_type == "CLIPSave" or class_type == "ModelSave":
         return save_noop(inputs)
+    elif str_starts_with(class_type, "ModelMerge"):
+        return model_merge_passthrough(inputs)
     elif class_type == "VAEDecodeTiled":
         return vae_decode(inputs)
     elif class_type == "ConditioningZeroOut":
