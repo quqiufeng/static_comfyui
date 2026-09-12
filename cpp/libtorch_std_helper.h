@@ -265,6 +265,11 @@ const char* torch_std_safetensors_name(void* dict, int idx);
 void* torch_std_safetensors_tensor(void* dict, int idx);
 void  torch_std_safetensors_free(void* dict);
 void* torch_std_safetensors_get_tensor_by_name(void* dict, const char* name);
+int   torch_std_safetensors_save(void* dict, const char* path);
+int   torch_std_copy_file(const char* src, const char* dst);
+void* torch_std_safetensors_merge(void* a, void* b, int mode,
+                                  const char* prefixes_csv, const char* ratios_csv,
+                                  double default_ratio, const char* strip_prefix);
 void* torch_std_lora_apply(void* weight, void* lora_A, void* lora_B, double scale);
 
 // ============================================================

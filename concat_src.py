@@ -10,6 +10,7 @@ BASE = os.path.join(os.path.dirname(__file__), "comfycli")
 FILES = [
     "cli_args.static.py",
     "sd_backend.static.py",
+    "torch_helper.static.py",
     "nodes.static.py",
     "execution.static.py",
     "main.static.py",

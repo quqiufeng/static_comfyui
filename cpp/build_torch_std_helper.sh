@@ -41,8 +41,8 @@ g++ -O3 -shared -fPIC -std=c++17 -D_GLIBCXX_USE_CXX11_ABI=1 \
     -L"$CUDA_LIB" \
     -ltorch -ltorch_cpu -lc10 -lcuda -lcudart -lpng \
     -Wl,-rpath,"$TORCH_LIB" \
-    -o libtorch_std_helper.so
+    -o libcomfycli_torch.so
 
 echo "=== Build complete ==="
-echo "Output: libtorch_std_helper.so"
-ls -lh libtorch_std_helper.so
+echo "Output: libcomfycli_torch.so"
+ls -lh libcomfycli_torch.so

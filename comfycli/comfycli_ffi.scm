@@ -8,6 +8,12 @@
 
 (load-shared-object "libsdcpp_adapter.so")
 
+;; libcomfycli_torch.so — 权重级操作（模型/CLIP 合并、权重导出）。
+;; 故意不使用 libtorch_std_helper.so 之名：上游 static_stdlib.scm 会探测该名并
+;; 声明完整 torch API，而本项目只需精简子集。可选依赖，缺失时相关节点不可用。
+(guard (e (#t (display "warning: libcomfycli_torch.so not loaded (merge/save nodes unavailable)\n")))
+  (load-shared-object "libcomfycli_torch.so"))
+
 ;; 上游 prelude 未提供 dict_keys（comfycli execution 需要）。
 ;; StaticPy 的 list 即 Scheme vector，故直接返回 hashtable-keys 的 vector。
 (define (dict_keys d)

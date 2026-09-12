@@ -2081,6 +2081,213 @@ void* torch_std_safetensors_get_tensor_by_name(void* dict, const char* name) {
     return nullptr;
 }
 
+// torch scalar type → safetensors dtype string
+static const char* st_dtype_str(c10::ScalarType st) {
+    switch (st) {
+        case torch::kFloat32:  return "F32";
+        case torch::kFloat16:  return "F16";
+        case torch::kBFloat16: return "BF16";
+        case torch::kFloat64:  return "F64";
+        case torch::kInt64:    return "I64";
+        case torch::kInt32:    return "I32";
+        case torch::kInt8:     return "I8";
+        case torch::kUInt8:    return "U8";
+        default:               return "F32";
+    }
+}
+
+// 简单文件复制（CheckpointSave/VAESave 等）
+int torch_std_copy_file(const char* src, const char* dst) {
+    if (!src || !dst) return -1;
+    FILE* in = fopen(src, "rb");
+    if (!in) return -2;
+    FILE* out = fopen(dst, "wb");
+    if (!out) {
+        fclose(in);
+        return -3;
+    }
+    char buf[1 << 20];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+        if (fwrite(buf, 1, n, out) != n) {
+            fclose(in);
+            fclose(out);
+            return -4;
+        }
+    }
+    fclose(in);
+    fclose(out);
+    return 0;
+}
+
+// 将 STDict 写为 safetensors 文件（无外部依赖）
+int torch_std_safetensors_save(void* dict, const char* path) {
+    try {
+        auto* d = static_cast<STDict*>(dict);
+        if (!d || !path) return -1;
+
+        std::string json = "{";
+        std::vector<torch::Tensor> ordered;
+        int64_t offset = 0;
+        bool first     = true;
+
+        for (int i = 0; i < d->count; i++) {
+            std::string name = d->entries[i].name;
+            if (name == "__metadata__") continue;
+            auto* t = static_cast<torch::Tensor*>(d->entries[i].tensor);
+            if (!t) continue;
+
+            torch::Tensor tc = t->to(torch::kCPU).contiguous();
+            int64_t nbytes   = tc.numel() * (int64_t)tc.element_size();
+
+            std::string shape = "[";
+            for (int k = 0; k < tc.dim(); k++) {
+                if (k) shape += ",";
+                shape += std::to_string(tc.size(k));
+            }
+            shape += "]";
+
+            if (!first) json += ",";
+            first = false;
+            json += "\"" + name + "\":{\"dtype\":\"" + st_dtype_str(tc.scalar_type()) +
+                    "\",\"shape\":" + shape + ",\"data_offsets\":[" + std::to_string(offset) + "," +
+                    std::to_string(offset + nbytes) + "]}";
+            offset += nbytes;
+            ordered.push_back(tc);
+        }
+        json += "}";
+        while (json.size() % 8 != 0) json += " ";
+
+        uint64_t hlen = (uint64_t)json.size();
+        FILE* f       = fopen(path, "wb");
+        if (!f) return -2;
+        fwrite(&hlen, 8, 1, f);
+        fwrite(json.data(), 1, json.size(), f);
+        for (auto& t : ordered) {
+            int64_t nbytes = t.numel() * (int64_t)t.element_size();
+            if (nbytes > 0) fwrite(t.data_ptr(), 1, (size_t)nbytes, f);
+        }
+        fclose(f);
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "torch_std_safetensors_save error: " << e.what() << std::endl;
+        return -3;
+    }
+}
+
+// 权重合并：返回新 dict（ComfyUI ModelMerge* / CLIPMerge* 语义）
+//   mode: 0 = 加权 (a*(1-r) + b*r)；1 = 相加 (a+b)；2 = 相减 (-r*a + r*b)
+//   prefixes/ratios/n_prefix: 最长前缀匹配的逐块 ratio（ModelMergeBlocks）
+//   default_ratio: 无前缀匹配时使用（ComfyUI 取第一个 block 输入的值）
+//   strip_prefix: 非空时仅合并包含该子串的键（如 "diffusion_model."），并按其后缀做前缀匹配；
+//                 空字符串表示合并全部键（CLIPMerge）
+static std::vector<std::string> split_csv(const char* s) {
+    std::vector<std::string> out;
+    if (!s) return out;
+    std::string cur;
+    for (const char* p = s; *p; p++) {
+        if (*p == ',') {
+            out.push_back(cur);
+            cur.clear();
+        } else {
+            cur += *p;
+        }
+    }
+    out.push_back(cur);
+    return out;
+}
+
+void* torch_std_safetensors_merge(void* a, void* b, int mode,
+                                  const char* prefixes_csv, const char* ratios_csv,
+                                  double default_ratio, const char* strip_prefix) {
+    try {
+        auto* da = static_cast<STDict*>(a);
+        auto* db = static_cast<STDict*>(b);
+        if (!da || !db) return nullptr;
+        std::string sp = strip_prefix ? strip_prefix : "";
+
+        std::vector<std::string> prefixes = split_csv(prefixes_csv);
+        std::vector<double> ratios;
+        for (auto& r : split_csv(ratios_csv)) {
+            ratios.push_back(r.empty() ? 0.0 : atof(r.c_str()));
+        }
+        int n_prefix = (int)std::min(prefixes.size(), ratios.size());
+
+        auto find = [](STDict* d, const std::string& name) -> torch::Tensor* {
+            for (int i = 0; i < d->count; i++) {
+                if (name == d->entries[i].name) return static_cast<torch::Tensor*>(d->entries[i].tensor);
+            }
+            return nullptr;
+        };
+
+        auto* out  = new STDict();
+        out->count = 0;
+
+        for (int pass = 0; pass < 2 && out->count < 4096; pass++) {
+            STDict* src = pass == 0 ? da : db;
+            for (int i = 0; i < src->count && out->count < 4096; i++) {
+                std::string name = src->entries[i].name;
+                if (name == "__metadata__") continue;
+                if (find(out, name) != nullptr) continue;
+
+                auto* ta = find(da, name);
+                auto* tb = find(db, name);
+
+                std::string k_unet = name;
+                bool mergeable     = true;
+                if (!sp.empty()) {
+                    size_t pos = name.find(sp);
+                    if (pos == std::string::npos) {
+                        mergeable = false;
+                    } else {
+                        k_unet = name.substr(pos + sp.size());
+                    }
+                }
+
+                torch::Tensor result;
+                if (mergeable && ta && tb && ta->is_floating_point() && tb->is_floating_point()) {
+                    double r    = default_ratio;
+                    size_t best = 0;
+                    for (int p = 0; p < n_prefix; p++) {
+                        const std::string& pre = prefixes[p];
+                        if (!pre.empty() && k_unet.rfind(pre, 0) == 0 && pre.size() > best) {
+                            r    = ratios[p];
+                            best = pre.size();
+                        }
+                    }
+                    double wa, wb;
+                    if (mode == 1) {
+                        wa = 1.0;
+                        wb = 1.0;
+                    } else if (mode == 2) {
+                        wa = -r;
+                        wb = r;
+                    } else {
+                        wa = 1.0 - r;
+                        wb = r;
+                    }
+                    result = (*ta) * wa;
+                    result.add_(*tb, wb);
+                } else if (ta) {
+                    result = *ta;
+                } else {
+                    result = *tb;
+                }
+
+                auto& e = out->entries[out->count];
+                strncpy(e.name, name.c_str(), 255);
+                e.name[255] = '\0';
+                e.tensor    = new torch::Tensor(result);
+                out->count++;
+            }
+        }
+        return out;
+    } catch (const std::exception& e) {
+        std::cerr << "torch_std_safetensors_merge error: " << e.what() << std::endl;
+        return nullptr;
+    }
+}
+
 // LoRA/LyCORIS merge: given a tensor and LoRA weights, apply W' = W + scale * B @ A
 void* torch_std_lora_apply(void* weight, void* lora_A, void* lora_B, double scale) {
     try {

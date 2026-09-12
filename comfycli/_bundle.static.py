@@ -386,6 +386,19 @@ def sd_generate_full(pipeline: ptr, prompt: str, negative_prompt: str,
         dict_get(opts, "ad_model_path"), dict_get(opts, "ad_prompt"),
         dict_get(opts, "ad_negative_prompt"),
         output_path)
+# === torch_helper.static.py ===
+# torch_helper.static.py — libtorch_std_helper.so FFI
+#
+# 用于 sd.cpp C API 无法覆盖的权重级操作（模型合并 / CLIP 合并 / 权重导出）。
+# 共享库由 comfycli_ffi.scm 以 guard 方式加载；缺失时相关节点不可用。
+
+extern fn torch_std_safetensors_load(path: str) -> ptr from "torch_helper"
+extern fn torch_std_safetensors_count(d: ptr) -> int from "torch_helper"
+extern fn torch_std_safetensors_save(d: ptr, path: str) -> int from "torch_helper"
+extern fn torch_std_safetensors_merge(a: ptr, b: ptr, mode: int, prefixes_csv: str, ratios_csv: str, default_ratio: float, strip_prefix: str) -> ptr from "torch_helper"
+extern fn torch_std_safetensors_free(d: ptr) -> None from "torch_helper"
+extern fn torch_std_copy_file(src: str, dst: str) -> int from "torch_helper"
+
 # === nodes.static.py ===
 
 NODE_CLASS_MAPPINGS: dict = make_dict()
@@ -395,6 +408,10 @@ NODE_DISPLAY_NAMES: dict = make_dict()
 @dataclass
 class SDPipelineHandle:
     pipeline: ptr
+    model_path: str
+    clip_l_path: str
+    clip_g_path: str
+    vae_path: str
 
 
 @dataclass
@@ -429,8 +446,8 @@ class IPAdapterModel:
     name: str
 
 
-def make_sd_pipeline_handle(pipeline: ptr) -> SDPipelineHandle:
-    return SDPipelineHandle(pipeline)
+def make_sd_pipeline_handle(pipeline: ptr, model_path: str, clip_l_path: str, clip_g_path: str, vae_path: str) -> SDPipelineHandle:
+    return SDPipelineHandle(pipeline, model_path, clip_l_path, clip_g_path, vae_path)
 
 
 def model_root() -> str:
@@ -588,7 +605,7 @@ def checkpoint_loader_simple(inputs):
         return (None, None, None)
 
     print("Checkpoint loaded, model version: " + sd_get_model_version_name(pipeline))
-    handle = make_sd_pipeline_handle(pipeline)
+    handle = make_sd_pipeline_handle(pipeline, ckpt_path, clip_l_path, clip_g_path, "")
     return (handle, handle, handle)
 
 
@@ -609,7 +626,7 @@ def unet_loader(inputs):
     if rc != 0:
         print("UNETLoader: load failed, rc=" + string_of_int(rc))
         return (None,)
-    handle = make_sd_pipeline_handle(pipeline)
+    handle = make_sd_pipeline_handle(pipeline, path, "", "", "")
     return (handle,)
 
 
@@ -825,7 +842,7 @@ def diffusion_model_loader(inputs):
         print("DiffusionModelLoader: load failed, rc=" + string_of_int(rc))
         return (None,)
 
-    handle = make_sd_pipeline_handle(pipeline)
+    handle = make_sd_pipeline_handle(pipeline, diffusion_model_path, llm_path, "", vae_path)
     return (handle, handle, handle)
 
 
@@ -1832,46 +1849,191 @@ def load_latent(inputs):
 register_node("LoadLatent", "Load Latent", "load_latent", ("LATENT",), False)
 
 
-def save_noop(inputs):
-    # 模型/CLIP/VAE 由 sd.cpp 内部持有，暂不支持导出
-    print("Save node: model is internal to sd.cpp backend, export not supported")
-    return ("",)
+def save_component(inputs, key: str, default_prefix: str):
+    handle: SDPipelineHandle = dict_get(inputs, key)
+    if handle is None:
+        print("Save: input '" + key + "' missing")
+        return ("",)
+    src = handle.model_path
+    if key == "vae" and handle.vae_path != "":
+        src = handle.vae_path
+    if key == "clip" and handle.clip_l_path != "":
+        src = handle.clip_l_path
+    if src == "":
+        print("Save: no source file for '" + key + "'")
+        return ("",)
+    output_dir = get_str(inputs, "output_dir", "/tmp/comfy_output")
+    prefix = get_str(inputs, "filename_prefix", default_prefix)
+    sd_ensure_directory(output_dir)
+    dst = output_dir + "/" + prefix + ".safetensors"
+    rc = torch_std_copy_file(src, dst)
+    if rc != 0:
+        print("Save: copy failed, rc=" + string_of_int(rc) + " (libtorch_std_helper.so missing?)")
+        return ("",)
+    print("Saved to: " + dst)
+    return (dst,)
 
 
-register_node("CheckpointSave", "CheckpointSave", "save_noop", ("*",), True)
-register_node("VAESave", "VAESave", "save_noop", ("*",), True)
-register_node("CLIPSave", "CLIPSave", "save_noop", ("*",), True)
-register_node("ModelSave", "ModelSave", "save_noop", ("*",), True)
+def checkpoint_save(inputs):
+    return save_component(inputs, "model", "checkpoint")
 
 
-def model_merge_passthrough(inputs):
-    # sd.cpp 不支持运行时模型合并 → 透传 model1
-    m = dict_get(inputs, "model1")
-    if m is None:
+def vae_save(inputs):
+    return save_component(inputs, "vae", "vae")
+
+
+def clip_save(inputs):
+    return save_component(inputs, "clip", "clip")
+
+
+def model_save(inputs):
+    return save_component(inputs, "model", "model")
+
+
+def webcam_capture(inputs):
+    # 命令行环境无摄像头设备
+    print("WebcamCapture: not available in CLI environment")
+    return (None,)
+
+
+register_node("CheckpointSave", "CheckpointSave", "checkpoint_save", ("*",), True)
+register_node("VAESave", "VAESave", "vae_save", ("*",), True)
+register_node("CLIPSave", "CLIPSave", "clip_save", ("*",), True)
+register_node("ModelSave", "ModelSave", "model_save", ("*",), True)
+register_node("ImageOnlyCheckpointSave", "ImageOnlyCheckpointSave", "checkpoint_save", ("*",), True)
+register_node("WebcamCapture", "WebcamCapture", "webcam_capture", ("IMAGE",), False)
+
+
+@dataclass
+class MergeRatios:
+    prefixes: str
+    ratios: str
+    default_ratio: float
+
+
+def merge_dir() -> str:
+    d = os_getenv("COMFYCLI_MERGE_DIR")
+    if d is None or d == "":
+        d = "/tmp/comfycli_merged"
+    sd_ensure_directory(d)
+    return d
+
+
+def merge_output_path() -> str:
+    return merge_dir() + "/merged_" + string_of_int(random_int()) + ".safetensors"
+
+
+def collect_block_ratios(inputs) -> MergeRatios:
+    keys = dict_keys(inputs)
+    prefixes: str = ""
+    ratios: str = ""
+    default_ratio: float = 1.0
+    first: bool = True
+    i: int = 0
+    n: int = list_length(keys)
+    while i < n:
+        k: str = keys[i]
+        if k != "model1" and k != "model2":
+            v = dict_get(inputs, k)
+            if v is None:
+                v = 0.0
+            if first:
+                default_ratio = v
+                first = False
+            else:
+                prefixes = prefixes + ","
+                ratios = ratios + ","
+            prefixes = prefixes + k
+            ratios = ratios + format_float(v, 6)
+        i = i + 1
+    return MergeRatios(prefixes, ratios, default_ratio)
+
+
+def merge_models(p1: str, p2: str, mode: int, prefixes: str, ratios: str, default_ratio: float, strip_prefix: str):
+    if p1 == "" or p2 == "":
+        print("Merge: source checkpoint path missing")
         return (None,)
-    return (m,)
+    d1 = torch_std_safetensors_load(p1)
+    d2 = torch_std_safetensors_load(p2)
+    if d1 is None or d2 is None:
+        print("Merge: failed to load safetensors (libtorch_std_helper.so missing?)")
+        return (None,)
+    merged = torch_std_safetensors_merge(d1, d2, mode, prefixes, ratios, default_ratio, strip_prefix)
+    torch_std_safetensors_free(d1)
+    torch_std_safetensors_free(d2)
+    if merged is None:
+        print("Merge: merge failed")
+        return (None,)
+    out_path = merge_output_path()
+    rc = torch_std_safetensors_save(merged, out_path)
+    torch_std_safetensors_free(merged)
+    if rc != 0:
+        print("Merge: save failed, rc=" + string_of_int(rc))
+        return (None,)
+    pipeline = sd_create()
+    rc2 = sd_load(pipeline, out_path, "", "", "", SD_WTYPE_AUTO, 8, 0)
+    if rc2 != 0:
+        print("Merge: failed to load merged checkpoint, rc=" + string_of_int(rc2))
+        return (None,)
+    print("Merged checkpoint saved to: " + out_path)
+    return (make_sd_pipeline_handle(pipeline, out_path, "", "", ""),)
 
 
-register_node("ModelMergeSimple", "ModelMergeSimple", "model_merge_passthrough", ("MODEL",), False)
-register_node("ModelMergeBlocks", "ModelMergeBlocks", "model_merge_passthrough", ("MODEL",), False)
-register_node("ModelMergeAdd", "ModelMergeAdd", "model_merge_passthrough", ("MODEL",), False)
-register_node("ModelMergeSubtract", "ModelMergeSubtract", "model_merge_passthrough", ("MODEL",), False)
-register_node("ModelMergeSD1", "ModelMergeSD1", "model_merge_passthrough", ("MODEL",), False)
-register_node("ModelMergeSD2", "ModelMergeSD2", "model_merge_passthrough", ("MODEL",), False)
-register_node("ModelMergeSDXL", "ModelMergeSDXL", "model_merge_passthrough", ("MODEL",), False)
-register_node("ModelMergeSD3_2B", "ModelMergeSD3_2B", "model_merge_passthrough", ("MODEL",), False)
-register_node("ModelMergeSD35_Large", "ModelMergeSD35_Large", "model_merge_passthrough", ("MODEL",), False)
-register_node("ModelMergeFlux1", "ModelMergeFlux1", "model_merge_passthrough", ("MODEL",), False)
-register_node("ModelMergeMochiPreview", "ModelMergeMochiPreview", "model_merge_passthrough", ("MODEL",), False)
-register_node("ModelMergeLTXV", "ModelMergeLTXV", "model_merge_passthrough", ("MODEL",), False)
-register_node("ModelMergeCosmos7B", "ModelMergeCosmos7B", "model_merge_passthrough", ("MODEL",), False)
-register_node("ModelMergeCosmos14B", "ModelMergeCosmos14B", "model_merge_passthrough", ("MODEL",), False)
-register_node("ModelMergeCosmosPredict2_2B", "ModelMergeCosmosPredict2_2B", "model_merge_passthrough", ("MODEL",), False)
-register_node("ModelMergeCosmosPredict2_14B", "ModelMergeCosmosPredict2_14B", "model_merge_passthrough", ("MODEL",), False)
-register_node("ModelMergeAuraflow", "ModelMergeAuraflow", "model_merge_passthrough", ("MODEL",), False)
-register_node("ModelMergeQwenImage", "ModelMergeQwenImage", "model_merge_passthrough", ("MODEL",), False)
-register_node("ModelMergeKrea2", "ModelMergeKrea2", "model_merge_passthrough", ("MODEL",), False)
-register_node("ModelMergeWAN2_1", "ModelMergeWAN2_1", "model_merge_passthrough", ("MODEL",), False)
+def model_merge_simple(inputs):
+    m1: SDPipelineHandle = dict_get(inputs, "model1")
+    m2: SDPipelineHandle = dict_get(inputs, "model2")
+    if m1 is None or m2 is None:
+        return (None,)
+    ratio = get_float(inputs, "ratio", 1.0)
+    return merge_models(m1.model_path, m2.model_path, 0, "", "", ratio, "diffusion_model.")
+
+
+def model_merge_add(inputs):
+    m1: SDPipelineHandle = dict_get(inputs, "model1")
+    m2: SDPipelineHandle = dict_get(inputs, "model2")
+    if m1 is None or m2 is None:
+        return (None,)
+    return merge_models(m1.model_path, m2.model_path, 1, "", "", 0.0, "diffusion_model.")
+
+
+def model_merge_subtract(inputs):
+    m1: SDPipelineHandle = dict_get(inputs, "model1")
+    m2: SDPipelineHandle = dict_get(inputs, "model2")
+    if m1 is None or m2 is None:
+        return (None,)
+    multiplier = get_float(inputs, "multiplier", 1.0)
+    return merge_models(m1.model_path, m2.model_path, 2, "", "", multiplier, "diffusion_model.")
+
+
+def model_merge_blocks(inputs):
+    m1: SDPipelineHandle = dict_get(inputs, "model1")
+    m2: SDPipelineHandle = dict_get(inputs, "model2")
+    if m1 is None or m2 is None:
+        return (None,)
+    br = collect_block_ratios(inputs)
+    return merge_models(m1.model_path, m2.model_path, 0, br.prefixes, br.ratios, br.default_ratio, "diffusion_model.")
+
+
+register_node("ModelMergeSimple", "ModelMergeSimple", "model_merge_simple", ("MODEL",), False)
+register_node("ModelMergeBlocks", "ModelMergeBlocks", "model_merge_blocks", ("MODEL",), False)
+register_node("ModelMergeAdd", "ModelMergeAdd", "model_merge_add", ("MODEL",), False)
+register_node("ModelMergeSubtract", "ModelMergeSubtract", "model_merge_subtract", ("MODEL",), False)
+register_node("ModelMergeSD1", "ModelMergeSD1", "model_merge_blocks", ("MODEL",), False)
+register_node("ModelMergeSD2", "ModelMergeSD2", "model_merge_blocks", ("MODEL",), False)
+register_node("ModelMergeSDXL", "ModelMergeSDXL", "model_merge_blocks", ("MODEL",), False)
+register_node("ModelMergeSD3_2B", "ModelMergeSD3_2B", "model_merge_blocks", ("MODEL",), False)
+register_node("ModelMergeSD35_Large", "ModelMergeSD35_Large", "model_merge_blocks", ("MODEL",), False)
+register_node("ModelMergeFlux1", "ModelMergeFlux1", "model_merge_blocks", ("MODEL",), False)
+register_node("ModelMergeMochiPreview", "ModelMergeMochiPreview", "model_merge_blocks", ("MODEL",), False)
+register_node("ModelMergeLTXV", "ModelMergeLTXV", "model_merge_blocks", ("MODEL",), False)
+register_node("ModelMergeCosmos7B", "ModelMergeCosmos7B", "model_merge_blocks", ("MODEL",), False)
+register_node("ModelMergeCosmos14B", "ModelMergeCosmos14B", "model_merge_blocks", ("MODEL",), False)
+register_node("ModelMergeCosmosPredict2_2B", "ModelMergeCosmosPredict2_2B", "model_merge_blocks", ("MODEL",), False)
+register_node("ModelMergeCosmosPredict2_14B", "ModelMergeCosmosPredict2_14B", "model_merge_blocks", ("MODEL",), False)
+register_node("ModelMergeAuraflow", "ModelMergeAuraflow", "model_merge_blocks", ("MODEL",), False)
+register_node("ModelMergeQwenImage", "ModelMergeQwenImage", "model_merge_blocks", ("MODEL",), False)
+register_node("ModelMergeKrea2", "ModelMergeKrea2", "model_merge_blocks", ("MODEL",), False)
+register_node("ModelMergeWAN2_1", "ModelMergeWAN2_1", "model_merge_blocks", ("MODEL",), False)
 
 
 def svd_img2vid_conditioning(inputs):
@@ -1898,10 +2060,6 @@ register_node("unCLIPCheckpointLoader", "Load unCLIP Checkpoint",
               "checkpoint_loader_simple", ("MODEL", "CLIP", "VAE", "CLIP_VISION"), False)
 register_node("ImageOnlyCheckpointLoader", "Load Image-Only Checkpoint",
               "checkpoint_loader_simple", ("MODEL", "CLIP_VISION", "VAE"), False)
-register_node("ImageOnlyCheckpointSave", "ImageOnlyCheckpointSave",
-              "save_noop", ("*",), True)
-register_node("WebcamCapture", "WebcamCapture",
-              "save_noop", ("IMAGE",), False)
 register_node("ConditioningSetAreaPercentageVideo", "ConditioningSetAreaPercentageVideo",
               "conditioning_passthrough", ("CONDITIONING",), False)
 register_node("AnimaLLLiteApply", "AnimaLLLiteApply",
@@ -2068,14 +2226,28 @@ def call_node(class_type: str, inputs):
         return save_latent(inputs)
     elif class_type == "LoadLatent":
         return load_latent(inputs)
-    elif class_type == "CheckpointSave" or class_type == "VAESave" or class_type == "CLIPSave" or class_type == "ModelSave":
-        return save_noop(inputs)
+    elif class_type == "CheckpointSave":
+        return checkpoint_save(inputs)
+    elif class_type == "VAESave":
+        return vae_save(inputs)
+    elif class_type == "CLIPSave":
+        return clip_save(inputs)
+    elif class_type == "ModelSave":
+        return model_save(inputs)
+    elif class_type == "ModelMergeSimple":
+        return model_merge_simple(inputs)
+    elif class_type == "ModelMergeAdd":
+        return model_merge_add(inputs)
+    elif class_type == "ModelMergeSubtract":
+        return model_merge_subtract(inputs)
     elif str_starts_with(class_type, "ModelMerge"):
-        return model_merge_passthrough(inputs)
+        return model_merge_blocks(inputs)
     elif class_type == "DiffusersLoader" or class_type == "unCLIPCheckpointLoader" or class_type == "ImageOnlyCheckpointLoader":
         return checkpoint_loader_simple(inputs)
-    elif class_type == "ImageOnlyCheckpointSave" or class_type == "WebcamCapture":
-        return save_noop(inputs)
+    elif class_type == "ImageOnlyCheckpointSave":
+        return checkpoint_save(inputs)
+    elif class_type == "WebcamCapture":
+        return webcam_capture(inputs)
     elif class_type == "ModelPatchLoader":
         return model_patch_loader(inputs)
     elif class_type == "SVD_img2vid_Conditioning":
