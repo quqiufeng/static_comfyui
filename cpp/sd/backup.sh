@@ -113,7 +113,8 @@ HIRES_STRENGTH="${HIRES_STRENGTH:-0.35}"
 echo -e "${BLUE}[INFO] $([ "$WIDTH" -ge 1920 ] && echo "Ultra HD" || echo "HD") Mode: steps=$STEPS, cfg=$CFG_SCALE, sampler=$SAMPLING_METHOD${NC}"
 
 QUALITY_PREFIX="masterpiece, best quality, ultra-detailed, sharp focus, 8k uhd, photorealistic, highly detailed, crisp, clear, centered composition, professional portrait, medium shot, realistic skin texture, soft lighting"
-if [[ "$PROMPT" != *"masterpiece"* ]]; then
+# SKIP_QUALITY_PREFIX=1 可关闭自动前缀（宽画幅 + close-up 时该前缀会诱导主体复制）
+if [ "${SKIP_QUALITY_PREFIX:-0}" != "1" ] && [[ "$PROMPT" != *"masterpiece"* ]]; then
     PROMPT="$QUALITY_PREFIX, $PROMPT"
 fi
 
