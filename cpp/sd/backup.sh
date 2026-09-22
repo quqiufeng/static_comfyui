@@ -5,10 +5,10 @@
 # 环境变量: VAE_TILE_SIZE, VAE_TILE_OVERLAP, CFG_SCALE, SAMPLING_METHOD 等
 # =============================================================================
 #
-# 【调优参数（人像, 2026-07-12 验证）】
-#   CFG=2.5  Sampler=euler  Scheduler=discrete  Steps=20→45
-#   HiRes strength=0.35  FreeU b1=1.3 b2=1.4  SAG=关
-#   规律: 人像 CFG 勿超 2.5; discrete 比 karras 稳; FreeU 降强度用
+# 【调优参数（人像, 2026-09-22 验证 combo B）】
+#   CFG=3.5  Sampler=euler  Scheduler=discrete  Steps=25→50
+#   HiRes strength=0.5  upscaler=latent-bislerp  FreeU b1=1.3 b2=1.4（z_image/DiT 下无效）  SAG=关
+#   规律: 人像 CFG 2.5~3.5; discrete 比 karras 稳; z_image 为 DiT，FreeU 是空操作
 #
 # 【VAE Tiling 峰值参考】
 #   Tile    | VAE Buffer | 峰值估算  | 适用显卡
@@ -105,12 +105,12 @@ echo -e "${GREEN}✓ All checks passed${NC}"
 
 SAMPLING_METHOD="${SAMPLING_METHOD:-euler}"
 SCHEDULER="${SCHEDULER:-discrete}"
-CFG_SCALE="${CFG_SCALE:-2.5}"
-STEPS="${STEPS:-20}"
-HIRES_STEPS="${HIRES_STEPS:-45}"
-HIRES_STRENGTH="${HIRES_STRENGTH:-0.35}"
-# HiRes 上采样方式: latent-bicubic（默认）| latent-bislerp | model（用 2x_ESRGAN 真实上采样）
-HIRES_UPSCALER="${HIRES_UPSCALER:-latent-bicubic}"
+CFG_SCALE="${CFG_SCALE:-3.5}"
+STEPS="${STEPS:-25}"
+HIRES_STEPS="${HIRES_STEPS:-50}"
+HIRES_STRENGTH="${HIRES_STRENGTH:-0.5}"
+# HiRes 上采样方式: latent-bislerp（默认，更锐）| latent-bicubic | model（用 2x_ESRGAN 真实上采样）
+HIRES_UPSCALER="${HIRES_UPSCALER:-latent-bislerp}"
 
 echo -e "${BLUE}[INFO] $([ "$WIDTH" -ge 1920 ] && echo "Ultra HD" || echo "HD") Mode: steps=$STEPS, cfg=$CFG_SCALE, sampler=$SAMPLING_METHOD${NC}"
 
@@ -244,12 +244,12 @@ SD_CMD=("$SD_CLI"
   --freeu
   --freeu-b1 1.3
   --freeu-b2 1.4
-  --clarity 0.2
+  --clarity 0.3
   --sharpen 0.3
   --sharpen-radius 1
   --smart-sharpen 0.5
   --smart-sharpen-radius 2
-  --edge-sharpen 1.5
+  --edge-sharpen 2.0
   --edge-sharpen-radius 2
   --edge-sharpen-threshold 0.3
   -W "$LOW_W" -H "$LOW_H"
