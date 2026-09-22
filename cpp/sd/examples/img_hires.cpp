@@ -60,6 +60,9 @@ static void print_usage(const char* argv0) {
     std::fprintf(stderr, "  --sag                     Enable Self-Attention Guidance\n");
     std::fprintf(stderr, "  --sag-scale <float>       SAG blend scale (default: 1.0)\n");
     std::fprintf(stderr, "  --diffusion-fa            Enable diffusion flash attention\n");
+    std::fprintf(stderr, "  --offload-to-cpu          Keep weights in CPU RAM (params_backend \"*=cpu\")\n");
+    std::fprintf(stderr, "  --backend <spec>          Backend spec (e.g. CUDA, CPU, \"te=cpu\")\n");
+    std::fprintf(stderr, "  --params-backend <spec>   Params backend spec (e.g. \"*=cpu\")\n");
     std::fprintf(stderr, "  --no-quality-prefix       Do not prepend quality keywords to prompt\n");
     std::fprintf(stderr, "Post-processing (defaults aligned to backup.sh; pass 0 to disable a stage):\n");
     std::fprintf(stderr, "  --clarity <float>         Clarity / local contrast, 0.0-1.0 (default: 0.2)\n");
@@ -155,6 +158,9 @@ int main(int argc, char** argv) {
 
     bool diffusion_fa = false;
     bool quality_prefix = true;
+    bool offload_to_cpu = false;
+    std::string backend;
+    std::string params_backend;
 
     // 后处理默认值对齐 backup.sh：清晰度 + 锐化 + 智能锐化 + 边缘锐化，提升清晰度/细节
     postproc::Params postproc;
@@ -250,6 +256,12 @@ int main(int argc, char** argv) {
             diffusion_fa = true;
         } else if (std::strcmp(argv[i], "--no-quality-prefix") == 0) {
             quality_prefix = false;
+        } else if (std::strcmp(argv[i], "--offload-to-cpu") == 0) {
+            offload_to_cpu = true;
+        } else if (std::strcmp(argv[i], "--backend") == 0 && i + 1 < argc) {
+            backend = argv[++i];
+        } else if (std::strcmp(argv[i], "--params-backend") == 0 && i + 1 < argc) {
+            params_backend = argv[++i];
         } else if (std::strcmp(argv[i], "--clarity") == 0 && i + 1 < argc) {
             postproc.clarity = std::atof(argv[++i]);
         } else if (std::strcmp(argv[i], "--sharpen") == 0 && i + 1 < argc) {
@@ -359,6 +371,13 @@ int main(int argc, char** argv) {
     cfg_model.vae_path             = vae;
     cfg_model.n_threads            = threads;
     cfg_model.diffusion_flash_attn = diffusion_fa;
+    cfg_model.backend              = backend;
+    // --offload-to-cpu 等价 sd.cpp 的 params_backend "*=cpu"（权重留 CPU RAM，按需上卡）
+    if (offload_to_cpu) {
+        cfg_model.params_backend = params_backend.empty() ? "*=cpu" : ("*=cpu," + params_backend);
+    } else {
+        cfg_model.params_backend = params_backend;
+    }
 
     sd::SDPipeline pipeline;
     if (!pipeline.load(cfg_model)) {
