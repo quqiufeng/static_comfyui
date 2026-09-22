@@ -53,6 +53,9 @@ static void print_usage(const char* argv0) {
     std::fprintf(stderr, "  --hires-strength <float>  HiRes denoising strength (default: 0.35)\n");
     std::fprintf(stderr, "  --hires-upscaler <name>   HiRes upscaler: latent-bicubic/bislerp/model (default: latent-bicubic)\n");
     std::fprintf(stderr, "  --hires-upscaler-model <path>  Upscaler model (for --hires-upscaler model)\n");
+    std::fprintf(stderr, "  --upscale-model <path>    Post-upscale model (ESRGAN), e.g. 2x_ESRGAN.gguf\n");
+    std::fprintf(stderr, "  --upscale-repeats <int>   Number of post-upscale passes (default: 0=off)\n");
+    std::fprintf(stderr, "  --upscale-tile-size <int> Post-upscale tile size (default: 128)\n");
     std::fprintf(stderr, "  --lora <path:weight>      LoRA, can be specified multiple times\n");
     std::fprintf(stderr, "  --freeu                   Enable FreeU\n");
     std::fprintf(stderr, "  --freeu-b1 <float>        FreeU backbone1 scale (default: 1.3)\n");
@@ -149,6 +152,10 @@ int main(int argc, char** argv) {
     std::string hires_upscaler = "latent-bicubic";
     std::string hires_upscaler_model;
 
+    std::string upscale_model;
+    int upscale_repeats = 0;
+    int upscale_tile_size = 128;
+
     bool freeu = false;
     float freeu_b1 = 1.3f;
     float freeu_b2 = 1.4f;
@@ -230,6 +237,12 @@ int main(int argc, char** argv) {
             hires_upscaler = argv[++i];
         } else if (std::strcmp(argv[i], "--hires-upscaler-model") == 0 && i + 1 < argc) {
             hires_upscaler_model = argv[++i];
+        } else if (std::strcmp(argv[i], "--upscale-model") == 0 && i + 1 < argc) {
+            upscale_model = argv[++i];
+        } else if (std::strcmp(argv[i], "--upscale-repeats") == 0 && i + 1 < argc) {
+            upscale_repeats = std::atoi(argv[++i]);
+        } else if (std::strcmp(argv[i], "--upscale-tile-size") == 0 && i + 1 < argc) {
+            upscale_tile_size = std::atoi(argv[++i]);
         } else if (std::strcmp(argv[i], "--lora") == 0 && i + 1 < argc) {
             std::string lora_arg = argv[++i];
             size_t pos = lora_arg.find(':');
@@ -438,6 +451,49 @@ int main(int argc, char** argv) {
             return 1;
         }
         std::fprintf(stderr, "Post-processing completed\n");
+    }
+
+    if (!upscale_model.empty() && upscale_repeats > 0) {
+        const char* be  = backend.empty() ? nullptr : backend.c_str();
+        const char* pbe = params_backend.empty() ? nullptr : params_backend.c_str();
+        upscaler_ctx_t* upscaler = new_upscaler_ctx(upscale_model.c_str(),
+                                                    false,
+                                                    threads,
+                                                    upscale_tile_size,
+                                                    be,
+                                                    pbe);
+        if (upscaler == nullptr) {
+            std::fprintf(stderr, "Failed to load upscaler: %s\n", upscale_model.c_str());
+            return 1;
+        }
+        int factor = get_upscale_factor(upscaler);
+        if (factor <= 0) {
+            factor = 4;
+        }
+        for (int r = 0; r < upscale_repeats; ++r) {
+            sd_image_t in;
+            in.width   = static_cast<uint32_t>(image.width);
+            in.height  = static_cast<uint32_t>(image.height);
+            in.channel = static_cast<uint32_t>(image.channels);
+            in.data    = image.data.data();
+            sd_image_t* out = nullptr;
+            int n           = 0;
+            if (!upscale(upscaler, in, static_cast<uint32_t>(factor), &out, &n) ||
+                n <= 0 || out == nullptr || out[0].data == nullptr) {
+                free_sd_images(out, n);
+                std::fprintf(stderr, "Upscale failed\n");
+                free_upscaler_ctx(upscaler);
+                return 1;
+            }
+            image.width    = static_cast<int>(out[0].width);
+            image.height   = static_cast<int>(out[0].height);
+            image.channels = static_cast<int>(out[0].channel);
+            image.data.assign(out[0].data,
+                              out[0].data + static_cast<size_t>(out[0].width) * out[0].height * out[0].channel);
+            free_sd_images(out, n);
+            std::fprintf(stderr, "Upscaled x%d -> %dx%d\n", factor, image.width, image.height);
+        }
+        free_upscaler_ctx(upscaler);
     }
 
     std::string final_output = expand_tilde(output);

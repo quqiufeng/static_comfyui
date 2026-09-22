@@ -109,6 +109,8 @@ CFG_SCALE="${CFG_SCALE:-2.5}"
 STEPS="${STEPS:-20}"
 HIRES_STEPS="${HIRES_STEPS:-45}"
 HIRES_STRENGTH="${HIRES_STRENGTH:-0.35}"
+# HiRes 上采样方式: latent-bicubic（默认）| latent-bislerp | model（用 2x_ESRGAN 真实上采样）
+HIRES_UPSCALER="${HIRES_UPSCALER:-latent-bicubic}"
 
 echo -e "${BLUE}[INFO] $([ "$WIDTH" -ge 1920 ] && echo "Ultra HD" || echo "HD") Mode: steps=$STEPS, cfg=$CFG_SCALE, sampler=$SAMPLING_METHOD${NC}"
 
@@ -175,6 +177,12 @@ else
     LOW_H=$((LOW_LATENT_H * 8))
 fi
 
+# 允许显式覆盖 base 分辨率（ESRGAN hires 2x 上采样时，base×2 需放得下显存）
+if [ -n "${LOW_W_OVERRIDE:-}" ] && [ -n "${LOW_H_OVERRIDE:-}" ]; then
+    LOW_W="$LOW_W_OVERRIDE"
+    LOW_H="$LOW_H_OVERRIDE"
+fi
+
 # 保持比例的最小限制：只在单边小于512时按比例放大
 if [ "$LOW_W" -lt 512 ] || [ "$LOW_H" -lt 512 ]; then
     TARGET_RATIO=$(echo "scale=6; $WIDTH / $HEIGHT" | bc)
@@ -198,6 +206,7 @@ echo -e "Low-res Pass: ${GREEN}${LOW_W}x${LOW_H} -> ${WIDTH}x${HEIGHT}${NC}"
 echo -e "Steps: $STEPS -> $HIRES_STEPS (HiRes)"
 echo -e "CFG Scale: ${CYAN}$CFG_SCALE${NC}"
 echo -e "HiRes Strength: $HIRES_STRENGTH"
+echo -e "HiRes Upscaler: ${CYAN}$HIRES_UPSCALER${NC}"
 echo -e "Sampler: ${CYAN}$SAMPLING_METHOD${NC} + ${CYAN}$SCHEDULER${NC}"
 if [ "$UPSCALE_FLAG" -eq 1 ]; then
     UPSCALED_W=$((WIDTH * 2))
@@ -250,10 +259,16 @@ SD_CMD=("$SD_CLI"
   --hires-height "$HEIGHT"
   --hires-strength "$HIRES_STRENGTH"
   --hires-steps "$HIRES_STEPS"
+  --hires-upscaler "$HIRES_UPSCALER"
   -s "$SEED"
   "$PROMPT"
   "$OUTPUT_PATH"
 )
+
+if [ "$HIRES_UPSCALER" = "model" ]; then
+    check_file "$UPSCALE_MODEL"
+    SD_CMD+=(--hires-upscaler-model "$UPSCALE_MODEL")
+fi
 
 if [ -n "$LORA_CONFIG" ]; then
     SD_CMD+=(--lora "$LORA_CONFIG")
