@@ -285,6 +285,26 @@ void SDPipeline::set_init_image(const std::string& image_path, float strength) {
                  image_path.c_str(), rgb.cols, rgb.rows, strength);
 }
 
+void SDPipeline::set_init_image_from_pixels(const uint8_t* rgb, int w, int h,
+                                            int c, float strength) {
+    if (!impl_) return;
+    if (rgb == nullptr || w <= 0 || h <= 0 || c <= 0) {
+        impl_->has_init_image = false;
+        impl_->init_image_data.clear();
+        impl_->init_image = sd_image_t{};
+        return;
+    }
+    impl_->init_image_data.assign(rgb, rgb + static_cast<size_t>(w) * h * c);
+    impl_->init_image.width   = w;
+    impl_->init_image.height  = h;
+    impl_->init_image.channel = c;
+    impl_->init_image.data    = impl_->init_image_data.data();
+    impl_->has_init_image     = true;
+    impl_->init_strength      = strength;
+    std::fprintf(stderr, "[C++ gen] set_init_image_from_pixels: %dx%d ch=%d strength=%.2f\n",
+                 w, h, c, strength);
+}
+
 bool SDPipeline::load_control_net(const std::string& path) {
     if (!impl_ || !impl_->ctx) return false;
     if (path.empty()) {
@@ -369,6 +389,11 @@ void SDPipeline::set_hires_upscaler(const std::string& upscaler, const std::stri
     if (!impl_) return;
     impl_->hires_upscaler       = upscaler;
     impl_->hires_upscaler_model = model_path;
+}
+
+std::string SDPipeline::get_hires_upscaler() const {
+    if (!impl_) return std::string();
+    return impl_->hires_upscaler;
 }
 
 void SDPipeline::set_prediction(int pred) {
@@ -1042,14 +1067,12 @@ int sd_pipeline_generate_full(sd_pipeline_t pipeline,
     params.scheduler       = scheduler ? scheduler : "discrete";
     params.seed            = seed;
 
-    if (hires_on) {
-        params.hires_enabled  = true;
-        params.hires_width    = hires_width;
-        params.hires_height   = hires_height;
-        params.hires_steps    = hires_steps > 0 ? hires_steps : 20;
-        params.hires_strength = hires_strength >= 0.0f && hires_strength <= 1.0f
-                                ? hires_strength : 0.35f;
-    }
+    // HiRes Fix 由本层显式两阶段实现（不再使用 sd.cpp 内置 hires）：
+    //   1) base 分辨率采样并解码出图
+    //   2) 对 base 图做 bicubic/bislerp 放大到目标分辨率，作为 init_image
+    //   3) 以 denoising_strength=hires_strength 做第二次采样（img2img）
+    float hires_strength_eff = (hires_strength >= 0.0f && hires_strength <= 1.0f)
+                               ? hires_strength : 0.35f;
 
     // Explicit tiling only; auto-tiling for large images is handled
     // inside SDPipeline::generate (single place).
@@ -1079,7 +1102,64 @@ int sd_pipeline_generate_full(sd_pipeline_t pipeline,
         params.ad_negative_prompt = ad_negative_prompt ? ad_negative_prompt : "";
     }
 
-    std::vector<sd::Image> images = p->generate(params);
+    std::vector<sd::Image> images;
+    if (hires_on) {
+        std::string up_name = p->get_hires_upscaler();
+        bool native_latent  = (up_name.find("latent") != std::string::npos);
+        if (native_latent) {
+            // 纯 latent 空间两阶段（ComfyUI LatentUpscale 原义）：
+            //   base 采样 -> latent bicubic/bislerp 放大 -> denoise 二次采样
+            // 由 sd.cpp 原生 hires 实现（upscaler=latent-bicubic/latent-bislerp）。
+            params.width          = base_w;
+            params.height         = base_h;
+            params.hires_enabled  = true;
+            params.hires_upscaler = up_name;
+            params.hires_width    = hires_width;
+            params.hires_height   = hires_height;
+            params.hires_steps    = hires_steps > 0 ? hires_steps : 20;
+            params.hires_strength = hires_strength_eff;
+            images = p->generate(params);
+            std::fprintf(stderr,
+                         "[C API] hires latent(%s): base %dx%d -> target %dx%d strength=%.2f -> %zu image(s)\n",
+                         up_name.c_str(), base_w, base_h, hires_width, hires_height,
+                         hires_strength_eff, images.size());
+        } else {
+            // 显式像素两阶段：base 出图 -> 像素 bicubic/bislerp 放大 -> img2img denoise
+            params.width         = base_w;
+            params.height        = base_h;
+            params.hires_enabled = false;
+            std::vector<sd::Image> base_images = p->generate(params);
+            std::fprintf(stderr, "[C API] hires stage1 base %dx%d -> %zu image(s)\n",
+                         base_w, base_h, base_images.size());
+            if (base_images.empty()) return -4;
+
+            int interp = (up_name.find("bislerp") != std::string::npos)
+                             ? cv::INTER_LINEAR
+                             : cv::INTER_CUBIC;
+            params.width  = hires_width;
+            params.height = hires_height;
+            params.steps  = hires_steps > 0 ? hires_steps : params.steps;
+            for (size_t i = 0; i < base_images.size(); i++) {
+                const sd::Image& b = base_images[i];
+                if (b.data.empty() || b.width <= 0 || b.height <= 0) continue;
+                cv::Mat src(b.height, b.width, CV_8UC(b.channels),
+                            const_cast<uint8_t*>(b.data.data()));
+                cv::Mat dst;
+                cv::resize(src, dst, cv::Size(hires_width, hires_height), 0, 0, interp);
+                p->set_init_image_from_pixels(dst.data, dst.cols, dst.rows,
+                                              dst.channels(), hires_strength_eff);
+                std::vector<sd::Image> out = p->generate(params);
+                for (size_t k = 0; k < out.size(); k++) {
+                    images.push_back(std::move(out[k]));
+                }
+            }
+            p->set_init_image("", hires_strength_eff);
+            std::fprintf(stderr, "[C API] hires stage2 target %dx%d -> %zu image(s) strength=%.2f\n",
+                         hires_width, hires_height, images.size(), hires_strength_eff);
+        }
+    } else {
+        images = p->generate(params);
+    }
     std::fprintf(stderr, "[C API] generate_full returned %zu image(s)\n", images.size());
     if (images.empty()) return -4;
 

@@ -171,6 +171,12 @@ public:
     // Pass an empty path to clear.
     void set_init_image(const std::string& image_path, float strength);
 
+    // img2img from an in-memory RGB(A) buffer (used by the explicit HiRes
+    // two-stage path: base image -> upscale -> second pass). Pass nullptr/empty
+    // dimensions to clear.
+    void set_init_image_from_pixels(const uint8_t* rgb, int w, int h, int c,
+                                    float strength);
+
     // ControlNet: hot-swap the control net and set the per-generation control image.
     bool load_control_net(const std::string& path);
     void set_control_image(const std::string& image_path, float strength);
@@ -202,6 +208,9 @@ public:
 
     // HiRes Fix upscaler ("model"/"latent"/... + optional upscaler model path)
     void set_hires_upscaler(const std::string& upscaler, const std::string& model_path);
+
+    // Current HiRes upscaler name (default "latent-bicubic").
+    std::string get_hires_upscaler() const;
 
     // ModelSamplingDiscrete: force prediction type (eps=0, v_pred=1)
     void set_prediction(int pred);
