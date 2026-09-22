@@ -2,8 +2,10 @@
 # =============================================================================
 # backup_qwen2.sh — Qwen-Image-2.1 HiRes 两阶段出图（Qwen 原生配方 v2）
 # 用法: ./backup_qwen2.sh "prompt" [output.png] [width] [height]
-# 环境变量: CFG, STEPS, HIRES_STEPS, HIRES_STRENGTH, SAMPLING_METHOD, SCHEDULER,
-#           VAE_TILE_SIZE, VAE_TILE_OVERLAP, OFFLOAD, POSTPROC, MODEL_DIR
+# 环境变量: CFG, STEPS, HIRES_STEPS, HIRES_STRENGTH, HIRES_UPSCALER,
+#           SAMPLING_METHOD, SCHEDULER, VAE_TILE_SIZE, VAE_TILE_OVERLAP,
+#           OFFLOAD, POSTPROC, CLARITY, SHARPEN, SMART_SHARPEN, EDGE_SHARPEN,
+#           FREEU, REALISM, MODEL_DIR
 # =============================================================================
 #
 # 【v2 相对 backup_qwen.sh 的修正】
@@ -16,6 +18,15 @@
 #      embedding:bad-hands-5）——Qwen3-VL 文本编码器没有这些 embedding
 #   4) 默认关闭重后处理（clarity/sharpen/smart/edge）——避免过锐、塑料感
 #   5) steps 提到 25→20，cfg 6.0 / euler（与官方 qwen_image_2.1.md 一致）
+#
+# 【v3 人像写实固化（2026-09-22 combo B）】
+#   - cfg 6.0 / euler / scheduler flux / steps 25→50 / hires strength 0.5
+#   - HiRes 放大器 latent-bislerp（更锐），base 2048x1152 → 2560x1440
+#   - 后处理默认开启：clarity 0.3 / sharpen 0.3 / smart 0.5 / edge 2.0
+#   - 正向自动追加写实词（REALISM=0 关）；负向加 anime/cartoon/illustration/
+#     3d render 等反动漫词 + 皮肤油腻词
+#   - FreeU 默认关（Qwen 为 DiT，FreeU 空操作；FREEU=1 可开）
+#   - POSTPROC=0 关闭后处理；OFFLOAD=1 权重常驻内存（20G 卡必需）
 #
 # 【分辨率】Qwen 要求宽高为 32 的倍数；脚本按 /32 计算 base。
 # 【显存】20GB 卡必须 --offload-to-cpu（权重常驻内存、采样/VAE 仍在 GPU）。
@@ -61,21 +72,34 @@ echo -e "${GREEN}✓ All checks passed${NC}"
 
 CFG_SCALE="${CFG:-6.0}"
 STEPS="${STEPS:-25}"
-HIRES_STEPS="${HIRES_STEPS:-20}"
-HIRES_STRENGTH="${HIRES_STRENGTH:-0.35}"
+HIRES_STEPS="${HIRES_STEPS:-50}"
+HIRES_STRENGTH="${HIRES_STRENGTH:-0.5}"
 SAMPLING_METHOD="${SAMPLING_METHOD:-euler}"
 SCHEDULER="${SCHEDULER:-flux}"
+HIRES_UPSCALER="${HIRES_UPSCALER:-latent-bislerp}"
 VAE_TILE_SIZE="${VAE_TILE_SIZE:-32}"
 VAE_TILE_OVERLAP="${VAE_TILE_OVERLAP:-0.5}"
 OFFLOAD="${OFFLOAD:-1}"
-POSTPROC="${POSTPROC:-0}"
+POSTPROC="${POSTPROC:-1}"
+CLARITY="${CLARITY:-0.3}"
+SHARPEN="${SHARPEN:-0.3}"
+SMART_SHARPEN="${SMART_SHARPEN:-0.5}"
+EDGE_SHARPEN="${EDGE_SHARPEN:-2.0}"
+FREEU="${FREEU:-0}"
+REALISM="${REALISM:-1}"
+REALISM_SUFFIX="photorealistic, realistic photograph, raw photo, natural skin texture"
 
 # v2：不再自动加 booru quality prefix（需要时可用 QUALITY_PREFIX 显式指定）
 if [ -n "${QUALITY_PREFIX:-}" ] && [[ "$PROMPT" != *"masterpiece"* ]]; then
     PROMPT="$QUALITY_PREFIX, $PROMPT"
 fi
 
-NEGATIVE_PROMPT="${NEGATIVE_PROMPT:-blurry, low quality, worst quality, jpeg artifacts, noise, bad anatomy, deformed, watermark, text, logo, signature}"
+# v3：写实约束（Qwen 默认偏动漫，追加写实关键词；REALISM=0 关闭）
+if [ "$REALISM" = "1" ] && [[ "$PROMPT" != *"photorealistic"* ]]; then
+    PROMPT="$PROMPT, $REALISM_SUFFIX"
+fi
+
+NEGATIVE_PROMPT="${NEGATIVE_PROMPT:-blurry, low quality, worst quality, jpeg artifacts, noise, bad anatomy, deformed, watermark, text, logo, signature, oily skin, shiny skin, greasy skin, glossy skin, plastic skin, skin blemishes, anime, cartoon, illustration, painting, drawing, 3d render, cgi, anime face, cel shading}"
 
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 if [ -n "$OUTPUT_FILE" ]; then
@@ -119,9 +143,11 @@ echo -e "Low-res Pass: ${GREEN}${LOW_W}x${LOW_H} -> ${WIDTH}x${HEIGHT}${NC}"
 echo -e "Steps: $STEPS -> $HIRES_STEPS (HiRes)"
 echo -e "CFG Scale: ${CYAN}$CFG_SCALE${NC}"
 echo -e "HiRes Strength: $HIRES_STRENGTH"
+echo -e "HiRes Upscaler: ${CYAN}$HIRES_UPSCALER${NC}"
 echo -e "Sampler: ${CYAN}$SAMPLING_METHOD${NC} + ${CYAN}$SCHEDULER${NC}"
 echo -e "VAE Tiling: ${VAE_TILE_SIZE} overlap ${VAE_TILE_OVERLAP}"
-echo -e "Post-processing: ${POSTPROC} (0=off)"
+echo -e "Post-processing: ${POSTPROC} (0=off), realism=${REALISM}"
+echo -e "FreeU: ${FREEU} (DiT 空操作)"
 echo -e "Offload to CPU: ${OFFLOAD}"
 echo "----------------------------------------"
 echo -e "Prompt: ${YELLOW}$PROMPT${NC}"
@@ -151,11 +177,20 @@ SD_CMD=("$SD_CLI"
   --hires-height "$HEIGHT"
   --hires-strength "$HIRES_STRENGTH"
   --hires-steps "$HIRES_STEPS"
+  --hires-upscaler "$HIRES_UPSCALER"
   -s "$SEED"
 )
 
-if [ "$POSTPROC" -eq 0 ]; then
+if [ "$POSTPROC" -eq 1 ]; then
+    SD_CMD+=(--clarity "$CLARITY" --sharpen "$SHARPEN" --sharpen-radius 1
+             --smart-sharpen "$SMART_SHARPEN" --smart-sharpen-radius 2
+             --edge-sharpen "$EDGE_SHARPEN" --edge-sharpen-radius 2
+             --edge-sharpen-threshold 0.3)
+else
     SD_CMD+=(--clarity 0 --sharpen 0 --smart-sharpen 0 --edge-sharpen 0)
+fi
+if [ "$FREEU" -eq 1 ]; then
+    SD_CMD+=(--freeu --freeu-b1 1.3 --freeu-b2 1.4)
 fi
 if [ "$OFFLOAD" -eq 1 ]; then
     SD_CMD+=(--offload-to-cpu)
