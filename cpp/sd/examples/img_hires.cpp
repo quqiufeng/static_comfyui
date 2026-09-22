@@ -49,7 +49,7 @@ static void print_usage(const char* argv0) {
     std::fprintf(stderr, "  --hires                   Enable HiRes Fix\n");
     std::fprintf(stderr, "  --hires-width <int>       HiRes target width (default: target width)\n");
     std::fprintf(stderr, "  --hires-height <int>      HiRes target height (default: target height)\n");
-    std::fprintf(stderr, "  --hires-steps <int>       HiRes steps (default: 20)\n");
+    std::fprintf(stderr, "  --hires-steps <int>       HiRes steps (default: 45, aligned to backup.sh)\n");
     std::fprintf(stderr, "  --hires-strength <float>  HiRes denoising strength (default: 0.35)\n");
     std::fprintf(stderr, "  --hires-upscaler <name>   HiRes upscaler: latent-bicubic/bislerp/model (default: latent-bicubic)\n");
     std::fprintf(stderr, "  --hires-upscaler-model <path>  Upscaler model (for --hires-upscaler model)\n");
@@ -61,13 +61,13 @@ static void print_usage(const char* argv0) {
     std::fprintf(stderr, "  --sag-scale <float>       SAG blend scale (default: 1.0)\n");
     std::fprintf(stderr, "  --diffusion-fa            Enable diffusion flash attention\n");
     std::fprintf(stderr, "  --no-quality-prefix       Do not prepend quality keywords to prompt\n");
-    std::fprintf(stderr, "Post-processing:\n");
-    std::fprintf(stderr, "  --clarity <float>         Clarity / local contrast, 0.0-1.0 (default: 0.0)\n");
-    std::fprintf(stderr, "  --sharpen <float>         USM sharpen amount, 0.0-3.0 (default: 0.0)\n");
+    std::fprintf(stderr, "Post-processing (defaults aligned to backup.sh; pass 0 to disable a stage):\n");
+    std::fprintf(stderr, "  --clarity <float>         Clarity / local contrast, 0.0-1.0 (default: 0.2)\n");
+    std::fprintf(stderr, "  --sharpen <float>         USM sharpen amount, 0.0-3.0 (default: 0.3)\n");
     std::fprintf(stderr, "  --sharpen-radius <int>    USM blur radius, 1-10 (default: 1)\n");
-    std::fprintf(stderr, "  --smart-sharpen <float>   Edge-aware smart sharpen, 0.0-3.0 (default: 0.0)\n");
+    std::fprintf(stderr, "  --smart-sharpen <float>   Edge-aware smart sharpen, 0.0-3.0 (default: 0.5)\n");
     std::fprintf(stderr, "  --smart-sharpen-radius <int>  Smart sharpen radius, 1-10 (default: 2)\n");
-    std::fprintf(stderr, "  --edge-sharpen <float>    Edge-mask sharpen amount, 0.0-3.0 (default: 0.0)\n");
+    std::fprintf(stderr, "  --edge-sharpen <float>    Edge-mask sharpen amount, 0.0-3.0 (default: 1.5)\n");
     std::fprintf(stderr, "  --edge-sharpen-radius <int>   Edge detection radius, 1-10 (default: 2)\n");
     std::fprintf(stderr, "  --edge-sharpen-threshold <float> Edge threshold, 0.0-1.0 (default: 0.3)\n");
 }
@@ -123,7 +123,8 @@ int main(int argc, char** argv) {
     bool clip_l_overridden = false;
     bool clip_g_overridden = false;
     bool vae_overridden    = false;
-    std::string neg    = "blurry, low quality, worst quality, jpeg artifacts, noise, grain, soft focus, out of focus, hazy, unclear, bad anatomy, deformed";
+    // 默认负面词对齐 backup.sh（含反演 embedding，sd.cpp 按普通 token 处理，无副作用）
+    std::string neg    = "blurry, low quality, worst quality, jpeg artifacts, noise, grain, soft focus, out of focus, hazy, unclear, bad anatomy, deformed, border artifacts, edge distortion, tiling artifacts, edge artifacts, frame distortion, warped edges, stretched proportions, asymmetrical face, off-center, cropped, out of frame, partial face, cut off, incomplete head, cropped head, watermark, text, logo, signature, cropped shoulders, embedding:EasyNegative, embedding:bad-hands-5";
     std::string output;
     std::string prompt;
     std::string method = "euler";
@@ -140,7 +141,7 @@ int main(int argc, char** argv) {
 
     bool hires = false;
     int low_w = 0, low_h = 0;
-    int hires_width = 0, hires_height = 0, hires_steps = 20;
+    int hires_width = 0, hires_height = 0, hires_steps = 45;
     float hires_strength = 0.35f;
     std::string hires_upscaler = "latent-bicubic";
     std::string hires_upscaler_model;
@@ -155,7 +156,16 @@ int main(int argc, char** argv) {
     bool diffusion_fa = false;
     bool quality_prefix = true;
 
+    // 后处理默认值对齐 backup.sh：清晰度 + 锐化 + 智能锐化 + 边缘锐化，提升清晰度/细节
     postproc::Params postproc;
+    postproc.clarity                = 0.2f;
+    postproc.sharpen_amount         = 0.3f;
+    postproc.sharpen_radius         = 1;
+    postproc.smart_sharpen_strength = 0.5f;
+    postproc.smart_sharpen_radius   = 2;
+    postproc.edge_sharpen_amount    = 1.5f;
+    postproc.edge_sharpen_radius    = 2;
+    postproc.edge_sharpen_threshold = 0.3f;
 
     std::vector<char*> positional;
     for (int i = 1; i < argc; ++i) {
@@ -302,7 +312,10 @@ int main(int argc, char** argv) {
     }
 
     if (quality_prefix && prompt.find("masterpiece") == std::string::npos) {
-        prompt = "masterpiece, best quality, ultra-detailed, sharp focus, highly detailed, " + prompt;
+        // 质量提示词原样对齐 backup.sh（画质 / 细节 / 人像取向）
+        prompt = "masterpiece, best quality, ultra-detailed, sharp focus, 8k uhd, photorealistic, "
+                 "highly detailed, crisp, clear, centered composition, professional portrait, "
+                 "medium shot, realistic skin texture, soft lighting, " + prompt;
     }
 
     if (!hires) {

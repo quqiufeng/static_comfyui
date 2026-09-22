@@ -4,6 +4,10 @@ from sd_backend import sd_create, sd_free, sd_load, sd_load_ex, sd_load_lora, sd
 NODE_CLASS_MAPPINGS: dict = make_dict()
 NODE_DISPLAY_NAMES: dict = make_dict()
 
+# 质量提示词 / 默认负面词 — 原样对齐 backup.sh 的 HiRes Fix 出图配方。
+QUALITY_PREFIX = "masterpiece, best quality, ultra-detailed, sharp focus, 8k uhd, photorealistic, highly detailed, crisp, clear, centered composition, professional portrait, medium shot, realistic skin texture, soft lighting"
+DEFAULT_NEGATIVE = "blurry, low quality, worst quality, jpeg artifacts, noise, grain, soft focus, out of focus, hazy, unclear, bad anatomy, deformed, border artifacts, edge distortion, tiling artifacts, edge artifacts, frame distortion, warped edges, stretched proportions, asymmetrical face, off-center, cropped, out of frame, partial face, cut off, incomplete head, cropped head, watermark, text, logo, signature, cropped shoulders, embedding:EasyNegative, embedding:bad-hands-5"
+
 
 @dataclass
 class SDPipelineHandle:
@@ -142,6 +146,24 @@ def merge_conditioning_text(a: str, b: str) -> str:
     if b == "":
         return a
     return a + ", " + b
+
+
+def apply_quality_prefix(prompt: str, inputs) -> str:
+    # 对齐 backup.sh：prompt 未含 masterpiece 时前置质量关键词；quality_prefix=0 可关。
+    if get_int(inputs, "quality_prefix", 1) == 0:
+        return prompt
+    if str_contains(prompt, "masterpiece"):
+        return prompt
+    return QUALITY_PREFIX + ", " + prompt
+
+
+def apply_default_negative(negative: str, inputs) -> str:
+    # 对齐 backup.sh：负面词留空时补默认；default_negative=0 可关。
+    if str_length(negative) > 0:
+        return negative
+    if get_int(inputs, "default_negative", 1) == 0:
+        return negative
+    return DEFAULT_NEGATIVE
 
 
 def parse_sampler_opts(inputs) -> dict:
@@ -586,6 +608,9 @@ def hires_fix(inputs):
 
     prompt = resolve_prompt_text(inputs, "positive", "prompt")
     negative_prompt = resolve_prompt_text(inputs, "negative", "negative_prompt")
+    # 质量提示词 / 默认负面词：对齐 backup.sh 出图配方（可用 quality_prefix=0 关闭）
+    prompt = apply_quality_prefix(prompt, inputs)
+    negative_prompt = apply_default_negative(negative_prompt, inputs)
 
     target_width = get_int(inputs, "width", 1024)
     target_height = get_int(inputs, "height", 1024)

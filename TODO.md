@@ -34,7 +34,16 @@
 ## HiRes Fix 出图质量优化
 **原理**：latent 放大 + 二次采样（denoise<1），即 ComfyUI 的 `LatentUpscale`（bicubic/bislerp）+ `KSampler(denoise)`；`backup.sh` 同原理（低分构图 → latent 放大 refine，基础分辨率越高、放大倍数越小越好）。
 
-已修（`23d9050` + `c950631`）：
+已修（对齐 `cpp/sd/backup.sh` 配方）：
+- `img_hires.cpp` 默认值：quality prefix 原样对齐 backup.sh；默认负面词对齐 backup.sh；
+  `--hires-steps` 默认 20→45；后处理默认开启并取 backup.sh 值（clarity 0.2 / sharpen 0.3 /
+  smart 0.5 / edge 1.5）
+- `HiResFix` 节点：prompt 未含 masterpiece 时前置 backup.sh 质量关键词（`quality_prefix=0` 可关）；
+  负面词留空时补 backup.sh 默认负面词（`default_negative=0` 可关）
+- 模型相关项（cfg / sampler / scheduler / FreeU / VAE tiling）仍由调用方显式传入，
+  不设为默认，避免影响 SDXL 等不同模型的正常区间
+
+历史修复（`23d9050` + `c950631`）：
 - 修复 `hires.model_path` 从未设置 / 枚举串大小写不匹配（"Model" vs "model"）
 - 默认改回 **latent-bicubic**（sd.cpp 的 `LATENT` 实为 Bilinear 偏软，ComfyUI 常用 bicubic）
 - 后处理默认关闭（旧 backup.sh 不做后处理）
