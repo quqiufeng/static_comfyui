@@ -1,16 +1,16 @@
 diff --git a/include/stable-diffusion.h b/include/stable-diffusion.h
-index cf69b48..119d63c 100644
+index 9173240..bc943cb 100644
 --- a/include/stable-diffusion.h
 +++ b/include/stable-diffusion.h
-@@ -210,6 +210,7 @@ typedef struct {
-     const char* audio_vae_path;
+@@ -212,6 +212,7 @@ typedef struct {
+     const char* audio_encoder_path;
      const char* taesd_path;
      const char* control_net_path;
 +    const char* gligen_path;
      const char* ip_adapter_path;
      const char* motion_module_path;
      const sd_embedding_t* embeddings;
-@@ -360,6 +361,7 @@ enum sd_hires_upscaler_t {
+@@ -364,6 +365,7 @@ enum sd_hires_upscaler_t {
      SD_HIRES_UPSCALER_LANCZOS,
      SD_HIRES_UPSCALER_NEAREST,
      SD_HIRES_UPSCALER_MODEL,
@@ -18,7 +18,7 @@ index cf69b48..119d63c 100644
      SD_HIRES_UPSCALER_COUNT,
  };
  
-@@ -377,6 +379,52 @@ typedef struct {
+@@ -381,6 +383,52 @@ typedef struct {
      int custom_sigmas_count;
  } sd_hires_params_t;
  
@@ -71,7 +71,7 @@ index cf69b48..119d63c 100644
  typedef struct {
      const sd_lora_t* loras;
      uint32_t lora_count;
-@@ -403,6 +451,15 @@ typedef struct {
+@@ -407,6 +455,15 @@ typedef struct {
      sd_tiling_params_t vae_tiling_params;
      sd_cache_params_t cache;
      sd_hires_params_t hires;
@@ -87,7 +87,7 @@ index cf69b48..119d63c 100644
      int qwen_image_layers;
      bool circular_x;
      bool circular_y;
-@@ -509,6 +566,12 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
+@@ -513,6 +570,12 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
                             sd_image_t** images_out,
                             int* num_images_out);
  
@@ -101,7 +101,7 @@ index cf69b48..119d63c 100644
      // Stop the current generation as soon as possible.
      SD_CANCEL_ALL,
 diff --git a/src/core/ggml_runner.h b/src/core/ggml_runner.h
-index 5dc3fa5..d3a1c4d 100644
+index 9084db1..c08b10a 100644
 --- a/src/core/ggml_runner.h
 +++ b/src/core/ggml_runner.h
 @@ -64,6 +64,14 @@ struct WeightAdapter {
@@ -119,7 +119,7 @@ index 5dc3fa5..d3a1c4d 100644
  struct GGMLRunnerContext {
      ggml_backend_t backend                                           = nullptr;
      ggml_context* ggml_ctx                                           = nullptr;
-@@ -75,6 +83,10 @@ struct GGMLRunnerContext {
+@@ -77,6 +85,10 @@ struct GGMLRunnerContext {
      bool circular_y_enabled                                          = false;
      ggml_tensor* ip_context                                          = nullptr;
      float ip_scale                                                   = 1.0f;
@@ -288,10 +288,10 @@ index 0000000..011c0ef
 +
 +#endif  // __GLIGEN_HPP__
 diff --git a/src/model/diffusion/model.hpp b/src/model/diffusion/model.hpp
-index 9d611c4..7c42b44 100644
+index fb4e362..9050665 100644
 --- a/src/model/diffusion/model.hpp
 +++ b/src/model/diffusion/model.hpp
-@@ -48,6 +48,9 @@ struct UNetDiffusionExtra {
+@@ -51,6 +51,9 @@ struct UNetDiffusionExtra {
      float control_strength                         = 0.f;
      const sd::Tensor<float>* ip_context            = nullptr;
      float ip_scale                                 = 1.f;
@@ -466,22 +466,8 @@ index 1c8ddf4..344d52c 100644
          return compute(n_threads,
                         *diffusion_params.x,
                         *diffusion_params.timesteps,
-diff --git a/src/model_loader.cpp b/src/model_loader.cpp
-index 6ab370c..47eee9a 100644
---- a/src/model_loader.cpp
-+++ b/src/model_loader.cpp
-@@ -70,7 +70,8 @@ const char* unused_tensors[] = {
-     "text_encoders.llm.output.weight",
-     "text_encoders.llm.lm_head.",
-     "language_model.lm_head.",
--    "vision_model.",
-+    // 本项目 patch：移除 "vision_model." —— #1935(SenseNova) 加入后，会把独立
-+    // CLIP vision 文件（键以 vision_model. 开头）全部过滤，导致 IP-Adapter 失败。
- };
- 
- bool is_unused_tensor(const std::string& name) {
 diff --git a/src/pipeline/diffusion_engine.cpp b/src/pipeline/diffusion_engine.cpp
-index 5d51e24..9d2641d 100644
+index e020a2d..7c398d4 100644
 --- a/src/pipeline/diffusion_engine.cpp
 +++ b/src/pipeline/diffusion_engine.cpp
 @@ -26,6 +26,7 @@
@@ -492,7 +478,7 @@ index 5d51e24..9d2641d 100644
  #include "stable-diffusion.h"
  
  #include "conditioning/conditioner.hpp"
-@@ -737,7 +738,10 @@ bool StableDiffusionGGML::init_model_loader(ModelLoader& model_loader, ModelConf
+@@ -742,7 +743,10 @@ bool StableDiffusionGGML::init_model_loader(ModelLoader& model_loader, ModelConf
  
      if (strlen(SAFE_STR(sd_ctx_params->clip_vision_path)) > 0) {
          LOG_INFO("loading clip_vision from '%s'", sd_ctx_params->clip_vision_path);
@@ -504,7 +490,7 @@ index 5d51e24..9d2641d 100644
              LOG_WARN("loading clip_vision from '%s' failed", sd_ctx_params->clip_vision_path);
          }
      }
-@@ -1233,6 +1237,13 @@ bool StableDiffusionGGML::validate_and_load_runners() {
+@@ -1311,6 +1315,13 @@ bool StableDiffusionGGML::validate_and_load_runners() {
      return true;
  }
  
@@ -518,8 +504,8 @@ index 5d51e24..9d2641d 100644
  bool StableDiffusionGGML::build_denoiser() {
      const auto* sd_ctx_params      = &config_->params;
      const auto& model_loader       = model_manager->loader();
-@@ -1755,6 +1766,28 @@ sd::Tensor<float> StableDiffusionGGML::get_clip_vision_output(const sd::Tensor<f
-     return output;
+@@ -1859,6 +1870,28 @@ sd::Tensor<float> StableDiffusionGGML::get_audio_embedding(const sd_audio_t& aud
+     return audio_encoder->compute(n_threads, mono);
  }
  
 +bool StableDiffusionGGML::encode_clip_vision_image(const sd_image_t& image) {
@@ -547,7 +533,7 @@ index 5d51e24..9d2641d 100644
  void StableDiffusionGGML::compute_ip_adapter_tokens(const sd_image_t& image, float strength) {
      ip_adapter_tokens        = {};
      ip_adapter_uncond_tokens = {};
-@@ -1763,9 +1796,11 @@ void StableDiffusionGGML::compute_ip_adapter_tokens(const sd_image_t& image, flo
+@@ -1867,9 +1900,11 @@ void StableDiffusionGGML::compute_ip_adapter_tokens(const sd_image_t& image, flo
          return;
      }
      auto image_tensor = sd_image_to_tensor(image);
@@ -562,17 +548,17 @@ index 5d51e24..9d2641d 100644
      if (embed.empty()) {
          return;
      }
-@@ -2110,6 +2145,9 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2218,6 +2253,9 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
  
      RunnerEndOnExit sample_control_runner_end{!control_image.empty() && control_net != nullptr ? control_net.get() : nullptr};
  
 +    // ModelNoiseScale（本项目 patch）
 +    sampler_noise_scale() = this->noise_scale;
 +
-     std::vector<int> skip_layers(guidance.slg.layers, guidance.slg.layers + guidance.slg.layer_count);
-     float cfg_scale     = guidance.txt_cfg;
-     float img_cfg_scale = guidance.img_cfg;
-@@ -2302,6 +2340,11 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+     const bool apply_denoise_mask = !denoise_mask.empty() &&
+                                     std::any_of(denoise_mask.values().begin(), denoise_mask.values().end(),
+                                                 [](float value) { return value != 1.f; });
+@@ -2414,6 +2452,11 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
                      nvf = static_cast<int>(noised_input.shape()[3]);
                  }
                  UNetDiffusionExtra unet_extra{nvf, &controls, control_strength};
@@ -584,7 +570,7 @@ index 5d51e24..9d2641d 100644
                  const auto& ip_tokens = use_uncond_ip ? ip_adapter_uncond_tokens : ip_adapter_tokens;
                  if (!ip_tokens.empty()) {
                      unet_extra.ip_context = &ip_tokens;
-@@ -2358,6 +2401,18 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2476,6 +2519,18 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
                  diffusion_params.extra = std::monostate{};
              }
  
@@ -603,7 +589,7 @@ index 5d51e24..9d2641d 100644
              sd::Tensor<float> cached_output;
              if (step_cache.before_condition(&condition, noised_input, &cached_output)) {
                  return std::move(cached_output);
-@@ -2395,6 +2450,35 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2513,6 +2568,35 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
              return {};
          }
  
@@ -639,7 +625,7 @@ index 5d51e24..9d2641d 100644
          if (!uncond.empty()) {
              if (!step_cache.is_step_skipped()) {
                  compute_sample_controls(control_image,
-@@ -2434,7 +2518,10 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2552,7 +2636,10 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
          guidance_input.pred_uncond     = uncond_out.empty() ? nullptr : &uncond_out;
          guidance_input.pred_img_uncond = img_uncond_out.empty() ? nullptr : &img_uncond_out;
  
@@ -651,7 +637,7 @@ index 5d51e24..9d2641d 100644
          if (guided.pred.empty()) {
              return {};
          }
-@@ -2455,6 +2542,127 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2573,6 +2660,127 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
              return {};
          }
  
@@ -780,10 +766,10 @@ index 5d51e24..9d2641d 100644
          sd::guidance::GuiderOutput output;
          output.pred = denoised;
 diff --git a/src/pipeline/diffusion_engine.h b/src/pipeline/diffusion_engine.h
-index 13cb6e8..0c6f337 100644
+index f2f8a8c..4bff69e 100644
 --- a/src/pipeline/diffusion_engine.h
 +++ b/src/pipeline/diffusion_engine.h
-@@ -12,7 +12,9 @@
+@@ -13,7 +13,9 @@
  #include <string>
  #include <vector>
  
@@ -793,7 +779,7 @@ index 13cb6e8..0c6f337 100644
  #include "core/ggml_graph_cut.h"
  #include "core/tensor.hpp"
  #include "core/util.h"
-@@ -100,6 +102,50 @@ public:
+@@ -106,6 +108,50 @@ public:
      bool is_using_v_parameterization     = false;
      bool is_using_edm_v_parameterization = false;
  
@@ -844,7 +830,7 @@ index 13cb6e8..0c6f337 100644
      std::shared_ptr<ModelManager> model_manager;
  
      enum class RunnerGroup { Core,
-@@ -324,6 +370,9 @@ public:
+@@ -334,6 +380,9 @@ public:
  
      bool build_denoiser();
  
@@ -854,11 +840,11 @@ index 13cb6e8..0c6f337 100644
      bool build_runners(const RunnerGroups& groups);
  
      bool is_using_v_parameterization_for_sd2(bool is_inpaint = false);
-@@ -363,6 +412,10 @@ public:
-                                              int clip_skip        = -1,
-                                              bool zero_out_masked = false);
+@@ -375,6 +424,10 @@ public:
  
-+    // CLIPVisionEncode（本项目 patch）：预编码参考图的 vision embedding，供 IP-Adapter 复用
+     sd::Tensor<float> get_audio_embedding(const sd_audio_t& audio);
+ 
++    // CLIPVisionEncode（本项目 patch）
 +    sd::Tensor<float> clip_vision_encoded;
 +    bool encode_clip_vision_image(const sd_image_t& image);
 +
@@ -866,10 +852,10 @@ index 13cb6e8..0c6f337 100644
  
      std::vector<float> process_timesteps(const std::vector<float>& timesteps,
 diff --git a/src/pipeline/image.cpp b/src/pipeline/image.cpp
-index 294e5b0..e460205 100644
+index 4c90150..5883256 100644
 --- a/src/pipeline/image.cpp
 +++ b/src/pipeline/image.cpp
-@@ -503,6 +503,26 @@ namespace sd::pipeline {
+@@ -523,6 +523,26 @@ namespace sd::pipeline {
          int64_t t1 = ggml_time_ms();
          LOG_INFO("get_learned_condition completed, taking %.2fs", (t1 - prepare_start_ms) * 1.0f / 1000);
  
@@ -896,7 +882,7 @@ index 294e5b0..e460205 100644
          ImageGenerationEmbeds embeds;
          embeds.img_uncond = std::move(img_uncond);
          embeds.cond       = std::move(cond);
-@@ -618,6 +638,127 @@ namespace sd::pipeline {
+@@ -638,6 +658,127 @@ namespace sd::pipeline {
          return result_images;
      }
  
@@ -1024,7 +1010,7 @@ index 294e5b0..e460205 100644
      static sd::Tensor<float> upscale_hires_latent(StableDiffusionGGML* sd,
                                                    const sd::Tensor<float>& latent,
                                                    const GenerationRequest& request,
-@@ -638,6 +779,17 @@ namespace sd::pipeline {
+@@ -658,6 +799,17 @@ namespace sd::pipeline {
              return target_shape;
          };
  
@@ -1042,7 +1028,7 @@ index 294e5b0..e460205 100644
          if (request.hires.upscaler == SD_HIRES_UPSCALER_LATENT ||
              request.hires.upscaler == SD_HIRES_UPSCALER_LATENT_NEAREST ||
              request.hires.upscaler == SD_HIRES_UPSCALER_LATENT_NEAREST_EXACT ||
-@@ -795,6 +947,46 @@ namespace sd::pipeline {
+@@ -809,6 +961,46 @@ namespace sd::pipeline {
              return false;
          sd->apply_circular_axes(sd_img_gen_params->circular_x, sd_img_gen_params->circular_y);
  
@@ -1090,10 +1076,10 @@ index 294e5b0..e460205 100644
  
          ImageVaeAxesGuard axes_guard(sd, sd_img_gen_params, request);
 diff --git a/src/runtime/denoiser.hpp b/src/runtime/denoiser.hpp
-index ec89406..a6af8b8 100644
+index 416859e..062e912 100644
 --- a/src/runtime/denoiser.hpp
 +++ b/src/runtime/denoiser.hpp
-@@ -1033,6 +1033,16 @@ struct LogitNormalScheduler : SigmaScheduler {
+@@ -1083,6 +1083,16 @@ struct LogitNormalScheduler : SigmaScheduler {
  };
  
  struct Denoiser {
@@ -1110,7 +1096,7 @@ index ec89406..a6af8b8 100644
      virtual float sigma_min()                                                        = 0;
      virtual float sigma_max()                                                        = 0;
      virtual float sigma_to_t(float sigma)                                            = 0;
-@@ -1131,7 +1141,9 @@ struct Denoiser {
+@@ -1186,7 +1196,9 @@ struct Denoiser {
                  scheduler = std::make_shared<DiscreteScheduler>();
                  break;
          }
@@ -1121,7 +1107,7 @@ index ec89406..a6af8b8 100644
      }
  };
  
-@@ -1566,6 +1578,12 @@ struct SenseNovaU1FlowDenoiser : public DiscreteFlowDenoiser {
+@@ -1621,6 +1633,12 @@ struct SenseNovaU1FlowDenoiser : public DiscreteFlowDenoiser {
  
  typedef std::function<sd::guidance::GuiderOutput(const sd::Tensor<float>&, float, int)> denoise_cb_t;
  
@@ -1134,7 +1120,7 @@ index ec89406..a6af8b8 100644
  static std::pair<float, float> get_ancestral_step(float sigma_from,
                                                    float sigma_to,
                                                    float eta = 1.0f) {
-@@ -1585,7 +1603,7 @@ static std::pair<float, float> get_ancestral_step(float sigma_from,
+@@ -1640,7 +1658,7 @@ static std::pair<float, float> get_ancestral_step(float sigma_from,
  
      float sigma_down_sq = sigma_to_sq - sigma_up * sigma_up;
      sigma_down          = sigma_down_sq > 0.0f ? std::sqrt(sigma_down_sq) : 0.0f;
@@ -1143,7 +1129,7 @@ index ec89406..a6af8b8 100644
  }
  
  static std::tuple<float, float, float> get_ancestral_step_flow(float sigma_from,
-@@ -1617,7 +1635,7 @@ static std::tuple<float, float, float> get_ancestral_step_flow(float sigma_from,
+@@ -1672,7 +1690,7 @@ static std::tuple<float, float, float> get_ancestral_step_flow(float sigma_from,
      float term = (sigma_down / sigma_to) * alpha_scale;
      term       = std::max(-1.0f, std::min(1.0f, term));
      sigma_up   = sigma_to * std::sqrt(std::max(1.0f - term * term, 0.0f));
@@ -1153,10 +1139,10 @@ index ec89406..a6af8b8 100644
  
  static std::tuple<float, float, float> get_ancestral_step(float sigma_from,
 diff --git a/src/stable-diffusion.cpp b/src/stable-diffusion.cpp
-index beb899c..3f2a647 100644
+index c533f2c..1d41748 100644
 --- a/src/stable-diffusion.cpp
 +++ b/src/stable-diffusion.cpp
-@@ -231,6 +231,7 @@ const char* hires_upscaler_to_str[] = {
+@@ -245,6 +245,7 @@ const char* hires_upscaler_to_str[] = {
      "Lanczos",
      "Nearest",
      "Model",
@@ -1164,7 +1150,7 @@ index beb899c..3f2a647 100644
  };
  
  const char* sd_hires_upscaler_name(enum sd_hires_upscaler_t upscaler) {
-@@ -493,6 +494,9 @@ void sd_img_gen_params_init(sd_img_gen_params_t* sd_img_gen_params) {
+@@ -514,6 +515,9 @@ void sd_img_gen_params_init(sd_img_gen_params_t* sd_img_gen_params) {
      sd_img_gen_params->batch_count         = 1;
      sd_img_gen_params->control_strength    = 0.9f;
      sd_img_gen_params->ip_adapter_strength = 1.0f;
@@ -1174,7 +1160,7 @@ index beb899c..3f2a647 100644
      sd_img_gen_params->qwen_image_layers   = 3;
      sd_img_gen_params->circular_x          = false;
      sd_img_gen_params->circular_y          = false;
-@@ -732,6 +736,20 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
+@@ -745,6 +749,20 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
      return execution.ready && sd::pipeline::generate_image(sd_ctx->sd, params, images_out, num_images_out);
  }
  

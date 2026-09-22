@@ -87,7 +87,9 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 
 ## 依赖的上游修复
 
-sd.cpp `7f410a3` 有两个回归会破坏原生 IP-Adapter，已在本项目 patch 修复（见 `cpp/sd/design.md` §4.6/§4.7）：
+sd.cpp 在 `7f410a3` 曾有两个回归会破坏原生 IP-Adapter（见 `cpp/sd/design.md` §4.6/§4.7）。**当前基准 `6dcb5bb`**：
+- `model_loader` 的 `vision_model.` 过滤回归已被上游 #1984 修复，相关 patch hunk 已删除；
+- clip vision 加载前缀回归**仍需**本项目 patch（`cond_stage_model.transformer.`）。
 
 1. `model_loader.cpp`：`unused_tensors` 含 `"vision_model."` → 过滤掉独立 CLIP vision 文件（#1935 引入）
 2. `diffusion_engine.cpp`：clip vision 加载前缀被误改为 `"clip_vision."`（#1957），应为 `"cond_stage_model.transformer."`

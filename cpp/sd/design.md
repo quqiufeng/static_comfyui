@@ -14,7 +14,7 @@
 ├── build_sd.sh                     # 编译 sd.cpp（静态链接，旧，已废弃）
 ├── build_sd_dl.sh                  # 编译 sd.cpp（动态后端，当前默认）
 ├── patches/
-│   └── sdcpp-freeu-sag-v2.patch    # 唯一 patch：FreeU + SAG + DynCFG（3 文件 159 行）
+│   └── sdcpp-freeu-sag-v2.patch    # 唯一 patch：FreeU/SAG/DynCFG/RescaleCFG/video CFG/GLIGEN/IPAdapter 前缀 等（11 文件 ~1180 行）
 ├── src/
 │   ├── adapters/
 │   │   ├── sdcpp_adapter.h         # C++ SDPipeline 类 + C API 声明
@@ -59,9 +59,9 @@ StaticPy extern fn ← sdcpp_adapter.h (C API) ← sdcpp_adapter.cpp ← stable-
 
 ## 4. 我们对 sd.cpp 的改动
 
-所有改动集中在 **一个 patch 文件** `patches/sdcpp-freeu-sag-v2.patch`（约 315 行），修改 sd.cpp 的 **5 个文件**。
+所有改动集中在 **一个 patch 文件** `patches/sdcpp-freeu-sag-v2.patch`（约 1180 行），修改 sd.cpp 的 **11 个文件**（含新增 `gligen.hpp`）。当前基准 commit：**`6dcb5bb`**（见 `SD_VERSION.lock`）。
 
-> **注意**：sd.cpp 在 `7f410a3` 做了大重构（#1956/#1957），生成管线从 `src/stable-diffusion.cpp` 拆到 `src/pipeline/`。patch 已随之重定位。
+> **注意**：sd.cpp 在 `7f410a3` 做了大重构（#1956/#1957），生成管线从 `src/stable-diffusion.cpp` 拆到 `src/pipeline/`。patch 已随之重定位。`6dcb5bb` 起上游又移除了 `unused_tensors`/`vision_model.` 过滤（#1984），旧的 `model_loader.cpp` hunk 已废弃、从 patch 中删除。
 
 ### 4.1 `include/stable-diffusion.h`
 新增 4 个结构体 + 在 `sd_img_gen_params_t` 末尾追加对应字段：
@@ -114,8 +114,8 @@ if (sd_version_is_unet(version)) {
 ### 4.5 `src/pipeline/image.cpp`
 一处改动：`generate_image()` 中从 `sd_img_gen_params_t` 读取 freeu/sag/dynamic_cfg 存入 `sd->*` 字段。
 
-### 4.6 `src/model_loader.cpp`（修复上游回归）
-从 `unused_tensors` 移除 `"vision_model."`——`#1935`（SenseNova U1.5）加入后，`is_unused_tensor` 在**加前缀之前**检查，会把独立 CLIP vision 文件（键以 `vision_model.` 开头）全部过滤，导致 IP-Adapter 的 CLIP Vision 加载为 0 个张量。
+### 4.6 `src/model_loader.cpp` ⚠️ 已从 patch 移除（`6dcb5bb`）
+历史修复（从 `unused_tensors` 移除 `"vision_model."`）在 `6dcb5bb` 上游已通过 #1984 删除整个 `unused_tensors[]` 过滤逻辑，hunk 自动作废，不再需要 patch。若将来 patch 再出现 `model_loader.cpp` 冲突，优先确认上游是否已删除该过滤。
 
 ### 4.7 `src/pipeline/diffusion_engine.cpp`（clip vision 前缀，修复上游回归）
 clip vision 加载前缀从 `"clip_vision."` 改回 `"cond_stage_model.transformer."`。`#1957` 重构把旧版的 `cond_stage_model.transformer.` 误改成 `clip_vision.`，而 `FrozenCLIPVisionEmbedder` 仍按 `cond_stage_model.transformer.` 查找。
@@ -193,7 +193,7 @@ LoRA、ControlNet、HiRes Fix、**VAE tiling（含 tile cap）**、sampler/sched
 cd /opt/sd
 git fetch origin
 git log --oneline origin/master -30     # 查看最近的提交
-git diff 7f410a3..origin/master --stat   # 查看变更概览
+git diff "$(cat /opt/static_comfyui/cpp/sd/SD_VERSION.lock)"..origin/master --stat   # 查看变更概览（以 lock 为基线）
 ```
 
 ### 5.2 第一步：checkout + **强制**更新 submodule
@@ -258,7 +258,7 @@ git apply --reject /opt/static_comfyui/cpp/sd/patches/sdcpp-freeu-sag-v2.patch 2
    - IPAdapter 注入：`prepare_image_generation_embeds` 中 `ImageGenerationEmbeds embeds;` 之前
    - 参数配线：`generate_image` 中 `apply_circular_axes` 之后、`resolve_ref_image_params` 之前
 
-> **重构历史**：`7f410a3` 起生成管线从 `stable-diffusion.cpp` 拆到 `src/pipeline/`。若上游再次移动这些函数，用 `grep -rn 'run_condition\|prepare_image_generation_embeds\|apply_circular_axes' src/` 重新定位。
+> **重构历史**：`7f410a3` 起生成管线从 `stable-diffusion.cpp` 拆到 `src/pipeline/`；`6dcb5bb` 起上游删除了 `model_loader.cpp` 的 `unused_tensors` 过滤。若上游再次移动这些函数，用 `grep -rn 'run_condition\|prepare_image_generation_embeds\|apply_circular_axes' src/` 重新定位。
 
 **如果官方已经合入了 FreeU/SAG：** 删除 patch 中对应部分，只保留未合入的部分。
 **如果官方 API 大变：** 对照 patch 的修改意图，在新代码的对应位置重新实现。
@@ -266,7 +266,7 @@ git apply --reject /opt/static_comfyui/cpp/sd/patches/sdcpp-freeu-sag-v2.patch 2
 ### 5.4 第二步：检查 sd.cpp C API 变化
 
 ```bash
-git diff 7f410a3..<new> -- include/stable-diffusion.h
+git diff "$(cat /opt/static_comfyui/cpp/sd/SD_VERSION.lock)"..<new> -- include/stable-diffusion.h
 ```
 
 逐项检查以下内容：
@@ -337,15 +337,32 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 # build_sd_dl.sh 会自动更新 lock；手工核对：
 cd /opt/sd && git rev-parse --short HEAD > /opt/static_comfyui/cpp/sd/SD_VERSION.lock
 
-# 重新生成 patch（排除 submodule 指针）
+# 重新生成 patch（排除 submodule 指针；gligen.hpp 是 untracked，需先 intent-to-add）
+cd /opt/sd
+git add -N src/model/diffusion/gligen.hpp
 git diff -- include src > /opt/static_comfyui/cpp/sd/patches/sdcpp-freeu-sag-v2.patch
+git reset src/model/diffusion/gligen.hpp   # 保持 untracked，避免误提交
 ```
 
-> 更新 `design.md` §4（patch 目标文件/位置）与本文档的基准 commit。
+> 更新 `design.md` §4（patch 目标文件/位置）与本文档的基准 commit。  
+> 当前基准：**`6dcb5bb`**（`SD_VERSION.lock`）。
 
 ### 5.9 实战踩坑记录
 
-**`7f410a3` 升级（74 commits，含生成管线大重构）实际遇到的问题：**
+**`6dcb5bb` 升级（`7f410a3` → `6dcb5bb`，35 commits）实际遇到的问题：**
+
+| # | 问题 | 现象 | 根因 | 修法 |
+|---|------|------|------|------|
+| 1 | `gligen_path` hunk 冲突 | `include/stable-diffusion.h.rej` | 上游新增 `audio_vae_path`/`audio_encoder_path` 改变了上下文锚点 | 锚点改为 `control_net_path` 后紧跟插入 `gligen_path` |
+| 2 | `model_loader.cpp` hunk 失效 | `.rej` | #1984 删除了整个 `unused_tensors[]`/`vision_model.` 过滤 | 该 hunk 作废，从 patch 中删除（§4.6） |
+| 3 | `clip_vision_encoded` / `encode_clip_vision_image` 冲突 | `diffusion_engine.h/.cpp.rej` | 上游新增 `get_audio_embedding` / `compute_ip_adapter_tokens` 改变锚点 | 声明/实现插入到 `compute_ip_adapter_tokens` 之前 |
+| 4 | `sampler_noise_scale()` 配线缺失 | 编译/行为回归 | `RunnerEndOnExit sample_control_runner_end` 后锚点上下文变化 | 在 `sample_control_runner_end` 与 `apply_denoise_mask` 之间插入 `sampler_noise_scale() = this->noise_scale;` |
+| 5 | 适配层 | **零改动**（编译一次通过） | `sd_*_params_init` + 按字段名赋值的抗性；`generate_video` 签名变化未被适配层使用 | — |
+| 6 | 回归 | FreeU/SAG 开关 MD5 不同；SDXL 1024×1024 出图 OK | — | `test_sdxl.json` + freeu on/off 双跑验证 |
+
+> **教训**：`git apply --reject` 后务必**读 `.rej` 真实内容再改锚点**——上游在目标函数附近插新行（如 `audio_encoder_path`）会让「按记忆中的旧上下文」编写的 fix 脚本断言失败。`model_loader.cpp` 这类修上游回归的 hunk，升级时先 `git log -S`/看上游 commit 确认是否已被上游自己修掉，避免盲目重放。
+
+**`7f410a3` 升级（74 commits，含生成管线大重构）历史问题（仍值得参考）：**
 
 | # | 问题 | 现象 | 根因 | 修法 |
 |---|------|------|------|------|
@@ -354,8 +371,8 @@ git diff -- include src > /opt/static_comfyui/cpp/sd/patches/sdcpp-freeu-sag-v2.
 | 3 | 缺 include | `UNetModelRunner does not name a type` | 新 `diffusion_engine.cpp` 未包含 `unet.hpp` | 加 `#include "model/diffusion/unet.hpp"` |
 | 4 | FreeU 静默失效 | 开关输出 hash 相同 | `nodes.parse_sampler_opts` 硬编码 `freeu=0`/`sag=0` | 改为 `get_int(inputs, "freeu", 0)` |
 | 5 | 适配层 | **零改动**（未报错） | `sd_*_params_init` + 按字段名赋值的抗性 | — |
-| 6 | 原生 IP-Adapter 的 CLIP Vision 加载为 0 张量 | `vision_model.* not in model metadata` | `#1935` 把 `"vision_model."` 加进 `unused_tensors`，而 `is_unused_tensor` 在加前缀前检查 | 从 `unused_tensors` 移除 `"vision_model."` |
-| 7 | 原生 IP-Adapter 前缀不匹配 | 同上 | `#1957` 把 clip vision 加载前缀从 `cond_stage_model.transformer.` 误改为 `clip_vision.` | 改回 `cond_stage_model.transformer.` |
+| 6 | 原生 IP-Adapter 的 CLIP Vision 加载为 0 张量 | `vision_model.* not in model metadata` | `#1935` 把 `"vision_model."` 加进 `unused_tensors`，而 `is_unused_tensor` 在加前缀前检查 | 从 `unused_tensors` 移除 `"vision_model."`（**`6dcb5bb` 起上游 #1984 已删除整个过滤，本修复作废**） |
+| 7 | 原生 IP-Adapter 前缀不匹配 | 同上 | `#1957` 把 clip vision 加载前缀从 `cond_stage_model.transformer.` 误改为 `clip_vision.` | 改回 `cond_stage_model.transformer.`（**`6dcb5bb` 仍需保留**） |
 
 > **教训**：升级后即使适配层零改动，**原生功能仍可能因上游重构/新特性引入回归**（#1935、#1957）。启用原生功能前务必实机验证，并对照旧版代码确认前缀/过滤逻辑是否被改。定位方法：`git log -S '<可疑字符串>' -- <file>` 找引入点。
 
