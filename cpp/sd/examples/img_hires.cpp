@@ -51,6 +51,8 @@ static void print_usage(const char* argv0) {
     std::fprintf(stderr, "  --hires-height <int>      HiRes target height (default: target height)\n");
     std::fprintf(stderr, "  --hires-steps <int>       HiRes steps (default: 20)\n");
     std::fprintf(stderr, "  --hires-strength <float>  HiRes denoising strength (default: 0.35)\n");
+    std::fprintf(stderr, "  --hires-upscaler <name>   HiRes upscaler: latent-bicubic/bislerp/model (default: latent-bicubic)\n");
+    std::fprintf(stderr, "  --hires-upscaler-model <path>  Upscaler model (for --hires-upscaler model)\n");
     std::fprintf(stderr, "  --lora <path:weight>      LoRA, can be specified multiple times\n");
     std::fprintf(stderr, "  --freeu                   Enable FreeU\n");
     std::fprintf(stderr, "  --freeu-b1 <float>        FreeU backbone1 scale (default: 1.3)\n");
@@ -140,6 +142,8 @@ int main(int argc, char** argv) {
     int low_w = 0, low_h = 0;
     int hires_width = 0, hires_height = 0, hires_steps = 20;
     float hires_strength = 0.35f;
+    std::string hires_upscaler = "latent-bicubic";
+    std::string hires_upscaler_model;
 
     bool freeu = false;
     float freeu_b1 = 1.3f;
@@ -206,6 +210,10 @@ int main(int argc, char** argv) {
             hires_steps = std::atoi(argv[++i]);
         } else if (std::strcmp(argv[i], "--hires-strength") == 0 && i + 1 < argc) {
             hires_strength = std::atof(argv[++i]);
+        } else if (std::strcmp(argv[i], "--hires-upscaler") == 0 && i + 1 < argc) {
+            hires_upscaler = argv[++i];
+        } else if (std::strcmp(argv[i], "--hires-upscaler-model") == 0 && i + 1 < argc) {
+            hires_upscaler_model = argv[++i];
         } else if (std::strcmp(argv[i], "--lora") == 0 && i + 1 < argc) {
             std::string lora_arg = argv[++i];
             size_t pos = lora_arg.find(':');
@@ -345,6 +353,8 @@ int main(int argc, char** argv) {
         return 1;
     }
     std::fprintf(stderr, "Model loaded\n");
+
+    pipeline.set_hires_upscaler(hires_upscaler, hires_upscaler_model);
 
     sd::ImageGenerationParams gen_params;
     gen_params.prompt          = prompt;
