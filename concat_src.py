@@ -19,6 +19,7 @@ FILES = [
 # 上游 prelude 无 dict_keys，由 comfycli_ffi.scm 提供 Scheme 实现；
 # 这里用一条 import 让类型检查器认识该名字（import 本身不生成代码）。
 HEADER = ("from comfycli_builtins import dict_keys, is_link, path_dirname, path_split\n"
+          "from comfycli_builtins import is_string, to_int, to_float, to_str\n"
           "from comfycli_builtins import torch_std_safetensors_load, torch_std_safetensors_count, "
           "torch_std_safetensors_save, torch_std_safetensors_merge, torch_std_safetensors_free, "
           "torch_std_copy_file\n\n")

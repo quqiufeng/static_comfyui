@@ -812,7 +812,16 @@ extern "C" {
 
 sd_pipeline_t sd_pipeline_create(void) {
     sd_set_log_callback(sdcpp_log_cb, nullptr);
-    return new sd::SDPipeline();
+    // 构造函数若抛异常，必须在此拦截：异常穿越 extern "C" 边界是未定义行为。
+    try {
+        return new sd::SDPipeline();
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[C API] sd_pipeline_create failed: %s\n", e.what());
+        return nullptr;
+    } catch (...) {
+        std::fprintf(stderr, "[C API] sd_pipeline_create failed: unknown exception\n");
+        return nullptr;
+    }
 }
 
 int sd_pipeline_free(sd_pipeline_t pipeline) {

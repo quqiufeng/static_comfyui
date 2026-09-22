@@ -54,7 +54,7 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
   GGML_BACKEND_PATH=/opt/sd/build-dl/bin/libggml-cuda.so \
   ./comfycli-bin workflow.json --output-dir ./output
 
-# 3. 或 prompt 模式
+# 3. 或 prompt 模式（CLIP 默认取自 checkpoint；如需外置：--clip-l / --clip-g）
 LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
   GGML_BACKEND_PATH=/opt/sd/build-dl/bin/libggml-cuda.so \
   ./comfycli-bin --checkpoint /data/models/image/sd_xl_base_1.0.safetensors \
@@ -308,6 +308,16 @@ comfycli/*.static.py  ──→  concat_src.py  ──→  _bundle.static.py
 ```
 
 > `staticpy/` 下的编译器核心（`static_translate.py` / `static_prelude.scm` / `static_stdlib.scm`）是 `/opt/ReScheme` 上游的**原样拷贝**；comfycli 特有的 FFI 与缺失内置放在 `comfycli/comfycli_ffi.scm`，构建脚本为 `staticpy/static_build_comfycli.sh`。详见 [BUILD.md](./BUILD.md)。
+>
+> `_bundle.static.py` 是 `concat_src.py` 生成的构建产物，**不入库**（`.gitignore`）；`build.sh` 会在缺失/过期时自动重建。
+
+### 编排层健壮性
+
+- **节点分发**：`call_node` 用 `NODE_GROUP` 查表路由到 5 个分类分派函数（clip/model/latent/image/misc），替代原先 200 分支的 `elif` 链。StaticPy 不支持一等函数值（无 `eval`/函数引用），故按类分组而非「字符串→函数」表。
+- **失败传播**：节点失败返回 `(None, ...)`；`execute_prompt` 执行前用 `upstream_missing` 检测上游空产出，直接报出「哪个节点依赖哪个失败节点」，避免下游含糊崩溃。
+- **无跨节点去重缓存**：早期缓存以 `class_type + 输入` 为键、不含节点身份，会跳过有副作用节点（`SaveImage` / 改 pipeline 状态的 `set_*`），已移除；`executed` 标记保证每节点只跑一次。
+- **输入类型归一化**：`get_int/get_float/get_str` 经 `comfycli_ffi.scm` 的 `to_int/to_float/to_str` 归一化，workflow 里以字符串写的数字（`"20"`）不会在 FFI 边界静默错位。
+- **`--prompt` 模式**不再硬编码 SDXL 的 `clip_l/clip_g.safetensors`；默认留空由 checkpoint 自带，可用 `--clip-l/--clip-g` 覆盖。
 
 ### 技术栈
 

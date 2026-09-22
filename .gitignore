@@ -224,7 +224,11 @@ comfyui_ref/
 sd_generate*.elf
 *.elf
 comfycli-bin
+# 由 concat_src.py 生成，不入库（build.sh 会在缺失/过期时自动重建）
 comfycli/_bundle.static.py
+
+# 运行时输出
+output/
 
 # C++ build artifacts in cpp/
 cpp/sdxl_pipeline

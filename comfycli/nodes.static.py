@@ -219,24 +219,25 @@ def node_return_count(class_type: str) -> int:
 
 
 def get_int(inputs, key: str, default: int) -> int:
+    # 归一化：字符串数字 -> int，flonum -> 截断，避免 FFI 类型错位
     v = dict_get(inputs, key)
     if v is None:
         return default
-    return v
+    return to_int(v)
 
 
 def get_float(inputs, key: str, default: float) -> float:
     v = dict_get(inputs, key)
     if v is None:
         return default
-    return v
+    return to_float(v)
 
 
 def get_str(inputs, key: str, default: str) -> str:
     v = dict_get(inputs, key)
     if v is None:
         return default
-    return v
+    return to_str(v)
 
 
 def checkpoint_loader_simple(inputs):
@@ -1076,8 +1077,17 @@ register_node("LatentCrop", "Latent Crop",
 
 
 def reroute(inputs):
-    val = dict_get(inputs, "anything")
-    return (val,)
+    # Reroute 在 ComfyUI 里是前端虚拟节点，输入键名不固定（""/"anything"/"value"…）。
+    # 取第一个非注入键（resolve_all 会补 output_dir），实现真正的透传。
+    keys = dict_keys(inputs)
+    i = 0
+    n = len(keys)
+    while i < n:
+        k = keys[i]
+        if k != "output_dir":
+            return (dict_get(inputs, k),)
+        i = i + 1
+    return (None,)
 
 
 register_node("Reroute", "Reroute",
@@ -1951,10 +1961,24 @@ def print_node_list():
         i = i + 1
 
 
-def call_node(class_type: str, inputs):
-    if class_type == "CheckpointLoaderSimple":
-        return checkpoint_loader_simple(inputs)
-    elif class_type == "DualCLIPLoader":
+NODE_GROUP: dict = make_dict()
+
+def register_group(types: list, group: int):
+    # 把一组节点类型登记到分发组（call_node 用 dict 查表，避免超长 elif 链）
+    i = 0
+    n = len(types)
+    while i < n:
+        dict_set(NODE_GROUP, types[i], group)
+        i = i + 1
+
+register_group(py_list("DualCLIPLoader", "CLIPTextEncode", "CLIPSetLastLayer", "ConditioningCombine", "ConditioningConcat", "ConditioningAverage"), 1)
+register_group(py_list("CheckpointLoaderSimple", "KSampler", "KSamplerAdvanced", "LORALoader", "DiffusionModelLoader", "HiResFix", "ADetailer", "IPAdapterApply", "CLIPVisionLoader", "IPAdapterModelLoader", "CheckpointLoader", "UNETLoader", "VAELoader", "CLIPLoader", "LoraLoader", "LoraLoaderModelOnly", "LoraLoaderBypass", "LoraLoaderBypassModelOnly", "CLIPMergeSimple", "CLIPMergeAdd", "CLIPMergeSubtract", "ModelSamplingFlux", "ModelSamplingSD3", "ModelSamplingAuraFlow", "ModelComputeDtype", "ModelAttentionBackend", "RescaleCFG", "ModelSamplingContinuousEDM", "ModelSamplingContinuousV", "ModelNoiseScale", "ModelSamplingDiscrete", "ModelSamplingStableCascade", "CheckpointSave", "VAESave", "CLIPSave", "ModelSave", "ModelMergeSimple", "ModelMergeAdd", "ModelMergeSubtract", "DiffusersLoader", "unCLIPCheckpointLoader", "ImageOnlyCheckpointLoader", "ImageOnlyCheckpointSave", "ModelPatchLoader", "VideoLinearCFGGuidance", "VideoTriangleCFGGuidance"), 2)
+register_group(py_list("EmptyLatentImage", "LatentUpscale", "LatentCrop", "SaveLatent", "LoadLatent", "LatentUpscaleBy", "LatentRotate", "LatentFlip", "LatentComposite", "LatentBlend", "RepeatLatentBatch", "LatentFromBatch", "SetLatentNoiseMask"), 3)
+register_group(py_list("VAEDecode", "VAEEncode", "VAEEncodeTiled", "LoadImageMask", "VAEEncodeForInpaint", "LoadImage", "ImageScale", "ImageScaleBy", "ImageInvert", "EmptyImage", "ImagePadForOutpaint", "ImageBlur", "ImageBatch", "ImageCompositeMasked", "ImageCrop", "ImageToMask", "MaskToImage", "CLIPVisionEncode", "LoadImageOutput", "PreviewImage", "Reroute", "SaveImage", "WebcamCapture", "VAEDecodeTiled"), 4)
+register_group(py_list("StyleModelLoader", "StyleModelApply", "unCLIPConditioning", "GLIGENLoader", "GLIGENTextBoxApply", "SVD_img2vid_Conditioning", "ConditioningSetAreaPercentageVideo", "AnimaLLLiteApply", "QwenImageDiffsynthControlnet", "ZImageFunControlnet", "WanUni3CControlnetApply", "SUPIRApply", "USOStyleReference", "ConditioningZeroOut", "ControlNetLoader", "DiffControlNetLoader", "ControlNetApply", "ControlNetApplyAdvanced", "InpaintModelConditioning", "PreviewAny", "ConditioningSetArea", "ConditioningSetAreaPercentage", "ConditioningSetAreaStrength", "ConditioningSetMask", "ConditioningMultiply", "ConditioningSetTimestepRange"), 5)
+
+def dispatch_clip_cond(class_type: str, inputs):
+    if class_type == "DualCLIPLoader":
         return dual_clip_loader(inputs)
     elif class_type == "CLIPTextEncode":
         return clip_text_encode(inputs)
@@ -1966,12 +1990,10 @@ def call_node(class_type: str, inputs):
         return conditioning_concat(inputs)
     elif class_type == "ConditioningAverage":
         return conditioning_average(inputs)
-    elif class_type == "EmptyLatentImage":
-        return empty_latent_image(inputs)
-    elif class_type == "LatentUpscale":
-        return latent_upscale(inputs)
-    elif class_type == "LatentCrop":
-        return latent_crop(inputs)
+
+def dispatch_model(class_type: str, inputs):
+    if class_type == "CheckpointLoaderSimple":
+        return checkpoint_loader_simple(inputs)
     elif class_type == "KSampler":
         return ksampler(inputs)
     elif class_type == "KSamplerAdvanced":
@@ -1990,7 +2012,95 @@ def call_node(class_type: str, inputs):
         return clip_vision_loader(inputs)
     elif class_type == "IPAdapterModelLoader":
         return ipadapter_model_loader(inputs)
-    elif class_type == "VAEDecode":
+    elif class_type == "CheckpointLoader":
+        return checkpoint_loader_simple(inputs)
+    elif class_type == "UNETLoader":
+        return unet_loader(inputs)
+    elif class_type == "VAELoader":
+        return vae_loader(inputs)
+    elif class_type == "CLIPLoader":
+        return clip_loader(inputs)
+    elif class_type == "LoraLoader" or class_type == "LoraLoaderModelOnly" or class_type == "LoraLoaderBypass" or class_type == "LoraLoaderBypassModelOnly":
+        return lora_loader(inputs)
+    elif class_type == "CLIPMergeSimple":
+        return clip_merge_simple(inputs)
+    elif class_type == "CLIPMergeAdd":
+        return clip_merge_add(inputs)
+    elif class_type == "CLIPMergeSubtract":
+        return clip_merge_subtract(inputs)
+    elif class_type == "ModelSamplingFlux" or class_type == "ModelSamplingSD3" or class_type == "ModelSamplingAuraFlow":
+        return model_sampling_flow(inputs)
+    elif class_type == "ModelComputeDtype":
+        return model_compute_dtype(inputs)
+    elif class_type == "ModelAttentionBackend":
+        return model_attention_backend(inputs)
+    elif class_type == "RescaleCFG":
+        return rescale_cfg(inputs)
+    elif class_type == "ModelSamplingContinuousEDM" or class_type == "ModelSamplingContinuousV":
+        return model_sampling_sigma_range(inputs)
+    elif class_type == "ModelNoiseScale":
+        return model_noise_scale(inputs)
+    elif class_type == "ModelSamplingDiscrete":
+        return model_sampling_discrete(inputs)
+    elif class_type == "ModelSamplingStableCascade":
+        return model_passthrough(inputs)
+    elif class_type == "CheckpointSave":
+        return checkpoint_save(inputs)
+    elif class_type == "VAESave":
+        return vae_save(inputs)
+    elif class_type == "CLIPSave":
+        return clip_save(inputs)
+    elif class_type == "ModelSave":
+        return model_save(inputs)
+    elif class_type == "ModelMergeSimple":
+        return model_merge_simple(inputs)
+    elif class_type == "ModelMergeAdd":
+        return model_merge_add(inputs)
+    elif class_type == "ModelMergeSubtract":
+        return model_merge_subtract(inputs)
+    elif str_starts_with(class_type, "ModelMerge"):
+        return model_merge_blocks(inputs)
+    elif class_type == "DiffusersLoader" or class_type == "unCLIPCheckpointLoader" or class_type == "ImageOnlyCheckpointLoader":
+        return checkpoint_loader_simple(inputs)
+    elif class_type == "ImageOnlyCheckpointSave":
+        return checkpoint_save(inputs)
+    elif class_type == "ModelPatchLoader":
+        return model_patch_loader(inputs)
+    elif class_type == "VideoLinearCFGGuidance":
+        return video_linear_cfg_guidance(inputs)
+    elif class_type == "VideoTriangleCFGGuidance":
+        return video_triangle_cfg_guidance(inputs)
+
+def dispatch_latent(class_type: str, inputs):
+    if class_type == "EmptyLatentImage":
+        return empty_latent_image(inputs)
+    elif class_type == "LatentUpscale":
+        return latent_upscale(inputs)
+    elif class_type == "LatentCrop":
+        return latent_crop(inputs)
+    elif class_type == "SaveLatent":
+        return save_latent(inputs)
+    elif class_type == "LoadLatent":
+        return load_latent(inputs)
+    elif class_type == "LatentUpscaleBy":
+        return latent_upscale_by(inputs)
+    elif class_type == "LatentRotate":
+        return latent_rotate(inputs)
+    elif class_type == "LatentFlip":
+        return latent_flip(inputs)
+    elif class_type == "LatentComposite":
+        return latent_composite(inputs)
+    elif class_type == "LatentBlend":
+        return latent_blend(inputs)
+    elif class_type == "RepeatLatentBatch":
+        return repeat_latent_batch(inputs)
+    elif class_type == "LatentFromBatch":
+        return latent_from_batch(inputs)
+    elif class_type == "SetLatentNoiseMask":
+        return set_latent_noise_mask(inputs)
+
+def dispatch_image(class_type: str, inputs):
+    if class_type == "VAEDecode":
         return vae_decode(inputs)
     elif class_type == "VAEEncode" or class_type == "VAEEncodeTiled":
         return vae_encode(inputs)
@@ -2026,7 +2136,19 @@ def call_node(class_type: str, inputs):
         return clip_vision_encode(inputs)
     elif class_type == "LoadImageOutput":
         return load_image(inputs)
-    elif class_type == "StyleModelLoader":
+    elif class_type == "PreviewImage":
+        return preview_image(inputs)
+    elif class_type == "Reroute":
+        return reroute(inputs)
+    elif class_type == "SaveImage":
+        return save_image(inputs)
+    elif class_type == "WebcamCapture":
+        return webcam_capture(inputs)
+    elif class_type == "VAEDecodeTiled":
+        return vae_decode(inputs)
+
+def dispatch_misc(class_type: str, inputs):
+    if class_type == "StyleModelLoader":
         return style_model_loader(inputs)
     elif class_type == "StyleModelApply":
         return style_model_apply(inputs)
@@ -2036,82 +2158,10 @@ def call_node(class_type: str, inputs):
         return gligen_loader(inputs)
     elif class_type == "GLIGENTextBoxApply":
         return gligen_textbox_apply(inputs)
-    elif class_type == "PreviewImage":
-        return preview_image(inputs)
-    elif class_type == "Reroute":
-        return reroute(inputs)
-    elif class_type == "SaveImage":
-        return save_image(inputs)
-    elif class_type == "CheckpointLoader":
-        return checkpoint_loader_simple(inputs)
-    elif class_type == "UNETLoader":
-        return unet_loader(inputs)
-    elif class_type == "VAELoader":
-        return vae_loader(inputs)
-    elif class_type == "CLIPLoader":
-        return clip_loader(inputs)
-    elif class_type == "LoraLoader" or class_type == "LoraLoaderModelOnly" or class_type == "LoraLoaderBypass" or class_type == "LoraLoaderBypassModelOnly":
-        return lora_loader(inputs)
-    elif class_type == "CLIPMergeSimple":
-        return clip_merge_simple(inputs)
-    elif class_type == "CLIPMergeAdd":
-        return clip_merge_add(inputs)
-    elif class_type == "CLIPMergeSubtract":
-        return clip_merge_subtract(inputs)
-    elif class_type == "ModelSamplingFlux" or class_type == "ModelSamplingSD3" or class_type == "ModelSamplingAuraFlow":
-        return model_sampling_flow(inputs)
-    elif class_type == "ModelComputeDtype":
-        return model_compute_dtype(inputs)
-    elif class_type == "ModelAttentionBackend":
-        return model_attention_backend(inputs)
-    elif class_type == "RescaleCFG":
-        return rescale_cfg(inputs)
-    elif class_type == "ModelSamplingContinuousEDM" or class_type == "ModelSamplingContinuousV":
-        return model_sampling_sigma_range(inputs)
-    elif class_type == "ModelNoiseScale":
-        return model_noise_scale(inputs)
-    elif class_type == "ModelSamplingDiscrete":
-        return model_sampling_discrete(inputs)
-    elif class_type == "ModelSamplingStableCascade":
-        return model_passthrough(inputs)
-    elif class_type == "SaveLatent":
-        return save_latent(inputs)
-    elif class_type == "LoadLatent":
-        return load_latent(inputs)
-    elif class_type == "CheckpointSave":
-        return checkpoint_save(inputs)
-    elif class_type == "VAESave":
-        return vae_save(inputs)
-    elif class_type == "CLIPSave":
-        return clip_save(inputs)
-    elif class_type == "ModelSave":
-        return model_save(inputs)
-    elif class_type == "ModelMergeSimple":
-        return model_merge_simple(inputs)
-    elif class_type == "ModelMergeAdd":
-        return model_merge_add(inputs)
-    elif class_type == "ModelMergeSubtract":
-        return model_merge_subtract(inputs)
-    elif str_starts_with(class_type, "ModelMerge"):
-        return model_merge_blocks(inputs)
-    elif class_type == "DiffusersLoader" or class_type == "unCLIPCheckpointLoader" or class_type == "ImageOnlyCheckpointLoader":
-        return checkpoint_loader_simple(inputs)
-    elif class_type == "ImageOnlyCheckpointSave":
-        return checkpoint_save(inputs)
-    elif class_type == "WebcamCapture":
-        return webcam_capture(inputs)
-    elif class_type == "ModelPatchLoader":
-        return model_patch_loader(inputs)
     elif class_type == "SVD_img2vid_Conditioning":
         return svd_img2vid_conditioning(inputs)
     elif class_type == "ConditioningSetAreaPercentageVideo" or class_type == "AnimaLLLiteApply" or class_type == "QwenImageDiffsynthControlnet" or class_type == "ZImageFunControlnet" or class_type == "WanUni3CControlnetApply" or class_type == "SUPIRApply" or class_type == "USOStyleReference":
         return conditioning_passthrough(inputs)
-    elif class_type == "VideoLinearCFGGuidance":
-        return video_linear_cfg_guidance(inputs)
-    elif class_type == "VideoTriangleCFGGuidance":
-        return video_triangle_cfg_guidance(inputs)
-    elif class_type == "VAEDecodeTiled":
-        return vae_decode(inputs)
     elif class_type == "ConditioningZeroOut":
         return conditioning_zero_out(inputs)
     elif class_type == "ControlNetLoader" or class_type == "DiffControlNetLoader":
@@ -2122,8 +2172,6 @@ def call_node(class_type: str, inputs):
         return controlnet_apply_advanced(inputs)
     elif class_type == "InpaintModelConditioning":
         return inpaint_model_conditioning(inputs)
-    elif class_type == "LatentUpscaleBy":
-        return latent_upscale_by(inputs)
     elif class_type == "PreviewAny":
         return preview_any(inputs)
     elif class_type == "ConditioningSetArea":
@@ -2138,23 +2186,21 @@ def call_node(class_type: str, inputs):
         return conditioning_multiply(inputs)
     elif class_type == "ConditioningSetTimestepRange":
         return conditioning_set_timestep_range(inputs)
-    elif class_type == "LatentRotate":
-        return latent_rotate(inputs)
-    elif class_type == "LatentFlip":
-        return latent_flip(inputs)
-    elif class_type == "LatentComposite":
-        return latent_composite(inputs)
-    elif class_type == "LatentBlend":
-        return latent_blend(inputs)
-    elif class_type == "RepeatLatentBatch":
-        return repeat_latent_batch(inputs)
-    elif class_type == "LatentFromBatch":
-        return latent_from_batch(inputs)
-    elif class_type == "SetLatentNoiseMask":
-        return set_latent_noise_mask(inputs)
     else:
         return (None,)
 
+def call_node(class_type: str, inputs):
+    group = dict_get(NODE_GROUP, class_type)
+    if group == 1:
+        return dispatch_clip_cond(class_type, inputs)
+    elif group == 2:
+        return dispatch_model(class_type, inputs)
+    elif group == 3:
+        return dispatch_latent(class_type, inputs)
+    elif group == 4:
+        return dispatch_image(class_type, inputs)
+    else:
+        return dispatch_misc(class_type, inputs)
 
 def main():
     pass

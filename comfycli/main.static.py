@@ -15,7 +15,8 @@ def make_workflow_node(class_type: str, inputs) -> dict:
 
 def build_prompt_workflow(checkpoint: str, prompt: str, output_path: str, output_dir: str,
                           width: int, height: int, steps: int, cfg: float,
-                          seed: int, sampler: str, scheduler: str) -> str:
+                          seed: int, sampler: str, scheduler: str,
+                          clip_l: str, clip_g: str) -> str:
     # Determine output directory and filename prefix.
     if output_path is not None and str_length(output_path) > 0:
         out_dir = path_dirname(output_path)
@@ -31,16 +32,16 @@ def build_prompt_workflow(checkpoint: str, prompt: str, output_path: str, output
         out_dir = output_dir
         filename_prefix = "comfy_cli"
 
-    # Default external CLIP encoders for SDXL.
-    clip_l = "clip_l.safetensors"
-    clip_g = "clip_g.safetensors"
-
+    # 外部 CLIP 编码器默认留空，由 checkpoint 自带（SDXL/SD1.5 单文件均适用）；
+    # 仅在用户显式指定 --clip-l/--clip-g 时才写入，避免硬编码 SDXL 文件名。
     workflow = make_dict()
 
     ckpt_inputs = make_dict()
     dict_set(ckpt_inputs, "ckpt_name", checkpoint)
-    dict_set(ckpt_inputs, "clip_l_name", clip_l)
-    dict_set(ckpt_inputs, "clip_g_name", clip_g)
+    if clip_l is not None and str_length(clip_l) > 0:
+        dict_set(ckpt_inputs, "clip_l_name", clip_l)
+    if clip_g is not None and str_length(clip_g) > 0:
+        dict_set(ckpt_inputs, "clip_g_name", clip_g)
     dict_set(workflow, "1", make_workflow_node("CheckpointLoaderSimple", ckpt_inputs))
 
     sampler_inputs = make_dict()
@@ -95,10 +96,12 @@ def main():
         seed = get_int(args, "seed", 42)
         sampler = get_str(args, "sampler", "euler_a")
         scheduler = get_str(args, "scheduler", "discrete")
+        clip_l = get_str(args, "clip_l", "")
+        clip_g = get_str(args, "clip_g", "")
         if checkpoint is not None and prompt is not None:
             content = build_prompt_workflow(checkpoint, prompt, output_path, output_dir,
                                               width, height, steps, cfg, seed,
-                                              sampler, scheduler)
+                                              sampler, scheduler, clip_l, clip_g)
             result = execute_prompt(content, output_dir)
         else:
             print("Usage: comfycli-bin workflow.json --output-dir ./output")

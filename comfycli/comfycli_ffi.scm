@@ -33,7 +33,8 @@
       (set! torch_std_safetensors_free (foreign-procedure "torch_std_safetensors_free" (void*) void))
       (set! torch_std_copy_file (foreign-procedure "torch_std_copy_file" (string string) int)))
     (begin
-      (display "warning: libcomfycli_torch.so not loaded (merge/save nodes unavailable)\n")
+      ;; 可选依赖缺失属正常情况（仅 merge/save 节点需要），不打印启动噪音；
+      ;; 真正调用时才由下面的 error 桩报错。
       (set! torch_std_safetensors_load (lambda (path) (error "libcomfycli_torch.so not loaded")))
       (set! torch_std_safetensors_count (lambda (d) (error "libcomfycli_torch.so not loaded")))
       (set! torch_std_safetensors_save (lambda (d path) (error "libcomfycli_torch.so not loaded")))
@@ -64,3 +65,23 @@
           ((char=? (string-ref p i) #\/)
            (vector (substring p 0 i) (substring p (+ i 1) (string-length p))))
           (else (loop (- i 1))))))
+
+;; ====== 输入取值类型强制（供 nodes.static.py 的 get_int/get_float/get_str）======
+;; workflow JSON 的数值字段可能以字符串形式出现（如 "20"），直接传给 C FFI
+;; 会静默错位。这里统一做一次类型归一化，避免 fixnum/flonum/string 混用。
+(define (is_string x) (string? x))
+
+(define (to_int x)
+  (cond ((string? x) (string_to_int x))
+        ((number? x) (exact (round x)))
+        (else x)))
+
+(define (to_float x)
+  (cond ((string? x) (string_to_float x))
+        ((number? x) (inexact x))
+        (else x)))
+
+(define (to_str x)
+  (cond ((string? x) x)
+        ((number? x) (number->string x))
+        (else (format "~s" x))))

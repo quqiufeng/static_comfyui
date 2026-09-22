@@ -20,6 +20,8 @@ def parse_cli_args() -> dict:
     seed: int = 42
     sampler: str = "euler_a"
     scheduler: str = "discrete"
+    clip_l: str = ""
+    clip_g: str = ""
 
     i: int = 1
     while i < argc:
@@ -76,6 +78,14 @@ def parse_cli_args() -> dict:
             i = i + 1
             if i < argc:
                 scheduler = py_list_ref(args_list, i)
+        elif arg == "--clip-l" or arg == "--clip_l":
+            i = i + 1
+            if i < argc:
+                clip_l = py_list_ref(args_list, i)
+        elif arg == "--clip-g" or arg == "--clip_g":
+            i = i + 1
+            if i < argc:
+                clip_g = py_list_ref(args_list, i)
         elif arg == "--cuda-device" or arg == "--cuda_device":
             i = i + 1
             if i < argc:
@@ -108,6 +118,8 @@ def parse_cli_args() -> dict:
     dict_set(result, "seed", seed)
     dict_set(result, "sampler", sampler)
     dict_set(result, "scheduler", scheduler)
+    dict_set(result, "clip_l", clip_l)
+    dict_set(result, "clip_g", clip_g)
     return result
 
 
@@ -131,6 +143,8 @@ def print_help():
     print("  --cfg, -C <float>               CFG scale (default: 7.0)")
     print("  --sampler <name>                Sampler name (default: euler_a)")
     print("  --scheduler <name>              Scheduler name (default: discrete)")
+    print("  --clip-l <path>                 External CLIP-L (default: auto from checkpoint)")
+    print("  --clip-g <path>                 External CLIP-G (default: auto from checkpoint)")
     print("  --cpu                           CPU mode (no GPU)")
     print("  --cuda-device <id>              CUDA device ID (default: 0)")
     print("  --highvram, --gpu-only          Keep all models on GPU")

@@ -92,10 +92,25 @@ def validate_prompt(prompt) -> int:
     return 0
 
 
-def input_signature(class_type: str, raw) -> str:
-    # 简化版输入签名：class_type + 原始输入（链接以 [src_id, idx] 参与）。
-    # 静态 DAG 下，签名相同的节点输出相同，可复用缓存。
-    return class_type + "|" + json_dumps(raw)
+def upstream_missing(inputs, node_outputs) -> str:
+    # 返回第一个「产出为 None」的上游节点 id（把失败定位到源头），否则返回 ""。
+    # 节点失败时约定返回 (None, ...)，下游直接取值会得到含糊报错，
+    # 这里提前检测并给出明确的节点 id。
+    keys = dict_keys(inputs)
+    k = 0
+    n = len(keys)
+    while k < n:
+        val = dict_get(inputs, keys[k])
+        if is_link(val):
+            src_id = val[0]
+            src_idx = val[1]
+            src_outputs = dict_get(node_outputs, src_id)
+            if src_outputs is None:
+                return src_id
+            if src_outputs[src_idx] is None:
+                return src_id
+        k = k + 1
+    return ""
 
 
 def execute_prompt(prompt_json: str, output_dir: str):
@@ -108,7 +123,9 @@ def execute_prompt(prompt_json: str, output_dir: str):
     deps, inputs_cache = build_deps(prompt)
     node_outputs = make_dict()
     executed = make_dict()
-    cache = make_dict()
+    # 注：曾用「class_type + 原始输入」做跨节点输出去重缓存，但该键不含节点身份，
+    # 会跳过有副作用节点（SaveImage / 改 pipeline 状态的 set_* 等）。已移除缓存，
+    # 每个节点只执行一次（executed 标记保证），语义正确优先。
     n = len(node_ids)
     remaining = n
     while remaining > 0:
@@ -130,14 +147,12 @@ def execute_prompt(prompt_json: str, output_dir: str):
                     node = dict_get(prompt, nid)
                     class_type = dict_get(node, "class_type")
                     inputs = dict_get(inputs_cache, nid)
-                    sig = input_signature(class_type, inputs)
-                    cached = dict_get(cache, sig)
-                    if cached is not None:
-                        outputs = cached
-                    else:
-                        resolved = resolve_all(inputs, node_outputs, output_dir)
-                        outputs = call_node(class_type, resolved)
-                        dict_set(cache, sig, outputs)
+                    miss = upstream_missing(inputs, node_outputs)
+                    if str_length(miss) > 0:
+                        print("Execution aborted: node " + nid + " (" + class_type + ") depends on upstream node " + miss + " which produced no output")
+                        return node_outputs
+                    resolved = resolve_all(inputs, node_outputs, output_dir)
+                    outputs = call_node(class_type, resolved)
                     dict_set(node_outputs, nid, outputs)
                     dict_set(executed, nid, 1)
                     remaining = remaining - 1

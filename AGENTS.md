@@ -139,9 +139,10 @@ comfycli-bin workflow.json --output-dir ./output
 - 无类继承/多态 → dataclass + 组合
 - 无 try/except → if 守卫 + 返回值检查
 - 无 lambda 闭包 / eval / exec
-- **无模块级可变全局变量** — 函数体内引用会被判 `undefined name`（硬错误）
-- **无 `break` / `continue`** — 翻译器不处理，需改写循环条件
-- **无 `is None` / `is not None`** — 用 `is_none()` / `is_some()`（见 `comfycli_ffi.scm`）
+- **无一等函数值**：`f = handler`（裸函数引用）会报 `undefined name`（翻译器给用户函数加 `static_` 前缀、引用不加）。因此**不能**用「字符串→函数」查表分发；需要分发时按类分组为多个函数（见 `nodes.static.py` 的 `NODE_GROUP` + `dispatch_*`）。
+- `continue` **可用**（见 `cli_args.static.py`）；`break` 未验证，循环退出仍建议改写条件。
+- `is None` / `is not None` **可用**（见 `execution.static.py`）。
+- 模块级注解字典**可用**（如 `NODE_CLASS_MAPPINGS: dict = make_dict()`，函数内 `dict_set/dict_get` 正常）；早期文档所述「硬错误」已不成立。
 - `list` 即 Scheme vector（`len`→`list_length`，索引→`vector-ref`）
 - `extern fn foo(x: int) -> int from "sdcpp_adapter"` 声明 C FFI；共享库由 `comfycli_ffi.scm` 加载
 
