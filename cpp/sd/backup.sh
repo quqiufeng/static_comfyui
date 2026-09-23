@@ -5,10 +5,41 @@
 # 环境变量: VAE_TILE_SIZE, VAE_TILE_OVERLAP, CFG_SCALE, SAMPLING_METHOD 等
 # =============================================================================
 #
-# 【调优参数（人像, 2026-09-22 验证 combo B）】
-#   CFG=3.5  Sampler=euler  Scheduler=discrete  Steps=25→50
-#   HiRes strength=0.5  upscaler=latent-bislerp  FreeU b1=1.3 b2=1.4（z_image/DiT 下无效）  SAG=关
-#   规律: 人像 CFG 2.5~3.5; discrete 比 karras 稳; z_image 为 DiT，FreeU 是空操作
+# 【最佳甜点配方（2026-09-23, 14 组离散扫描筛出, 图 zimage_p_E1xMIN.png）】
+#   默认即此配方（Q5 模型 / seed 时间戳随机 / 皮肤词负面已固化）:
+#   CFG=3.0  Steps=20→40  HiRes strength=0.4  upscaler=latent-bislerp
+#   clarity=0.15  edge-sharpen=0.0  Sampler=euler  Scheduler=discrete
+#   质量前缀: E1xMIN 带 img_hires 内置前缀（同本脚本文本, 单份）。
+#     SKIP_QUALITY_PREFIX=1(默认) 只关脚本层添加, img_hires 仍会加同一份 → 与 E1xMIN 一致;
+#     彻底不加前缀需给 img_hires 传 --no-quality-prefix（当前脚本未暴露）。
+#
+# 【甜点参数范围（每项单独扫描过的离散区间, 两括号内为安全值, 甜点在其中）】
+#   cfg           3.0~3.5   (3.0~5.0)
+#     原理: 提示词约束强度。z_image 蒸馏 turbo 模型, <2.5 皮肤纹理词失效发散;
+#           >5.0 肖像易过饱和僵硬。
+#   base steps    20        (16~25)
+#   hires steps   40        (30~50)
+#     原理: 二次采样细节量。蒸馏 turbo 不吃步数, 40→80 被否(更慢更差);
+#           16→30 可用但细节不足, 甜点 20→40。
+#   strength      0.4       (0.35~0.5)
+#     原理: HiRes 二次改写幅度。0.25 皮肤无纹理(磨皮假感); 0.75 跑构图出噪点。
+#   upscaler      bislerp   (latent-bislerp)
+#     原理: latent 放大插值。bicubic 软到丢毛孔, 模型级(ESRGAN)高分辨率崩溃。
+#   clarity       0.15      (0.15~0.3)
+#     原理: 局部对比度。0 皮肤死平; 0.8 塑料过锐; 0.15~0.3 微纹理真实感。
+#   edge-sharpen  0.0       (必须 0)
+#     原理: 轮廓高通锐化。纯白背景剪影强, >0 必出白边/振铃 halo, 数码处理感最伤写实。
+#
+# 【本轮调试经验（14 张对比, seed 25630, 2560×1440, z_image_turbo-Q8）】
+#   1. 决定性败笔是 edge-sharpen: 基准(3.5/25→50/0.5/bislerp/clarity0.3/edge2.0)被否,
+#      与最优 E1 唯一差异就是 edge 2.0→0 — 白底人像轮廓锐化必出白边。
+#   2. MIN(全低配: 2.0/16→30/0.25/bicubic/clarity0/edge0) 好看但皮肤过腻 —
+#      真实皮肤纹理必须由 strength+clarity+bislerp+足量步数四项同时供给。
+#   3. 综合 = E1 与 MIN 参数取中点(即本配方), 二者互补: E1 纹理真, MIN 柔自然。
+#   4. FreeU 对 z_image/Qwen(DiT) 是空操作(diffusion_engine 仅 UNet 生效), 加了无害但无效。
+#   5. 蒸馏 turbo 模型步数收益低: 40→80 反而更差; z_image 走 discrete, Qwen 必须 flux。
+#   6. 质量前缀(QUALITY_PREFIX)在宽画幅+close-up 会诱导主体复制, 需 SKIP_QUALITY_PREFIX=1。
+#   7. ESRGAN(model) hires 内部路径高分辨率必崩(weight preparation), 只用 latent 路径。
 #
 # 【VAE Tiling 峰值参考】
 #   Tile    | VAE Buffer | 峰值估算  | 适用显卡
@@ -30,6 +61,11 @@ BLUE="\033[0;34m"; CYAN="\033[0;36m"; NC="\033[0m"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODEL_DIR="${MODEL_DIR:-/data/models/image}"
 SD_CLI="${SD_CLI:-$SCRIPT_DIR/build/img_hires}"
+SD_BACKEND_DIR="${SD_BACKEND_DIR:-/opt/sd/build-dl/bin}"
+
+# 运行环境依赖内聚到脚本内, 外部无需再 export
+export LD_LIBRARY_PATH="$SCRIPT_DIR/build:$SD_BACKEND_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export GGML_BACKEND_PATH="${GGML_BACKEND_PATH:-$SD_BACKEND_DIR/libggml-cuda.so}"
 DIFFUSION_MODEL="${DIFFUSION_MODEL:-$MODEL_DIR/z_image_turbo-Q5_K_M.gguf}"
 VAE_MODEL="${VAE_MODEL:-$MODEL_DIR/ae.safetensors}"
 LLM_MODEL="${LLM_MODEL:-$MODEL_DIR/Qwen3-4B-Instruct-2507-Q4_K_M.gguf}"
@@ -75,7 +111,7 @@ while [ $i -lt $# ]; do
     i=$((i+1))
 done
 
-PROMPT="${ARGS[0]:-A beautiful landscape}"
+PROMPT="${ARGS[0]:-solo,single woman,half body portrait of a young woman, soft natural lighting, elegant pose, studio lighting, sharp eyes, pure white background, fair skin, pale skin, smooth skin, matte skin, porcelain skin, flawless skin, medium close up}"
 OUTPUT_FILE="${ARGS[1]:-}"
 WIDTH="${ARGS[2]:-1280}"
 HEIGHT="${ARGS[3]:-720}"
@@ -105,22 +141,27 @@ echo -e "${GREEN}✓ All checks passed${NC}"
 
 SAMPLING_METHOD="${SAMPLING_METHOD:-euler}"
 SCHEDULER="${SCHEDULER:-discrete}"
-CFG_SCALE="${CFG_SCALE:-3.5}"
-STEPS="${STEPS:-25}"
-HIRES_STEPS="${HIRES_STEPS:-50}"
-HIRES_STRENGTH="${HIRES_STRENGTH:-0.5}"
-# HiRes 上采样方式: latent-bislerp（默认，更锐）| latent-bicubic | model（用 2x_ESRGAN 真实上采样）
+CFG_SCALE="${CFG_SCALE:-3.0}"
+STEPS="${STEPS:-20}"
+HIRES_STEPS="${HIRES_STEPS:-40}"
+HIRES_STRENGTH="${HIRES_STRENGTH:-0.4}"
+# HiRes 上采样方式: latent-bislerp（默认，保细节）| latent-bicubic（偏软）| model（ESRGAN 高分辨率会崩）
 HIRES_UPSCALER="${HIRES_UPSCALER:-latent-bislerp}"
+# 后处理（甜点见头部注释）: clarity 局部对比 0.15; edge-sharpen 必须 0（白底轮廓锐化出白边）
+CLARITY="${CLARITY:-0.15}"
+EDGE_SHARPEN="${EDGE_SHARPEN:-0.0}"
 
 echo -e "${BLUE}[INFO] $([ "$WIDTH" -ge 1920 ] && echo "Ultra HD" || echo "HD") Mode: steps=$STEPS, cfg=$CFG_SCALE, sampler=$SAMPLING_METHOD${NC}"
 
 QUALITY_PREFIX="masterpiece, best quality, ultra-detailed, sharp focus, 8k uhd, photorealistic, highly detailed, crisp, clear, centered composition, professional portrait, medium shot, realistic skin texture, soft lighting"
-# SKIP_QUALITY_PREFIX=1 可关闭自动前缀（宽画幅 + close-up 时该前缀会诱导主体复制）
-if [ "${SKIP_QUALITY_PREFIX:-0}" != "1" ] && [[ "$PROMPT" != *"masterpiece"* ]]; then
+# 默认关闭自动前缀（E1xMIN 复现配方无前缀）; 宽画幅 + close-up 加前缀会诱导主体复制
+# 需要时 SKIP_QUALITY_PREFIX=0 打开
+if [ "${SKIP_QUALITY_PREFIX:-1}" != "1" ] && [[ "$PROMPT" != *"masterpiece"* ]]; then
     PROMPT="$QUALITY_PREFIX, $PROMPT"
 fi
 
-NEGATIVE_PROMPT="${NEGATIVE_PROMPT:-blurry, low quality, worst quality, jpeg artifacts, noise, grain, soft focus, out of focus, hazy, unclear, bad anatomy, deformed, border artifacts, edge distortion, tiling artifacts, edge artifacts, frame distortion, warped edges, stretched proportions, asymmetrical face, off-center, cropped, out of frame, partial face, cut off, incomplete head, cropped head, watermark, text, logo, signature, cropped shoulders, embedding:EasyNegative, embedding:bad-hands-5}"
+# E1xMIN 复现负面词: 基础负面 + 皮肤油腻词（防磨皮/油光）
+NEGATIVE_PROMPT="${NEGATIVE_PROMPT:-blurry, low quality, worst quality, jpeg artifacts, noise, grain, soft focus, out of focus, hazy, unclear, bad anatomy, deformed, border artifacts, edge distortion, tiling artifacts, edge artifacts, frame distortion, warped edges, stretched proportions, asymmetrical face, off-center, cropped, out of frame, partial face, cut off, incomplete head, cropped head, watermark, text, logo, signature, cropped shoulders, oily skin, shiny skin, greasy skin, glossy skin, plastic skin, skin blemishes, embedding:EasyNegative, embedding:bad-hands-5}"
 
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 if [ -n "$OUTPUT_FILE" ]; then
@@ -139,7 +180,7 @@ else
 fi
 
 mkdir -p "$OUTPUT_DIR"
-OUTPUT_PATH="$OUTPUT_DIR/$OUTPUT"
+OUTPUT_PATH="$(cd "$OUTPUT_DIR" && pwd)/$OUTPUT"
 
 TARGET_LATENT_W=$((WIDTH / 8))
 TARGET_LATENT_H=$((HEIGHT / 8))
@@ -219,7 +260,7 @@ echo -e "Output: ${GREEN}$OUTPUT_PATH${NC}"
 echo "========================================"
 echo ""
 
-SEED="${SEED:-$RANDOM}"
+SEED="${SEED:-$(date +%s)}"
 echo "Generating...  $(date '+%H:%M:%S')"
 
 # Convert VAE_TILE_SIZE "128x128" -> single int for img_hires
@@ -244,12 +285,12 @@ SD_CMD=("$SD_CLI"
   --freeu
   --freeu-b1 1.3
   --freeu-b2 1.4
-  --clarity 0.3
+  --clarity "$CLARITY"
   --sharpen 0.3
   --sharpen-radius 1
   --smart-sharpen 0.5
   --smart-sharpen-radius 2
-  --edge-sharpen 2.0
+  --edge-sharpen "$EDGE_SHARPEN"
   --edge-sharpen-radius 2
   --edge-sharpen-threshold 0.3
   -W "$LOW_W" -H "$LOW_H"
@@ -318,7 +359,8 @@ if [ "$UPSCALE_FLAG" -eq 1 ]; then
 fi
 
 START_TIME=$(date +%s)
-"${SD_CMD[@]}"
+# 在后端目录运行: ggml 按 exe 目录/当前目录搜索 cpu 插件; 低显存时 auto-fit 会把 te/vae params 放 cpu
+( cd "$SD_BACKEND_DIR" && "${SD_CMD[@]}" )
 END_TIME=$(date +%s)
 GEN_DURATION=$((END_TIME - START_TIME))
 

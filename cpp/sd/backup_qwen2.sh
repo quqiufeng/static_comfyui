@@ -11,9 +11,10 @@
 # 【v2 相对 backup_qwen.sh 的修正】
 #   1) scheduler: discrete → flux（sd.cpp 对 VERSION_QWEN_IMAGE_2_1 的默认调度器
 #      就是 FLUX_SCHEDULER；官方示例不传 --scheduler。强制 discrete 会明显掉画质）
-#   2) 去掉 SD1.5 味的 quality prefix（"masterpiece, best quality, 8k uhd,
-#      professional portrait, medium shot"）——Qwen 是自然语言模型，booru 标签
-#      会污染语义并诱导"AI 味"构图
+#   2) 脚本层去掉 SD1.5 味的 quality prefix（"masterpiece, best quality, 8k uhd,
+#      professional portrait, medium shot"）。注意: img_hires 二进制内置同文前缀
+#      默认仍会自动加（历次 Qwen 验证图均带此前提）; NO_QUALITY_PREFIX=1 透传
+#      --no-quality-prefix 才能真正关闭
 #   3) 去掉 negative 里的 SD1.5 textual inversion（embedding:EasyNegative /
 #      embedding:bad-hands-5）——Qwen3-VL 文本编码器没有这些 embedding
 #   4) 默认关闭重后处理（clarity/sharpen/smart/edge）——避免过锐、塑料感
@@ -27,6 +28,20 @@
 #     3d render 等反动漫词 + 皮肤油腻词
 #   - FreeU 默认关（Qwen 为 DiT，FreeU 空操作；FREEU=1 可开）
 #   - POSTPROC=0 关闭后处理；OFFLOAD=1 权重常驻内存（20G 卡必需）
+#
+# 【v4 甜点同步（2026-09-23, 与 backup.sh 同步 z_image 14 组扫描结论）】
+#   用法与 backup.sh 一致: 只提供提示词（+ 输出路径、分辨率）, 其余全默认裸跑复现。
+#   甜点值: steps 20→40 / hires strength 0.4 / clarity 0.15 / edge-sharpen 0.0
+#           upscaler latent-bislerp（不变）/ SEED 默认时间戳随机（复现用 SEED=25630）
+#           / 无质量前缀 / 皮肤词负面已固化
+#   cfg 保持 6.0 — z_image 甜点 3.0 不适用 Qwen（两模型引导尺度不同,
+#      Qwen 官方/已验证值即 6.0; 想试 CFG=3.0 需单独扫）
+#   参数范围与原理、14 张对比调试经验见 backup.sh 头部注释（同步维护）:
+#     - edge-sharpen 必须 0: 白底剪影高通锐化出白边/振铃 halo
+#     - clarity 0.15~0.3: 0 皮肤死平, 0.8 塑料过锐
+#     - strength 0.35~0.5: 0.25 无纹理, 0.75 跑构图
+#     - 蒸馏 turbo 步数收益低: 40→80 更慢更差, 甜点 20→40
+#     - FreeU 对 Qwen(DiT) 空操作; 质量前缀污染自然语言语义（v2 已去）
 #
 # 【分辨率】Qwen 要求宽高为 32 的倍数；脚本按 /32 计算 base。
 # 【显存】20GB 卡必须 --offload-to-cpu（权重常驻内存、采样/VAE 仍在 GPU）。
@@ -45,12 +60,14 @@ DIFFUSION_MODEL="${DIFFUSION_MODEL:-$MODEL_DIR/qwen-image-2.1-Q5_K_M.gguf}"
 LLM_MODEL="${LLM_MODEL:-$MODEL_DIR/Qwen3VL-8B-Instruct-Q4_K_M.gguf}"
 VAE_MODEL="${VAE_MODEL:-$MODEL_DIR/qwen_image_2.1_vae_bf16.safetensors}"
 
+# 运行环境依赖内聚到脚本内, 外部无需再 export
 export LD_LIBRARY_PATH="$SCRIPT_DIR/build:$SD_BACKEND_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export GGML_BACKEND_PATH="${GGML_BACKEND_PATH:-$SD_BACKEND_DIR/libggml-cuda.so}"
 
 ARGS=()
 for arg in "$@"; do ARGS+=("$arg"); done
 
-PROMPT="${ARGS[0]:-a lovely cat holding a sign that says hello}"
+PROMPT="${ARGS[0]:-solo,single woman,half body portrait of a young woman, soft natural lighting, elegant pose, studio lighting, sharp eyes, pure white background, fair skin, pale skin, smooth skin, matte skin, porcelain skin, flawless skin, medium close up}"
 OUTPUT_FILE="${ARGS[1]:-}"
 WIDTH="${ARGS[2]:-1024}"
 HEIGHT="${ARGS[3]:-1024}"
@@ -71,9 +88,9 @@ check_file "$VAE_MODEL"
 echo -e "${GREEN}✓ All checks passed${NC}"
 
 CFG_SCALE="${CFG:-6.0}"
-STEPS="${STEPS:-25}"
-HIRES_STEPS="${HIRES_STEPS:-50}"
-HIRES_STRENGTH="${HIRES_STRENGTH:-0.5}"
+STEPS="${STEPS:-20}"
+HIRES_STEPS="${HIRES_STEPS:-40}"
+HIRES_STRENGTH="${HIRES_STRENGTH:-0.4}"
 SAMPLING_METHOD="${SAMPLING_METHOD:-euler}"
 SCHEDULER="${SCHEDULER:-flux}"
 HIRES_UPSCALER="${HIRES_UPSCALER:-latent-bislerp}"
@@ -81,12 +98,13 @@ VAE_TILE_SIZE="${VAE_TILE_SIZE:-32}"
 VAE_TILE_OVERLAP="${VAE_TILE_OVERLAP:-0.5}"
 OFFLOAD="${OFFLOAD:-1}"
 POSTPROC="${POSTPROC:-1}"
-CLARITY="${CLARITY:-0.3}"
+CLARITY="${CLARITY:-0.15}"
 SHARPEN="${SHARPEN:-0.3}"
 SMART_SHARPEN="${SMART_SHARPEN:-0.5}"
-EDGE_SHARPEN="${EDGE_SHARPEN:-2.0}"
+EDGE_SHARPEN="${EDGE_SHARPEN:-0.0}"
 FREEU="${FREEU:-0}"
 REALISM="${REALISM:-1}"
+NO_QUALITY_PREFIX="${NO_QUALITY_PREFIX:-0}"
 REALISM_SUFFIX="photorealistic, realistic photograph, raw photo, natural skin texture"
 
 # v2：不再自动加 booru quality prefix（需要时可用 QUALITY_PREFIX 显式指定）
@@ -155,7 +173,7 @@ echo -e "Output: ${GREEN}$OUTPUT_PATH${NC}"
 echo "========================================"
 echo ""
 
-SEED="${SEED:-$RANDOM}"
+SEED="${SEED:-$(date +%s)}"
 echo "Generating...  $(date '+%H:%M:%S')"
 
 SD_CMD=("$SD_CLI"
@@ -193,7 +211,10 @@ if [ "$FREEU" -eq 1 ]; then
     SD_CMD+=(--freeu --freeu-b1 1.3 --freeu-b2 1.4)
 fi
 if [ "$OFFLOAD" -eq 1 ]; then
-    SD_CMD+=(--offload-to-cpu)
+  SD_CMD+=(--offload-to-cpu)
+fi
+if [ "$NO_QUALITY_PREFIX" -eq 1 ]; then
+  SD_CMD+=(--no-quality-prefix)
 fi
 
 SD_CMD+=("$PROMPT" "$OUTPUT_PATH")
