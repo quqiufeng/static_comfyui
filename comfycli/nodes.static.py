@@ -619,9 +619,9 @@ def hires_fix(inputs):
     if seed == 0:
         seed = -1
 
-    # HiRes 放大器：默认 latent-bicubic（对齐 ComfyUI LatentUpscale 原理）；
+    # HiRes 放大器：默认 latent-bislerp（对齐 combo B 配方，更锐）；
     # 如需 ESRGAN 可显式设 upscaler=model + upscaler_model
-    upscaler = get_str(inputs, "upscaler", "latent-bicubic")
+    upscaler = get_str(inputs, "upscaler", "latent-bislerp")
     upscaler_model = get_str(inputs, "upscaler_model", "2x_ESRGAN.gguf")
     upscaler_path = ""
     if upscaler == "model" and upscaler_model != "":
@@ -629,27 +629,28 @@ def hires_fix(inputs):
     sd_set_hires_upscaler(model.pipeline, upscaler, upscaler_path)
 
     opts = parse_sampler_opts(inputs)
-    dict_set(opts, "cfg", get_float(inputs, "cfg", 2.5))
+    dict_set(opts, "steps", get_int(inputs, "steps", 25))
+    dict_set(opts, "cfg", get_float(inputs, "cfg", 3.5))
     dict_set(opts, "scheduler", get_str(inputs, "scheduler", "discrete"))
     dict_set(opts, "seed", seed)
     dict_set(opts, "vae_tiling", get_int(inputs, "vae_tiling", 1))
     dict_set(opts, "vae_tile_size", get_int(inputs, "vae_tile_size", 128))
     dict_set(opts, "hires_width", target_width)
     dict_set(opts, "hires_height", target_height)
-    dict_set(opts, "hires_steps", get_int(inputs, "hires_steps", 45))
-    dict_set(opts, "hires_strength", get_float(inputs, "hires_strength", 0.35))
+    dict_set(opts, "hires_steps", get_int(inputs, "hires_steps", 50))
+    dict_set(opts, "hires_strength", get_float(inputs, "hires_strength", 0.5))
     dict_set(opts, "freeu", get_int(inputs, "freeu", 1))
     dict_set(opts, "freeu_b1", get_float(inputs, "freeu_b1", 1.3))
     dict_set(opts, "freeu_b2", get_float(inputs, "freeu_b2", 1.4))
     dict_set(opts, "sag", get_int(inputs, "sag", 0))
     dict_set(opts, "sag_scale", get_float(inputs, "sag_scale", 1.0))
-    # 后处理：对齐 img_hires/backup.sh（clarity 0.2 / sharpen 0.3 / smart 0.5 / edge 1.5）
-    dict_set(opts, "clarity", get_float(inputs, "clarity", 0.2))
+    # 后处理：对齐 backup.sh combo B（clarity 0.3 / sharpen 0.3 / smart 0.5 / edge 2.0）
+    dict_set(opts, "clarity", get_float(inputs, "clarity", 0.3))
     dict_set(opts, "sharpen", get_float(inputs, "sharpen", 0.3))
     dict_set(opts, "sharpen_radius", get_int(inputs, "sharpen_radius", 1))
     dict_set(opts, "smart_sharpen", get_float(inputs, "smart_sharpen", 0.5))
     dict_set(opts, "smart_sharpen_radius", get_int(inputs, "smart_sharpen_radius", 2))
-    dict_set(opts, "edge_sharpen", get_float(inputs, "edge_sharpen", 1.5))
+    dict_set(opts, "edge_sharpen", get_float(inputs, "edge_sharpen", 2.0))
     dict_set(opts, "edge_sharpen_radius", get_int(inputs, "edge_sharpen_radius", 2))
     dict_set(opts, "edge_sharpen_threshold", get_float(inputs, "edge_sharpen_threshold", 0.3))
 
