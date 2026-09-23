@@ -5,25 +5,18 @@
       "ckpt_name": "/data/models/image/sd_xl_base_1.0.safetensors"
     }
   },
-  "10": {
-    "class_type": "DualCLIPLoader",
-    "inputs": {
-      "clip_name1": "clip_g.safetensors",
-      "clip_name2": "clip_l.safetensors"
-    }
-  },
   "4": {
     "class_type": "CLIPTextEncode",
     "inputs": {
       "text": "portrait of a young woman, soft natural lighting, sharp focus",
-      "clip": ["10", 0]
+      "clip": ["3", 1]
     }
   },
   "5": {
     "class_type": "CLIPTextEncode",
     "inputs": {
       "text": "blurry, low quality, ugly",
-      "clip": ["10", 0]
+      "clip": ["3", 1]
     }
   },
   "6": {
@@ -49,7 +42,9 @@
       "sag_scale": 1.0,
       "clarity": 0.2,
       "sharpen": 0.3,
-      "sharpen_radius": 1
+      "sharpen_radius": 1,
+      "quality_prefix": 0,
+      "default_negative": 0
     }
   },
   "7": {
