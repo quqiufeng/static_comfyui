@@ -42,7 +42,7 @@
 
 **实测**（RTX 3080 20G，seed=25630，backup.sh 默认提示词）：
 - 优化前 ~665s → **210s（3m30s，~3.2×）**；hires 采样 531s→142s。
-- 开关：`CACHE_MODE=disabled|easycache`（默认 easycache）；`CACHE_THRESHOLD` 越低跳越多（默认 0.2）。
+- 开关：`CACHE_MODE=disabled|easycache`（默认 easycache）；`CACHE_THRESHOLD` 越低跳越多（默认 0.2）。已同步到 `backup.sh` / `backup_qwen.sh` / `backup_scene.sh`。
 - 接线：`ImageGenerationParams.cache_*` → `sd_img_gen_params_t.cache` → `SampleCacheRuntime`；CLI `--cache-mode/--cache-threshold/--cache-start/--cache-end`。
 - 未做：batch CFG（`z_image` 断言 `x->ne[3]==1`）、降 hires steps（画质换速度）。
 

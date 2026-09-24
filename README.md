@@ -47,7 +47,7 @@ ComfyUI 是优秀的 Stable Diffusion 工作流引擎，但 Python 解释器带�
 
 E1xMIN 2560×1440（RTX 3080）从 **~11 分钟 → 3.5 分钟（约 3.2×）**，默认已开：
 
-1. **EasyCache**（主因）：相邻采样步变化小于阈值时复用 latent、跳过本步 DiT forward；蒸馏 turbo 后期步更易命中（base 跳 9/20，hires 跳 ~30/41）。`backup.sh` 环境变量 `CACHE_MODE`（默认 `easycache`）、`CACHE_THRESHOLD`（默认 0.2，越低跳越多）。
+1. **EasyCache**（主因）：相邻采样步变化小于阈值时复用 latent、跳过本步 DiT forward；蒸馏 turbo 后期步更易命中（base 跳 9/20，hires 跳 ~30/41）。`backup.sh` / `backup_qwen.sh` / `backup_scene.sh` 环境变量 `CACHE_MODE`（默认 `easycache`）、`CACHE_THRESHOLD`（默认 0.2，越低跳越多）。
 2. **GGML_CUDA_GRAPHS=ON**：`build_sd_dl.sh` 开启，把一步采样的 CUDA kernel 录成 graph 一次提交，减少 launch 开销。
 3. `img_hires` 分段计时：`Model loaded` / `generate wall` / `Post-processing` / `TOTAL wall`，日志含 `EasyCache skipped N/M steps`。
 

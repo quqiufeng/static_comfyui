@@ -18,6 +18,7 @@
 #   Steps=20→40  HiRes strength=0.4  upscaler=latent-bislerp
 #   clarity=0.15  edge-sharpen=0.0  Sampler=euler  Scheduler=discrete
 #   Q5 模型 / seed 时间戳随机 / 环境变量内聚脚本内 / cd 后端目录防 cpu 插件缺失
+#   采样加速: 默认开 EasyCache（CACHE_MODE=disabled 关）, 与 backup.sh 同步
 #   人像专用的完整甜点区间与 14 组调试经验见 backup.sh 头部（单处维护）。
 #
 # 【VAE Tiling 峰值参考】
@@ -53,6 +54,11 @@ TARGET_RATIO=""
 
 VAE_TILE_SIZE="${VAE_TILE_SIZE:-128x128}"
 VAE_TILE_OVERLAP="${VAE_TILE_OVERLAP:-0.5}"
+# 采样步缓存（与 backup.sh 同步）: 默认开; CACHE_MODE=disabled 关
+CACHE_MODE="${CACHE_MODE:-easycache}"
+CACHE_THRESHOLD="${CACHE_THRESHOLD:-0.2}"
+CACHE_START="${CACHE_START:-0.15}"
+CACHE_END="${CACHE_END:-0.95}"
 
 UPSCALE_FLAG=0; LORA_CONFIG=""; PROMPT_SCHEDULE=""; REGIONAL_PROMPTS=""
 FACE_RESTORE_FLAG=0; FACE_RESTORE_MODEL=""
@@ -230,6 +236,9 @@ echo -e "HiRes Strength: $HIRES_STRENGTH"
 echo -e "HiRes Upscaler: ${CYAN}$HIRES_UPSCALER${NC}"
 echo -e "Sampler: ${CYAN}$SAMPLING_METHOD${NC} + ${CYAN}$SCHEDULER${NC}"
 echo -e "Quality prefix: ${CYAN}$([ "$NO_QUALITY_PREFIX" -eq 1 ] && echo "off" || echo "img_hires default")${NC}"
+if [ "$CACHE_MODE" != "disabled" ]; then
+    echo -e "Cache: ${CYAN}$CACHE_MODE${NC} threshold=$CACHE_THRESHOLD range=[$CACHE_START,$CACHE_END]"
+fi
 if [ "$UPSCALE_FLAG" -eq 1 ]; then
     UPSCALED_W=$((WIDTH * 2))
     UPSCALED_H=$((HEIGHT * 2))
@@ -282,6 +291,10 @@ SD_CMD=("$SD_CLI"
   --hires-strength "$HIRES_STRENGTH"
   --hires-steps "$HIRES_STEPS"
   --hires-upscaler "$HIRES_UPSCALER"
+  --cache-mode "$CACHE_MODE"
+  --cache-threshold "$CACHE_THRESHOLD"
+  --cache-start "$CACHE_START"
+  --cache-end "$CACHE_END"
   -s "$SEED"
   "$PROMPT"
   "$OUTPUT_PATH"

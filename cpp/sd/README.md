@@ -407,7 +407,7 @@ const char* sd_version();
 | 参数 | `src/adapters/sdcpp_adapter.h` | `ImageGenerationParams.cache_mode/threshold/start/end` |
 | 传入 | `src/adapters/sdcpp_adapter.cpp` | `generate()` 写入 `img_params.cache.mode` 等 |
 | CLI | `examples/img_hires.cpp` | `--cache-mode/--cache-threshold/--cache-start/--cache-end` + 分段计时 |
-| 脚本 | `backup.sh` | 默认 `CACHE_MODE=easycache`（`disabled` 可关） |
+| 脚本 | `backup.sh` / `backup_qwen.sh` / `backup_scene.sh` | 默认 `CACHE_MODE=easycache`（`disabled` 可关） |
 | 构建 | `build_sd_dl.sh` | `GGML_CUDA_GRAPHS=ON`（`FA_ALL_QUANTS` 不开，DiT K/V 为 F16） |
 
 **原理**：EasyCache 在相邻步去噪结果变化小于阈值时复用上一步、跳过本步 forward（蒸馏 turbo 后期更易命中）；CUDA graphs 把一步采样的 kernel 序列一次提交，减 launch 开销。  
