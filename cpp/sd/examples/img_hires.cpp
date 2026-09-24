@@ -4,12 +4,18 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <string>
 #include <vector>
+
+static double now_sec() {
+    using clock = std::chrono::steady_clock;
+    return std::chrono::duration<double>(clock::now().time_since_epoch()).count();
+}
 
 static int save_png(const char* path, const uint8_t* data, int w, int h, int c) {
     return stbi_write_png(path, w, h, c, data, 0);
@@ -63,6 +69,10 @@ static void print_usage(const char* argv0) {
     std::fprintf(stderr, "  --sag                     Enable Self-Attention Guidance\n");
     std::fprintf(stderr, "  --sag-scale <float>       SAG blend scale (default: 1.0)\n");
     std::fprintf(stderr, "  --diffusion-fa            Enable diffusion flash attention\n");
+    std::fprintf(stderr, "  --cache-mode <name>       Sample-step cache: easycache (DiT) | disabled (default)\n");
+    std::fprintf(stderr, "  --cache-threshold <float> EasyCache reuse threshold (default 0.2; lower = more skips)\n");
+    std::fprintf(stderr, "  --cache-start <float>     Cache active from this progress (0-1, default 0.15)\n");
+    std::fprintf(stderr, "  --cache-end <float>       Cache active until this progress (0-1, default 0.95)\n");
     std::fprintf(stderr, "  --offload-to-cpu          Keep weights in CPU RAM (params_backend \"*=cpu\")\n");
     std::fprintf(stderr, "  --backend <spec>          Backend spec (e.g. CUDA, CPU, \"te=cpu\")\n");
     std::fprintf(stderr, "  --params-backend <spec>   Params backend spec (e.g. \"*=cpu\")\n");
@@ -168,6 +178,10 @@ int main(int argc, char** argv) {
     bool offload_to_cpu = false;
     std::string backend;
     std::string params_backend;
+    std::string cache_mode = "disabled";
+    float cache_threshold = 0.2f;
+    float cache_start = 0.15f;
+    float cache_end = 0.95f;
 
     // 后处理默认值对齐 backup.sh：清晰度 + 锐化 + 智能锐化 + 边缘锐化，提升清晰度/细节
     postproc::Params postproc;
@@ -267,6 +281,14 @@ int main(int argc, char** argv) {
             sag_scale = std::atof(argv[++i]);
         } else if (std::strcmp(argv[i], "--diffusion-fa") == 0) {
             diffusion_fa = true;
+        } else if (std::strcmp(argv[i], "--cache-mode") == 0 && i + 1 < argc) {
+            cache_mode = argv[++i];
+        } else if (std::strcmp(argv[i], "--cache-threshold") == 0 && i + 1 < argc) {
+            cache_threshold = std::atof(argv[++i]);
+        } else if (std::strcmp(argv[i], "--cache-start") == 0 && i + 1 < argc) {
+            cache_start = std::atof(argv[++i]);
+        } else if (std::strcmp(argv[i], "--cache-end") == 0 && i + 1 < argc) {
+            cache_end = std::atof(argv[++i]);
         } else if (std::strcmp(argv[i], "--no-quality-prefix") == 0) {
             quality_prefix = false;
         } else if (std::strcmp(argv[i], "--offload-to-cpu") == 0) {
@@ -392,12 +414,13 @@ int main(int argc, char** argv) {
         cfg_model.params_backend = params_backend;
     }
 
+    double t_load0 = now_sec();
     sd::SDPipeline pipeline;
     if (!pipeline.load(cfg_model)) {
         std::fprintf(stderr, "Failed to load model\n");
         return 1;
     }
-    std::fprintf(stderr, "Model loaded\n");
+    std::fprintf(stderr, "Model loaded (%.2fs)\n", now_sec() - t_load0);
 
     pipeline.set_hires_upscaler(hires_upscaler, hires_upscaler_model);
 
@@ -428,7 +451,28 @@ int main(int argc, char** argv) {
     gen_params.sag_enabled     = sag;
     gen_params.sag_scale       = sag_scale;
 
+    if (cache_mode == "easycache") {
+        gen_params.cache_mode = 1; // SD_CACHE_EASYCACHE
+    } else if (cache_mode == "cache-dit") {
+        gen_params.cache_mode = 5; // SD_CACHE_CACHE_DIT
+    } else if (cache_mode == "spectrum") {
+        gen_params.cache_mode = 6; // SD_CACHE_SPECTRUM
+    } else if (cache_mode != "disabled" && !cache_mode.empty()) {
+        std::fprintf(stderr, "Unknown --cache-mode: %s (use easycache|cache-dit|spectrum|disabled)\n", cache_mode.c_str());
+        return 1;
+    }
+    gen_params.cache_reuse_threshold = cache_threshold;
+    gen_params.cache_start_percent   = cache_start;
+    gen_params.cache_end_percent     = cache_end;
+    if (gen_params.cache_mode != 0) {
+        std::fprintf(stderr, "  cache:  %s threshold=%.3f range=[%.2f,%.2f]\n",
+                     cache_mode.c_str(), cache_threshold, cache_start, cache_end);
+    }
+
+    double t_gen0 = now_sec();
     std::vector<sd::Image> images = pipeline.generate(gen_params);
+    double t_gen1 = now_sec();
+    std::fprintf(stderr, "  generate wall: %.2fs\n", t_gen1 - t_gen0);
     if (images.empty() || images[0].empty()) {
         std::fprintf(stderr, "Image generation failed\n");
         return 1;
@@ -439,6 +483,7 @@ int main(int argc, char** argv) {
                          postproc.sharpen_amount > 0.0f ||
                          postproc.smart_sharpen_strength > 0.0f ||
                          postproc.edge_sharpen_amount > 0.0f);
+    double t_pp0 = 0.0;
     if (has_postproc) {
         std::fprintf(stderr, "Post-processing: clarity=%.2f, sharpen=%.2f(r=%d), "
                              "smart=%.2f(r=%d), edge=%.2f(r=%d,t=%.2f)\n",
@@ -446,11 +491,12 @@ int main(int argc, char** argv) {
                      postproc.sharpen_amount, postproc.sharpen_radius,
                      postproc.smart_sharpen_strength, postproc.smart_sharpen_radius,
                      postproc.edge_sharpen_amount, postproc.edge_sharpen_radius, postproc.edge_sharpen_threshold);
+        t_pp0 = now_sec();
         if (!postproc::apply(image.data.data(), image.width, image.height, image.channels, postproc)) {
             std::fprintf(stderr, "Post-processing failed\n");
             return 1;
         }
-        std::fprintf(stderr, "Post-processing completed\n");
+        std::fprintf(stderr, "Post-processing completed (%.2fs)\n", now_sec() - t_pp0);
     }
 
     if (!upscale_model.empty() && upscale_repeats > 0) {
@@ -497,11 +543,15 @@ int main(int argc, char** argv) {
     }
 
     std::string final_output = expand_tilde(output);
+    double t_save0 = now_sec();
     if (!save_png(final_output.c_str(), image.data.data(), image.width, image.height, image.channels)) {
         std::fprintf(stderr, "Failed to save %s\n", final_output.c_str());
         return 1;
     }
-    std::fprintf(stderr, "Saved %s (%dx%d, %d channels)\n",
-                 final_output.c_str(), image.width, image.height, image.channels);
+    std::fprintf(stderr, "Saved %s (%dx%d, %d channels) in %.2fs\n",
+                 final_output.c_str(), image.width, image.height, image.channels,
+                 now_sec() - t_save0);
+    std::fprintf(stderr, "TOTAL wall (load+gen+post+save): %.2fs\n",
+                 (now_sec() - t_load0));
     return 0;
 }

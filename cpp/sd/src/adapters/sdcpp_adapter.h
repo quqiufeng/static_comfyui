@@ -127,6 +127,13 @@ struct ImageGenerationParams {
     // img2img: init image path + denoising strength (ignored when empty)
     std::string init_image_path;
     float strength = 1.0f;
+
+    // Sample-step cache (EasyCache/DiT step skip). mode: 0=disabled, 1=easycache, ...
+    // Matches sd_cache_mode_t; params mirror sd_cache_params_t.
+    int cache_mode = 0; // SD_CACHE_DISABLED
+    float cache_reuse_threshold = 0.2f;
+    float cache_start_percent = 0.15f;
+    float cache_end_percent = 0.95f;
 };
 
 /**

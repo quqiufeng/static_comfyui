@@ -52,6 +52,22 @@
 #   20G 卡:  ./backup.sh "portrait" ~/out.png 2560 1440
 #   24G 卡:  VAE_TILE_SIZE=256x256 ./backup.sh "portrait" ~/out.png 2560 1440
 #   LoRA:    ./backup.sh "prompt" ~/out.png 2560 1440 --lora style.safetensors:0.8
+#
+# 【采样加速（2026-09-24 实测，默认已开）】
+#   RTX 3080 20G / 2560×1440 / E1xMIN 配方 seed=25630：
+#     优化前 ~665s（11min）→ 优化后 ~210s（3.5min），约 3.2×。
+#   1) EasyCache（主因，省 ~80% hires 采样）
+#      原理：相邻步去噪结果变化小于阈值时，复用上一步 latent、跳过本步 UNet/DiT forward。
+#      蒸馏 turbo（z_image）后期步变化极小 → 更易命中；base 跳 9/20，hires 跳 28–30/41。
+#      接线：ImageGenerationParams.cache_* → sd_img_gen_params_t.cache → SampleCacheRuntime。
+#      调参：CACHE_MODE=disabled|easycache|cache-dit|spectrum
+#            CACHE_THRESHOLD 越低跳得越多（默认 0.2；0.15 更激进，0.3 更保守，过低画质漂）。
+#   2) GGML_CUDA_GRAPHS=ON（build_sd_dl.sh）
+#      原理：把一步采样的 CUDA kernel 序列录成 graph 一次提交，砍 launch 开销。
+#      本例约再省数秒～十数秒；需重编 /opt/sd/build-dl。
+#   3) 未做/评估中：batch CFG（z_image 断言 N==1，改模型层收益待测）、降 hires steps（画质换速度）。
+#   分段计时看日志：Model loaded / generate wall / Post-processing / TOTAL wall / EasyCache skipped。
+#   对照关缓存：CACHE_MODE=disabled ./backup.sh ...
 # =============================================================================
 set -euo pipefail
 
@@ -150,6 +166,12 @@ HIRES_UPSCALER="${HIRES_UPSCALER:-latent-bislerp}"
 # 后处理（甜点见头部注释）: clarity 局部对比 0.15; edge-sharpen 必须 0（白底轮廓锐化出白边）
 CLARITY="${CLARITY:-0.15}"
 EDGE_SHARPEN="${EDGE_SHARPEN:-0.0}"
+# 采样步缓存（EasyCache/DiT 步跳过）: 默认开启; CACHE_MODE=disabled 关闭
+# CACHE_THRESHOLD 越低跳步越多（默认 0.2; 0.15 更激进, 0.3 更保守）
+CACHE_MODE="${CACHE_MODE:-easycache}"
+CACHE_THRESHOLD="${CACHE_THRESHOLD:-0.2}"
+CACHE_START="${CACHE_START:-0.15}"
+CACHE_END="${CACHE_END:-0.95}"
 
 echo -e "${BLUE}[INFO] $([ "$WIDTH" -ge 1920 ] && echo "Ultra HD" || echo "HD") Mode: steps=$STEPS, cfg=$CFG_SCALE, sampler=$SAMPLING_METHOD${NC}"
 
@@ -249,6 +271,9 @@ echo -e "CFG Scale: ${CYAN}$CFG_SCALE${NC}"
 echo -e "HiRes Strength: $HIRES_STRENGTH"
 echo -e "HiRes Upscaler: ${CYAN}$HIRES_UPSCALER${NC}"
 echo -e "Sampler: ${CYAN}$SAMPLING_METHOD${NC} + ${CYAN}$SCHEDULER${NC}"
+if [ "$CACHE_MODE" != "disabled" ]; then
+    echo -e "Cache: ${CYAN}$CACHE_MODE${NC} threshold=$CACHE_THRESHOLD range=[$CACHE_START,$CACHE_END]"
+fi
 if [ "$UPSCALE_FLAG" -eq 1 ]; then
     UPSCALED_W=$((WIDTH * 2))
     UPSCALED_H=$((HEIGHT * 2))
@@ -301,6 +326,10 @@ SD_CMD=("$SD_CLI"
   --hires-strength "$HIRES_STRENGTH"
   --hires-steps "$HIRES_STEPS"
   --hires-upscaler "$HIRES_UPSCALER"
+  --cache-mode "$CACHE_MODE"
+  --cache-threshold "$CACHE_THRESHOLD"
+  --cache-start "$CACHE_START"
+  --cache-end "$CACHE_END"
   -s "$SEED"
   "$PROMPT"
   "$OUTPUT_PATH"

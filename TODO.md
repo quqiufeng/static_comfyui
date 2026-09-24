@@ -31,6 +31,21 @@
 - `ModelMergeSimple/Blocks/Add/Subtract`：ratio / 逐块 ratio 行为
 - `CLIPMerge*`：不同 CLIP 合并
 
+## 采样加速（已完成，2026-09-24）
+**目标**：E1xMIN 2560×1440 出图 ~11min → ≤5min。
+
+| 项 | 原理 | 结果 |
+|----|------|------|
+| **EasyCache**（默认开） | 相邻步 latent 变化 < 阈值则复用、跳过本步 forward；turbo 后期更易命中 | base 跳 9/20，hires 跳 ~30/41；**主因** |
+| **GGML_CUDA_GRAPHS=ON** | 一步采样 kernel 序列录成 CUDA graph 一次提交，减 launch 开销 | 再省数秒～十数秒（`build_sd_dl.sh`） |
+| 分段计时 | `img_hires` 打 load/generate/post/save + EasyCache summary | 便于回归对比 |
+
+**实测**（RTX 3080 20G，seed=25630，backup.sh 默认提示词）：
+- 优化前 ~665s → **210s（3m30s，~3.2×）**；hires 采样 531s→142s。
+- 开关：`CACHE_MODE=disabled|easycache`（默认 easycache）；`CACHE_THRESHOLD` 越低跳越多（默认 0.2）。
+- 接线：`ImageGenerationParams.cache_*` → `sd_img_gen_params_t.cache` → `SampleCacheRuntime`；CLI `--cache-mode/--cache-threshold/--cache-start/--cache-end`。
+- 未做：batch CFG（`z_image` 断言 `x->ne[3]==1`）、降 hires steps（画质换速度）。
+
 ## HiRes Fix 出图质量优化
 **原理**：latent 放大 + 二次采样（denoise<1），即 ComfyUI 的 `LatentUpscale`（bicubic/bislerp）+ `KSampler(denoise)`；`backup.sh` 同原理（低分构图 → latent 放大 refine，基础分辨率越高、放大倍数越小越好）。
 

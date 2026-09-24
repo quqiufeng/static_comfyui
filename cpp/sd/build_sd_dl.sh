@@ -112,6 +112,9 @@ CMAKE_ARGS=(
     "-DGGML_NATIVE=OFF"
     "-DCMAKE_CUDA_ARCHITECTURES=native"
     "-DGGML_LTO=OFF"
+    # 本地加速: CUDA graphs 减 kernel launch 开销
+    # FA_ALL_QUANTS 不开：DiT 的 K/V 是 F16 激活，量化 FA 内核只会让编译时间爆炸
+    "-DGGML_CUDA_GRAPHS=ON"
 )
 
 if [ "${CUDA_AVAILABLE}" -eq 1 ]; then

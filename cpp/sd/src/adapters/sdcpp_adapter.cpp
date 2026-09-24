@@ -605,6 +605,16 @@ std::vector<Image> SDPipeline::generate(const ImageGenerationParams& params) {
         img_params.vae_tiling_params.tile_size_y = 128;
     }
 
+    // Sample-step cache (EasyCache 等): 跳过变化小的步，turbo/DiT 上收益明显
+    if (params.cache_mode != 0) {
+        img_params.cache.mode = static_cast<sd_cache_mode_t>(params.cache_mode);
+        if (std::isfinite(params.cache_reuse_threshold)) {
+            img_params.cache.reuse_threshold = params.cache_reuse_threshold;
+        }
+        img_params.cache.start_percent = params.cache_start_percent;
+        img_params.cache.end_percent   = params.cache_end_percent;
+    }
+
     // HiRes Fix
     if (params.hires_enabled) {
         img_params.hires.enabled = true;
