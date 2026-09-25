@@ -2,12 +2,13 @@
 
 ## 概述
 
-ComfyCLI 编译为独立 ELF 二进制，零 Python 依赖。远程部署有两条路线：
+ComfyCLI 编译为独立 ELF 二进制，零 Python 依赖。远程部署有三条路线：
 
 | 路线 | 二进制 | 适用场景 | 章节 |
 |------|--------|---------|------|
 | **A：workflow 路线** | `comfycli-bin`（StaticPy/Chez 编排层） | 执行 ComfyUI workflow JSON / prompt 模式 | 全文 + `comfycli_remote.sh` 一键 |
 | **B：出图管线路线** | `img_hires`（纯 C++） | 只跑 `backup.sh` / `backup_qwen.sh` 风格出图 | [方案 B：出图管线部署](#方案-b出图管线部署img_hires--backupsh--backup_qwensh) |
+| **C：图片编辑路线** | `sd-cli`（sd.cpp 官方 CLI） | Qwen-Image-2.1 指令图片编辑（换背景/换装/缩放保真） | [方案 C：图片编辑部署](#方案-c图片编辑部署sd-cli--editsh) |
 
 路线 A 流程（`comfycli_remote.sh` 一键完成）：
 1. 本地编译出 `comfycli-bin` + `libsdcpp_adapter.so`
@@ -34,6 +35,7 @@ XGC_PASSWORD=your_password
 | `xgc_ctl.py` | Xiangongyun 实例生命周期管理（部署/等待/SSH/销毁） |
 | `comfycli_remote.sh` | 端到端自动化：编译 → 打包 → 部署 → 同步模型 → 上传 → 运行 → 下载 |
 | `deploy.sh` | 打包部署包（含 sd.cpp/ggml/CUDA 后端等运行时 .so） |
+| `cpp/sd/edit.sh` | Qwen-Image-2.1 指令图片编辑（sd-cli `-r` 参考图 + FA/EasyCache 加速，见方案 C） |
 
 ---
 
@@ -308,6 +310,105 @@ rm -f  /opt/run_*.sh /opt/start_linux_vec.sh /opt/gen_refs_remote.py /opt/fix_al
 rm -rf /root/{miniconda3,.cache,.npm,.triton,.launchpadlib}
 # 保留：/usr/local/cuda（CUDA Runtime）、NVIDIA 驱动、/data/models、~/build、~/backup*.sh
 ```
+
+---
+
+## 方案 C：图片编辑部署（sd-cli + edit.sh）
+
+基于 sd.cpp 官方 `sd-cli` 的 `-r` 参考图路线，跑 Qwen-Image-2.1 指令图片编辑，零 pip。
+编辑脚本 `cpp/sd/edit.sh` 部署到远程 `~/edit.sh`，与路线 B 的 `backup*.sh` 同级共存。
+
+### C1. 用法
+
+```bash
+bash edit.sh <输入图> <编辑指令> <输出图> [宽] [高]
+
+# 换背景（身份保持 + 光照自动协调）
+bash edit.sh in.jpg "Change the background to a sunset beach" out.png
+
+# 省略宽高 → 按输入图比例自动: 最长边 <= MAX_SIDE(默认1024), 宽高 32 整除（缩小保真）
+bash edit.sh in.jpg "Keep the image exactly the same" small.png
+
+# 指定分辨率（需 32 整除）
+bash edit.sh in.jpg "Change the dress to a red silk gown" out.png 768 1024
+```
+
+环境变量：
+
+| 变量 | 默认 | 说明 |
+|------|------|------|
+| `FA` / `CACHE` | `1` / `1` | 加速开关：FlashAttention（`--diffusion-fa`）/ EasyCache 步缓存；`FA=0`、`CACHE=0` 关闭 |
+| `SAGE` | `0` | `SAGE=1` 额外启用 `--sage-attn` |
+| `STEPS` / `CFG` / `METHOD` | `20` / `6.0` / `euler` | 采样参数 |
+| `MAX_SIDE` | `1024` | 自动尺寸时的最长边上限（越小越快） |
+| `SEED` | 随机 | 固定种子 |
+| `SD_CLI` / `MODEL_DIR` | 自动查找 | sd-cli 路径 / 模型目录（见 C3 查找顺序） |
+
+编辑是**整图参考式重绘**（非 mask 局部编辑）：换背景/换装/缩放保真效果好，
+构图会轻微收紧、项链等配饰级细节会重绘，不保证像素级还原。
+
+### C2. 本地编译 sd-cli
+
+```bash
+cmake --build /opt/sd/build-dl --target sd-cli -j$(nproc)
+# 产物: /opt/sd/build-dl/bin/sd-cli（依赖同目录 libstable-diffusion.so / libggml*.so / libwebp*）
+```
+
+### C3. scp 清单
+
+```bash
+H=<domain>; P=<port>   # python3 xgc_ctl.py info <id>
+STAGE=/tmp/sdcli_stage; rm -rf $STAGE; mkdir -p $STAGE/bin
+
+# 1) sd-cli 核心 12 件 → ~/sdcli/（或并入路线 B 的 ~/build/，edit.sh 两处都找）
+scp -P $P cpp/sd/edit.sh root@$H:/
+ssh -p $P root@$H 'mkdir -p ~/sdcli'
+B=/opt/sd/build-dl/bin
+scp -P $P $B/sd-cli $B/libstable-diffusion.so \
+          $B/libggml.so.0* $B/libggml-base.so.0* $B/libggml-cpu.so $B/libggml-cuda.so \
+          $B/libwebp.so* $B/libwebpmux.so* $B/libwebm.so $B/libsharpyuv.so* \
+          root@$H:~/sdcli/
+
+# 2) 系统依赖闭包（B2 配方通用，入口换 sd-cli）
+ldd $B/sd-cli $B/libstable-diffusion.so $B/libggml-cuda.so \
+  | grep -oP '=> \K[^ ]+' | grep '^/' | sort -u > /tmp/union.txt
+grep -vE '/(libc\.so\.6|libm\.so\.6|libpthread\.so\.0|libdl\.so\.2|librt\.so\.1|ld-linux-x86-64\.so\.2|libresolv\.so\.2|libgcc_s\.so\.1|libcuda\.so\.1)$' /tmp/union.txt \
+| grep -vE 'libcudart\.so\.12|libcublas\.so\.12|libcublasLt\.so\.12|/opt/sd/build-dl' \
+| while read -r f; do cp -rn "$f" "$STAGE/bin/"; done
+tar czf - -C $STAGE . | ssh -p $P root@$H 'tar xzf - -C ~/sdcli'
+
+# 3) mmproj 视觉权重 → /data/models/image/（1.1G，**编辑必需**；T2I 不需要）
+#    扩散/VAE/LLM 三个模型与路线 B 相同，镜像已有
+curl -L -o /data/models/image/mmproj-Qwen3VL-8B-Instruct-F16.gguf \
+  https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-8B-Instruct-F16.gguf
+scp -P $P /data/models/image/mmproj-Qwen3VL-8B-Instruct-F16.gguf root@$H:/data/models/image/
+```
+
+模型四件（`MODEL_DIR=/data/models/image`）：
+
+| 文件 | 大小 | 用于 |
+|------|------|------|
+| `qwen-image-2.1-Q6_K.gguf` | 5.8G | 扩散（同 B） |
+| `qwen_image_2.1_vae_bf16.safetensors` | 644M | VAE（同 B） |
+| `Qwen3VL-8B-Instruct-Q4_K_M.gguf` | 4.7G | LLM 文本编码（同 B） |
+| `mmproj-Qwen3VL-8B-Instruct-F16.gguf` | 1.1G | **视觉编码（编辑必需，需下载）** |
+
+### C4. 远程运行与实测
+
+```bash
+ssh -p $P root@$H
+# edit.sh 的 sd-cli 查找顺序: $SCRIPT_DIR/sd-cli → ~/sdcli/sd-cli → ~/build/sd-cli → $SCRIPT_DIR/build/sd-cli
+bash ~/edit.sh /root/test.jpg "Change the background to a sunset beach" /root/out.png
+```
+
+4090 实测（编辑 2885×4325 输入）：
+
+| 配置 | 采样 | 端到端 |
+|------|------|--------|
+| 调优前：30 步、无加速、1024×1536 | 316s（另 VAE OOM 触发 tiling 重试） | 330s |
+| 调优后：20 步、FA + EasyCache、672×1024 | 17.8s（EasyCache 跳 11/20 步） | **24-27s** |
+
+约 12× 提速；EasyCache 与 30 步无缓存画质无肉眼差异。质量表现见 C1 末段。
 
 ---
 

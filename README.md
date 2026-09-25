@@ -504,7 +504,7 @@ ComfyUI 是 Python ML 生态中最复杂的纯推理项目之一：
 | [设计文档](./design.md) | 技术架构、模块映射、翻译策略、工程顺序 |
 | [编译流水线](./BUILD.md) | 本地编译、增量编译、编译产物说明 |
 | [部署文档](./deploy.md) | 纯二进制部署、GLIBC 兼容方案、远程要求 |
-| [远程 GPU 部署](./remote_server.md) | Xiangongyun 实例；路线 A comfycli-bin workflow 一键 / 路线 B img_hires 出图管线手动 scp 清单 |
+| [远程 GPU 部署](./remote_server.md) | Xiangongyun 实例；路线 A comfycli-bin workflow 一键 / 路线 B img_hires 出图管线手动 scp 清单 / 路线 C sd-cli 图片编辑（edit.sh） |
 | [ComfyUI 分析报告](./comfyui_analysis.md) | code search 语义索引结果 (797 文件, 25,586 chunks) |
 | [code search 使用文档](https://github.com/quqiufeng/my_db/blob/main/coding.md) | 语义搜索 + 向量查询工具用法 |
 
