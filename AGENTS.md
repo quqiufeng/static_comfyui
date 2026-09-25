@@ -193,7 +193,7 @@ comfycli-bin workflow.json --output-dir ./output
 - `xgc_ctl.py`：复用 ReScheme 的 Xiangongyun API 控制器，负责实例生命周期（deploy / wait / ssh / shutdown_destroy）。
 - `.env`：Xiangongyun API Token + 镜像 ID，脚本自动读取。
 - `comfycli_remote.sh`：端到端脚本，自动完成本地编译打包、创建远程实例、同步模型文件、上传二进制、远程运行、下载输出。
-- `remote_server.md`：包含完整的 ComfyUI 远程部署说明。
+- `remote_server.md`：完整远程部署说明。两条路线——**A** `comfycli-bin` workflow（`comfycli_remote.sh` 一键）；**B** `img_hires` 出图管线手动部署（编译命令、scp 文件清单、系统 so 闭包配方、裸机清理）。只跑 `backup*.sh` 出图用 B。
 
 典型用法：
 
