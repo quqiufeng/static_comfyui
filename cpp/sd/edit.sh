@@ -56,7 +56,7 @@ SAGE="${SAGE:-0}"
 # ---- sd-cli 定位 ----
 SD_CLI="${SD_CLI:-}"
 if [ -z "$SD_CLI" ]; then
-    for c in "$SCRIPT_DIR/sd-cli" "$HOME/sdcli/sd-cli" "$HOME/build/sd-cli" "$SCRIPT_DIR/build/sd-cli"; do
+    for c in "$SCRIPT_DIR/sd-cli" "$HOME/sdcli/sd-cli" "$HOME/build/sd-cli" "$SCRIPT_DIR/build/sd-cli" /opt/sd/build-dl/bin/sd-cli; do
         [ -x "$c" ] && SD_CLI="$c" && break
     done
 fi
@@ -70,18 +70,63 @@ export LD_LIBRARY_PATH="$SD_BIN_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 for f in "$DIFFUSION_MODEL" "$VAE_MODEL" "$LLM_MODEL" "$LLM_VISION"; do
     [ -f "$f" ] || die "模型缺失: $f"
 done
+# 规范化为绝对路径（脚本末尾会 cd 到 sd-cli 目录, 相对路径会错位）
+case "$INPUT" in /*) ;; *) INPUT="$PWD/$INPUT" ;; esac
 mkdir -p "$(dirname "$OUTPUT")"
+case "$OUTPUT" in /*) ;; *) OUTPUT="$PWD/$OUTPUT" ;; esac
 
 # ---- 宽高: 显式优先, 否则按输入比例自动 (32 整除) ----
 if [ -z "$W" ] || [ -z "$H" ]; then
-    AUTO_WH="$(python3 -c "
-from PIL import Image
-w, h = Image.open('$INPUT').size
-s = min($MAX_SIDE / max(w, h), 1.0)
+    AUTO_WH="$(python3 - "$INPUT" "$MAX_SIDE" <<'PY'
+import struct, sys
+p, mx = sys.argv[1], int(sys.argv[2])
+def jpeg(f):
+    f.seek(2)
+    while True:
+        if f.read(1) != b'\xff':
+            return None
+        m = f.read(1)
+        while m == b'\xff':
+            m = f.read(1)
+        if m in b'\xc0\xc1\xc2\xc3\xc5\xc6\xc7\xc9\xca\xcb\xcd\xce\xcf':
+            f.read(3)
+            h, w = struct.unpack('>HH', f.read(4))
+            return w, h
+        if m in (b'\xd9', b'\xda'):
+            return None
+        ln = struct.unpack('>H', f.read(2))[0]
+        f.seek(ln - 2, 1)
+with open(p, 'rb') as f:
+    sig = f.read(12)
+    if sig[:8] == b'\x89PNG\r\n\x1a\n':
+        f.seek(16)
+        w, h = struct.unpack('>II', f.read(8))
+    elif sig[:2] == b'\xff\xd8':
+        w, h = jpeg(f)
+    elif sig[:4] == b'RIFF' and sig[8:12] == b'WEBP':
+        fourcc = f.read(4)
+        if fourcc == b'VP8X':
+            f.seek(20)
+            b = f.read(10)
+            w, h = 1 + int.from_bytes(b[1:4], 'little'), 1 + int.from_bytes(b[4:7], 'little')
+        elif fourcc == b'VP8 ':
+            f.seek(26)
+            b = f.read(4)
+            w, h = int.from_bytes(b[2:4], 'little') & 0x3fff, int.from_bytes(b[0:2], 'little') & 0x3fff
+        else:
+            f.seek(21)
+            v = int.from_bytes(f.read(4), 'little')
+            w, h = (v & 0x3fff) + 1, ((v >> 14) & 0x3fff) + 1
+    else:
+        sys.exit(1)
+if not w or not h:
+    sys.exit(1)
+s = min(mx / max(w, h), 1.0)
 print(max(round(w * s / 32) * 32, 32), max(round(h * s / 32) * 32, 32))
-" 2>/dev/null || true)"
+PY
+)" || true
     if [ -z "$AUTO_WH" ]; then
-        warn "PIL 解析尺寸失败, 回退 768x1024"
+        warn "解析输入图尺寸失败, 回退 768x1024"
         AUTO_WH="768 1024"
     fi
     set -- $AUTO_WH; W="$1"; H="$2"

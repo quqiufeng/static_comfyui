@@ -342,7 +342,7 @@ bash edit.sh in.jpg "Change the dress to a red silk gown" out.png 768 1024
 | `STEPS` / `CFG` / `METHOD` | `20` / `6.0` / `euler` | 采样参数 |
 | `MAX_SIDE` | `1024` | 自动尺寸时的最长边上限（越小越快） |
 | `SEED` | 随机 | 固定种子 |
-| `SD_CLI` / `MODEL_DIR` | 自动查找 | sd-cli 路径 / 模型目录（见 C3 查找顺序） |
+| `SD_CLI` / `MODEL_DIR` | 自动查找 | sd-cli 路径 / 模型目录（查找顺序见 C4） |
 
 编辑是**整图参考式重绘**（非 mask 局部编辑）：换背景/换装/缩放保真效果好，
 构图会轻微收紧、项链等配饰级细节会重绘，不保证像素级还原。
@@ -393,11 +393,17 @@ scp -P $P /data/models/image/mmproj-Qwen3VL-8B-Instruct-F16.gguf root@$H:/data/m
 | `Qwen3VL-8B-Instruct-Q4_K_M.gguf` | 4.7G | LLM 文本编码（同 B） |
 | `mmproj-Qwen3VL-8B-Instruct-F16.gguf` | 1.1G | **视觉编码（编辑必需，需下载）** |
 
-### C4. 远程运行与实测
+### C4. 运行与实测
+
+本地开发机与远程用法相同（本地 sd-cli 编译后、模型在 `/data/models/image/` 即零配置可用）：
 
 ```bash
+# 本地（有 NVIDIA GPU 即可）
+bash cpp/sd/edit.sh test.jpg "Change the background to a sunset beach" out.png
+
+# 远程
 ssh -p $P root@$H
-# edit.sh 的 sd-cli 查找顺序: $SCRIPT_DIR/sd-cli → ~/sdcli/sd-cli → ~/build/sd-cli → $SCRIPT_DIR/build/sd-cli
+# edit.sh 的 sd-cli 查找顺序: $SCRIPT_DIR/sd-cli → ~/sdcli/sd-cli → ~/build/sd-cli → $SCRIPT_DIR/build/sd-cli → /opt/sd/build-dl/bin/sd-cli(本地)
 bash ~/edit.sh /root/test.jpg "Change the background to a sunset beach" /root/out.png
 ```
 
