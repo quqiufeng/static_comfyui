@@ -73,11 +73,13 @@
 #   归档: ~/qwen_scan_20260924/{01_base..14_nopp}.png + scan.log
 #   复扫: 见 /tmp/opencode/bench/qwen_scan/run_scan.sh（GROUPS 勿用, 用 SCAN_CASES）
 #
-# 【风格提示词预设库（2026-09-25, 19 组批量验证, ~/batch_20260924/, seed=42）】
+# 【风格提示词预设库（2026-09-25, 19 组批量验证 + 3 组新增, seed=42）】
 #   用法: PRESET=<名字> ./backup_qwen.sh out.png 2560 1440
 #   预设自动 REALISM=0（关写实后缀, 风格图不需要；REALISM=1 可覆盖）。
 #   适用域: Qwen 擅长风格/插画/带字/复杂构图; 写实人像用 backup.sh (z_image)。
 #   实测结论: 19/19 全部可用, 平均 ~4.5 分/张 (2560×1440, EasyCache)。
+#   新增 3 组（devana/lighthouse/swordswoman, 2026-09-25, 各横竖 2 张验证:
+#   ~/devana_*.png ~/lighthouse_*.png ~/swordswoman_*.png, ~4.5 分/张）。
 #
 #   ── 机甲科幻 ──
 #   mecha            机甲特写: 水墨+3D 混合, 白底, 战损金属, 蓝眼红面颊
@@ -89,21 +91,24 @@
 #   manga_mono       漫画线稿单色: 圆框眼镜仰视, 极简平涂白底
 #   pocahontas       白底简洁人物半身: 黑发长裙项链
 #   blue_armor       蓝肤尖耳奇幻战士: 森林平涂, 指向镜头
+#   swordswoman      暗黑剑士坐水晶台: 油画质感+动漫赛璐璐, 绿瞳绿甲单色系
 #   ── 艺术插画 ──
 #   bradhamel        Bradhamel 风超现实侧脸: 金丝曼陀罗, 羊皮纸+靛蓝
 #   impression_poppy 印象派罂粟花田: 厚涂油画+水彩, 青蓝金配色
 #   folk_art         蜡笔民间艺术: 彩色小镇, 黑裙少女侧影行走
 #   blue_wildflower  蓝花田背影: 版画刻线+有限色, 日式书封诗意
 #   arabesque        夜景抽象女性: 伊斯兰花纹, 几何+花卉
+#   devana           战神 Devana 徽章: 水粉+Scavengers Reign 风, 铜甲圆章斯拉夫花纹
 #   ── 立体纸雕 ──
 #   papercraft       多层剪纸冬景: 纸纹水彩, 蓝灰金, 物理景深
 #   ── 绘本/概念 ──
-#   penguin          绘本风企鹅: 夏威夷衫+thought bubble "love u",
+#   penguin          绘本风企鹅: 夏威夷衫+空白 thought bubble,
 #                    梦幻森林洞穴, 水粉平涂+拼贴层叠
 #   bustdaal         宝可梦风蝴蝶: 云海浪尖宽景, 无人风景
 #   ── 风景/氛围 ──
 #   northern_lights  极光冰山: 赛博动漫电影感, 粉彩色
 #   rajampat         水墨多色调 Raja Ampat 落日: 高密度 maximalist
+#   lighthouse       超现实拼贴灯塔浮岛: 复古编辑拼贴色, 纸纹+北欧极简
 #   ── 时尚摄影 ──
 #   red_editorial    红唇心形眼线编辑肖像: 硬光红毛皮, 高对比棚拍
 #
@@ -139,9 +144,9 @@ for arg in "$@"; do ARGS+=("$arg"); done
 # --list-presets: 打印预设名列表后退出（不跑模型）
 if [ "${ARGS[0]:-}" = "--list-presets" ]; then
     echo "风格预设 (PRESET=<name>):"
-    echo "  mecha oni_kimono miku yoru morimee manga_mono pocahontas blue_armor"
-    echo "  bradhamel impression_poppy folk_art blue_wildflower arabesque"
-    echo "  papercraft penguin bustdaal northern_lights rajampat red_editorial"
+    echo "  mecha oni_kimono miku yoru morimee manga_mono pocahontas blue_armor swordswoman"
+    echo "  bradhamel impression_poppy folk_art blue_wildflower arabesque devana"
+    echo "  papercraft penguin bustdaal northern_lights rajampat lighthouse red_editorial"
     exit 0
 fi
 
@@ -174,6 +179,9 @@ preset_prompt() {
     blue_armor)
         echo 'masterpiece, best quality, highres, absurdres, newest, SemiFrealism, 748cmstyle, upper body, foreshortening, 1girl, solo, l4thr1lmtg, pointy ears, colored skin, blue skin, brown hair, long hair, purple eyes, facial tattoo, purple sclera, no pupils, armor, gold circlet, cape, green cape, breastplate, fur trim, pauldrons, pointing at viewer, determined, flat colors, outdoors, forest'
         ;;
+    swordswoman)
+        echo 'The painting style is highly textured, with thick, brush-like strokes and a rough, gritty quality. oil painting (medium), full-body anime character illustration set against a plain white background, featuring a dark swordswoman seated on a pedestal of crystalline structures and flowers. The female character sits elegantly with crossed legs, her body turned slightly toward the viewer. Her face is completely enveloped in pitch-black shadow, except for a single glowing green eye that glares at the viewer. Long, pale seafoam-green hair flows dynamically around her in large, sweeping strands. She wears a gothic black dress adorned with a dark flower pin, patterned sleeve trim, dark tights, and black high heels. Black gloved hands feature sharp, bright green manicured nails. She is seated among white crystalline shards and monochrome lily flowers. Behind her, a massive circular fan-like halo framed with smoke outlines her upper body. Two katanas are positioned around her, one resting near her right hand and another strapped behind her back. Features clean line art, crisp cell shading, and high-contrast monochrome tones with vibrant green eye and nail accents.'
+        ;;
     # ── 艺术插画 ──
     bradhamel)
         echo 'Bradhamel art style. A surreal portrait of a woman in profile, her face rendered in soft, aged parchment tones with delicate, flowing lines and ornate golden filigree emerging from her hair and eyes; her right eye is partially open, revealing a deep blue iris with intricate swirling patterns, while the left side of her face dissolves into an elaborate, symmetrical mandala-like structure composed of dark navy, gold, and orange hues, adorned with floral and geometric motifs that cascade downward like dripping ink or liquid metal; the background is a textured blend of sepia and indigo, with faint vertical text columns on the right edge resembling ancient script; the overall composition is vertically oriented, grounded by stylized mountainous forms at the bottom, and illuminated by a mysterious, ambient glow that highlights the metallic gold outlines against the deep shadows, evoking a sense of mystical elegance and arcane beauty.'
@@ -189,6 +197,9 @@ preset_prompt() {
         ;;
     arabesque)
         echo 'abstract, beautiful, strange, woman, night, city, wonderful, arabesque style, geometric patterns, floral, Islamic art, detailed'
+        ;;
+    devana)
+        echo 'detailed gouache painting :: Scavengers Reign digital 2D surreal science-fiction animated still :: Single-subject, luxpunk brutalism, portrait of the goddess Devana, full-body, standing in dynamic contrapposto. A beautiful woman with long dark copper-colored curls cascading over antique bronze armor. In her hand she holds a heavy copper shield engraved with a flat icon of a white-stag'\''s head, horns arcing upward and around the curved edge of the shield in intricate detail. The entire scene is framed inside a perfect circular medallion, painted with cracked plaster texture and mineral pigments. Outside the circle, at the edges and in the corners of the square, dense and ornate floral ornamentation inspired by Slavic pottery -- warm terracotta palette, aged patina, dramatic mythic energy :: limited, restrained, crisp, clear, high-contrast lighting, fine sketch-like luminous strokes, dark empty background emphasizing the vibrant colors, ethereal aesthetic, highly detailed linework, glowing contours, calm expression, minimal dark background, ultra detailed strokes, smooth gradients, colorful luminous textures, dreamy atmosphere, soft glow lighting, sketch-inspired rendering, high contrast, modern digital art :: minimal soft shadow forms and localized edge highlights. The ambient light creates an ethereal glow, while cosmic glow effects amplify the dreamlike atmosphere. Soft, radiant hues bathe the object'\''s features, blending seamlessly with the surrounding world for a mesmerizing, otherworldly composition, chromatic aberration :: no text. image only.'
         ;;
     # ── 立体纸雕 ──
     papercraft)
@@ -207,6 +218,9 @@ preset_prompt() {
         ;;
     rajampat)
         echo 'Ink illustration, multiple tones, aged bright multicolored paper, psychodelic scene, breathtaking beauty of Raja Ampat by sunset, waterfall, shadowed Palms, flying paradise bird, a canoe on the river, glowing, best quality, realistic, whimsical, fantastic, splash art, intricate detailed, hyperdetailed, maximalist style, photorealistic, concept art, sharp focus, harmony, serenity, tranquility, soft pastell colors, ambient occlusion, cozy ambient lighting, surreal, will-o'\''-the-wisp, moonlit, lonely, solitude, windy, tall trees, willows, willowy, OverallDetail, extremely detailed, UHD, long exposure, dystopian but extremely beautiful, best quality, award winning, a masterpiece, Special Ink-drawing mode, animeniji, Mh1$AgThS2, 2D flat anime, cartoon-style, intricate linework with expressive contrasts, soft lighting with dynamic highlights, a masterpiece, award winning, pingtu style, illustration-fen'
+        ;;
+    lighthouse)
+        echo 'A surreal abstract collage featuring a solitary white lighthouse standing on a floating rocky island suspended above a tranquil turquoise ocean. Gentle waterfalls cascade from the island into soft layers of clouds below, creating a peaceful dreamlike atmosphere. A monumental warm orange sun glows behind the lighthouse against a soft blush pink sky, partially veiled by fluffy cream white clouds. Minimalist black geometric stairways rise toward the floating island, adding a striking architectural element. Bold textured rock formations frame the composition while oversized pastel flowers, delicate botanical cutouts, and subtle tropical foliage decorate the foreground like handcrafted paper collage elements. Calm aqua water reflects the pastel sky with soft geometric ripples leading toward the horizon. The entire artwork uses a harmonious retro palette inspired by vintage editorial collage, featuring blush pink, peach, warm coral orange, turquoise, aqua, seafoam green, mint, soft cream, ivory, muted charcoal black, buttery yellow, and subtle lavender accents. Flat geometric forms blend with organic botanical shapes, layered paper textures, vintage grain, clean negative space, Scandinavian minimalism, mid century modern design, contemporary surreal collage art, elegant balanced composition, calming atmosphere, museum quality, a breathtaking masterpiece, award winning'
         ;;
     # ── 时尚摄影 ──
     red_editorial)
