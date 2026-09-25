@@ -21,7 +21,7 @@ ComfyCLI 编译为独立 ELF 二进制，零 Python 依赖。远程部署有两�
 
 ```bash
 XGC_API_TOKEN=your_api_token
-XGC_IMAGE_ID=c5b511af-75b7-4f51-8115-f6157f3cade8
+XGC_IMAGE_ID=25802c4f-7939-4ff6-80c9-f385e608c80a
 XGC_PASSWORD=your_password
 ```
 
