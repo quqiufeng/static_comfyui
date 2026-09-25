@@ -125,7 +125,7 @@ MODEL_DIR="${MODEL_DIR:-/data/models/image}"
 SD_CLI="${SD_CLI:-$SCRIPT_DIR/build/img_hires}"
 SD_BACKEND_DIR="${SD_BACKEND_DIR:-/opt/sd/build-dl/bin}"
 
-DIFFUSION_MODEL="${DIFFUSION_MODEL:-$MODEL_DIR/qwen-image-2.1-Q5_K_M.gguf}"
+DIFFUSION_MODEL="${DIFFUSION_MODEL:-$MODEL_DIR/qwen-image-2.1-Q6_K.gguf}"
 LLM_MODEL="${LLM_MODEL:-$MODEL_DIR/Qwen3VL-8B-Instruct-Q4_K_M.gguf}"
 VAE_MODEL="${VAE_MODEL:-$MODEL_DIR/qwen_image_2.1_vae_bf16.safetensors}"
 
@@ -196,7 +196,7 @@ preset_prompt() {
         ;;
     # ── 绘本/概念 ──
     penguin)
-        echo 'A whimsical surreal storybook illustration of a small cute penguin standing on pale rocks inside a dreamlike enchanted forest grotto, wearing black sunglasses pushed up on its head and a bright tropical Hawaiian shirt covered in bold flowers, one flipper raised thoughtfully to its beak with a confused expression, round eyes looking upward at a floating thought bubble that reads "love u" in clean bold black rounded lettering. The environment behind the penguin is an ethereal painterly forest with tall pale tree trunks, white bare branches, soft aqua and cream waterfalls cascading down layered mossy stone, clusters of rounded rocks, delicate plants, ghostly ferns, tiny white flowers, and deep black vertical gaps that feel like outer space filled with faint stars. A white deer stands quietly in the upper background between the trees, surrounded by several glowing circular moonlike orbs climbing along a trunk, giving the scene a strange mystical fairytale logic. Palette of misty ivory, bone white, muted sage, dusty teal, pale turquoise, warm ochre, soft beige, and deep cosmic black, with loose watercolor-gouache textures, flat graphic shapes mixed with translucent washes, gentle bloom around pale elements, layered collage-like depth, soft edges, dreamy children-book absurdism, awkward comic timing, serene fantasy atmosphere contrasted with the penguin deadpan confusion.'
+        echo 'A whimsical surreal storybook illustration of a small cute penguin standing on pale rocks inside a dreamlike enchanted forest grotto, wearing black sunglasses pushed up on its head and a bright tropical Hawaiian shirt covered in bold flowers, one flipper raised thoughtfully to its beak with a confused expression, round eyes looking upward at a floating thought bubble. The environment behind the penguin is an ethereal painterly forest with tall pale tree trunks, white bare branches, soft aqua and cream waterfalls cascading down layered mossy stone, clusters of rounded rocks, delicate plants, ghostly ferns, tiny white flowers, and deep black vertical gaps that feel like outer space filled with faint stars. A white deer stands quietly in the upper background between the trees, surrounded by several glowing circular moonlike orbs climbing along a trunk, giving the scene a strange mystical fairytale logic. Palette of misty ivory, bone white, muted sage, dusty teal, pale turquoise, warm ochre, soft beige, and deep cosmic black, with loose watercolor-gouache textures, flat graphic shapes mixed with translucent washes, gentle bloom around pale elements, layered collage-like depth, soft edges, dreamy children-book absurdism, awkward comic timing, serene fantasy atmosphere contrasted with the penguin deadpan confusion.'
         ;;
     bustdaal)
         echo 'BustDaal, bug, butterfly, cloud, waves, no_humans, sky, flying, outdoors, animal_focus, scenery, wide_shot, water, cloudy_sky, ocean, wings, pokemon_(creature)'
