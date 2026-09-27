@@ -104,9 +104,9 @@ REALISM=0 SEED=42 bash cpp/sd/backup_qwen.sh '<提示词>' ./output/out.png 2560
 
 HiResFix ≠ 插值放大。流程（`cpp/sd/backup.sh` → `img_hires` → `libsdcpp_adapter.so` → sd.cpp）：
 
-1. **base 阶段**：在较低分辨率（如 1920×1080）跑完整采样，出构图与主体（`steps=20`）。
-2. **latent 放大**：直接在 latent 空间插值放大到目标尺寸（`latent-bislerp` 保细节 / `latent-bicubic` 偏软），**不经过像素域**，无放大算法的涂抹感；等价 ComfyUI 的 `LatentUpscale(bislerp)`。
-3. **二次采样（denoise 重绘）**：加噪后以 `hires_strength=0.4` 的去噪强度二次采样。sd.cpp 按 sd-webui 语义先把调度总步数放大为 `hires_steps / strength`（40/0.4=100），再截取尾部**恰好 40 步**有效去噪（`request.cpp:449`），既补细节又不破坏构图。等价 `KSampler(denoise=0.4)`。
+1. **base 阶段**：在较低分辨率（如 1920×1080）跑完整采样，出构图与主体（默认 `steps=16`）。
+2. **latent 放大**：直接在 latent 空间插值放大到目标尺寸（`latent-bicubic` 默认偏柔 / `latent-bislerp` 保细节），**不经过像素域**，无放大算法的涂抹感；等价 ComfyUI 的 `LatentUpscale(bicubic)`。
+3. **二次采样（denoise 重绘）**：加噪后以 `hires_strength=0.25` 的去噪强度二次采样（默认柔化档）。sd.cpp 按 sd-webui 语义先把调度总步数放大为 `hires_steps / strength`（30/0.25=120），再截取尾部**恰好 30 步**有效去噪（`request.cpp:449`），既补细节又不破坏构图。等价 `KSampler(denoise=0.25)`；想要更强毛孔纹理可回 E1xMIN 档（`strength=0.4`）。
 4. **后处理**：clarity 局部对比 / sharpen / smart_sharpen / edge_sharpen（`sdcpp_adapter.cpp` postproc）。
 
 因此画质取决于三条硬约束：
@@ -127,7 +127,7 @@ HiResFix ≠ 插值放大。流程（`cpp/sd/backup.sh` → `img_hires` → `lib
 
 取 **64 的倍数**可一次性满足全部三种，且**除 2 缩档后仍合规**（64k→32k→16k 链条里 32 整除保持得最久）；只跑 z_image + Qwen 则 **32 的倍数**即够。
 
-**推荐尺寸**（base 由 `backup.sh:214` 硬编码表 / `img_hires.cpp:98` 同款公式自动推算，放大均为 ~1.23-1.33×）：
+**推荐尺寸**（base 由 `backup.sh:235` 硬编码表 / `img_hires.cpp:98` 同款公式自动推算，放大均为 ~1.23-1.33×）：
 
 | 用途 | 横版 | 竖版 | base → target |
 |---|---|---|---|
@@ -141,13 +141,13 @@ HiResFix ≠ 插值放大。流程（`cpp/sd/backup.sh` → `img_hires` → `lib
 
 注意：`2560×1440 / 1440×2560` 中 1440 是 **32 整除而非 64 整除**——z_image/Qwen 下完全合规并命中硬编码表（最优 1.33×），仅 SDXL 会被抬到 1472。表外自定义尺寸走通用公式（目标 latent ×4/5、对齐到 8 的倍数），只要倍数 ≤1.5× 即可用。
 
-对照关闭缓存与参数扫描区间见下节与 `cpp/sd/backup.sh` 头注释。
+对照关闭缓存与参数扫描区间见下节与 `cpp/sd/backup.sh` 头注释（默认档已于 2026-09-27 由 E1xMIN 切为 MIN 全低配，见头注释）。
 
 ## 采样加速（HiRes 出图）
 
-E1xMIN 2560×1440（RTX 3080）从 **~11 分钟 → 3.5 分钟（约 3.2×）**，默认已开：
+EasyCache 实测（E1xMIN 档 2560×1440，RTX 3080）：从 **~11 分钟 → 3.5 分钟（约 3.2×）**，默认已开：
 
-1. **EasyCache**（主因）：相邻采样步变化小于阈值时复用 latent、跳过本步 DiT forward；蒸馏 turbo 后期步更易命中（base 跳 9/20，hires 跳 ~30/41）。`backup.sh` / `backup_qwen.sh` / `backup_scene.sh` 环境变量 `CACHE_MODE`（默认 `easycache`）、`CACHE_THRESHOLD`（默认 0.2，越低跳越多）。
+1. **EasyCache**（主因）：相邻采样步变化小于阈值时复用 latent、跳过本步 DiT forward；蒸馏 turbo 后期步更易命中（base 跳 9/20，hires 跳 ~30/41；该测对应 E1xMIN 档 20→40 步）。`backup.sh` / `backup_qwen.sh` / `backup_scene.sh` 环境变量 `CACHE_MODE`（默认 `easycache`）、`CACHE_THRESHOLD`（默认 0.2，越低跳越多）。
 2. **GGML_CUDA_GRAPHS=ON**：`build_sd_dl.sh` 开启，把一步采样的 CUDA kernel 录成 graph 一次提交，减少 launch 开销。
 3. `img_hires` 分段计时：`Model loaded` / `generate wall` / `Post-processing` / `TOTAL wall`，日志含 `EasyCache skipped N/M steps`。
 

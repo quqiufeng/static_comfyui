@@ -220,7 +220,7 @@ done
 
 ```
 /root/
-├── backup.sh               # 写实管线（z_image，默认 E1xMIN）
+├── backup.sh               # 写实管线（z_image，默认 MIN 全低配档）
 ├── backup_qwen.sh          # 风格管线（Qwen-Image-2.1，预设库 22 组）
 └── build/                  # 二进制 + 全部依赖（实测 246 项 / 376M）
     ├── img_hires

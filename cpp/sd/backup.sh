@@ -5,12 +5,16 @@
 # 环境变量: VAE_TILE_SIZE, VAE_TILE_OVERLAP, CFG_SCALE, SAMPLING_METHOD 等
 # =============================================================================
 #
-# 【最佳甜点配方（2026-09-23, 14 组离散扫描筛出, 图 zimage_p_E1xMIN.png）】
-#   默认即此配方（Q5 模型 / seed 时间戳随机 / 皮肤词负面已固化）:
-#   CFG=3.0  Steps=20→40  HiRes strength=0.4  upscaler=latent-bislerp
-#   clarity=0.15  edge-sharpen=0.0  Sampler=euler  Scheduler=discrete
-#   质量前缀: E1xMIN 带 img_hires 内置前缀（同本脚本文本, 单份）。
-#     SKIP_QUALITY_PREFIX=1(默认) 只关脚本层添加, img_hires 仍会加同一份 → 与 E1xMIN 一致;
+# 【默认配方（2026-09-27 更新）】
+#   默认已切到「MIN 全低配」人像档（Q5 模型 / seed 时间戳随机 / 皮肤词负面已固化）:
+#   CFG=2.0  Steps=16→30  HiRes strength=0.25  upscaler=latent-bicubic
+#   clarity=0.0  edge-sharpen=0.0  Sampler=euler  Scheduler=discrete
+#   效果: 皮肤白净柔和、无锐化痕迹（胜出图 ~/scan_MIN_q5_20260927_171626.png）。
+#   注: 该档低于下方「甜点范围」下限, 属刻意柔化取向; 想要毛孔纹理可回
+#       E1xMIN 中点档（CFG=3.0/20→40/0.4/latent-bislerp/clarity0.15,
+#       2026-09-23 扫描, 图 zimage_p_E1xMIN.png）。
+#   质量前缀: 带 img_hires 内置前缀（同本脚本文本, 单份）。
+#     SKIP_QUALITY_PREFIX=1(默认) 只关脚本层添加, img_hires 仍会加同一份;
 #     彻底不加前缀需给 img_hires 传 --no-quality-prefix（当前脚本未暴露）。
 #
 # 【甜点参数范围（每项单独扫描过的离散区间, 两括号内为安全值, 甜点在其中）】
@@ -40,6 +44,23 @@
 #   5. 蒸馏 turbo 模型步数收益低: 40→80 反而更差; z_image 走 discrete, Qwen 必须 flux。
 #   6. 质量前缀(QUALITY_PREFIX)在宽画幅+close-up 会诱导主体复制, 需 SKIP_QUALITY_PREFIX=1。
 #   7. ESRGAN(model) hires 内部路径高分辨率必崩(weight preparation), 只用 latent 路径。
+#
+# 【人像参数扫描 + 最终选定（2026-09-27, Q5, 2560×1440）】
+#   10 组扫描(seed=timestamp, 图 ~/scan_c01..c10_20260927_*.png):
+#     c01 默认(3.0/20→40/0.40/0.15/bislerp) c02 cfg3.5 c03 cfg4.0
+#     c04 16→30  c05 25→50  c06 str0.35  c07 str0.50  c08 clarity0.30
+#     c09 3.5/20→45/0.45/0.20  c10 latent-bicubic
+#   4 组 MIN+质感微调(图 ~/texture_u1..u4_20260927_*.png):
+#     u1 2.0/0.35/bicubic  u2 2.0/0.40/bislerp  u3 2.0/0.50/bislerp
+#     u4 = c07 配方(3.0/20→40/0.50/0.15/bislerp, 质感参考)
+#   ★最终选定: MIN 全低配 + Q5 模型（皮肤白净柔和, 无锐化痕迹; Q8 同参数不可辨, Q5 省 1.7G）
+#     CFG=2.0  steps=16→30  strength=0.25  upscaler=latent-bicubic
+#     clarity=0  edge-sharpen=0  sampler=euler  scheduler=discrete
+#     胜出图 ~/scan_MIN_q5_20260927_171626.png（Q8 对照 ~/scan_MIN_repro_20260927_171118.png）
+#     复现: CFG_SCALE=2.0 STEPS=16 HIRES_STEPS=30 HIRES_STRENGTH=0.25 \
+#           HIRES_UPSCALER=latent-bicubic CLARITY=0 EDGE_SHARPEN=0 SEED=25630 \
+#           cpp/sd/backup.sh "<默认肖像提示词>" ~/out.png 2560 1440
+#   注: 下方默认值已按最终选定更新为 MIN 档; 想要纹理可显式回 E1xMIN 中点档。
 #
 # 【VAE Tiling 峰值参考】
 #   Tile    | VAE Buffer | 峰值估算  | 适用显卡
@@ -157,14 +178,14 @@ echo -e "${GREEN}✓ All checks passed${NC}"
 
 SAMPLING_METHOD="${SAMPLING_METHOD:-euler}"
 SCHEDULER="${SCHEDULER:-discrete}"
-CFG_SCALE="${CFG_SCALE:-3.0}"
-STEPS="${STEPS:-20}"
-HIRES_STEPS="${HIRES_STEPS:-40}"
-HIRES_STRENGTH="${HIRES_STRENGTH:-0.4}"
-# HiRes 上采样方式: latent-bislerp（默认，保细节）| latent-bicubic（偏软）| model（ESRGAN 高分辨率会崩）
-HIRES_UPSCALER="${HIRES_UPSCALER:-latent-bislerp}"
-# 后处理（甜点见头部注释）: clarity 局部对比 0.15; edge-sharpen 必须 0（白底轮廓锐化出白边）
-CLARITY="${CLARITY:-0.15}"
+CFG_SCALE="${CFG_SCALE:-2.0}"
+STEPS="${STEPS:-16}"
+HIRES_STEPS="${HIRES_STEPS:-30}"
+HIRES_STRENGTH="${HIRES_STRENGTH:-0.25}"
+# HiRes 上采样方式: latent-bicubic（默认，MIN 柔化档）| latent-bislerp（保细节）| model（ESRGAN 高分辨率会崩）
+HIRES_UPSCALER="${HIRES_UPSCALER:-latent-bicubic}"
+# 后处理（甜点见头部注释）: MIN 默认 clarity 0（需纹理可调 0.15）; edge-sharpen 必须 0（白底轮廓锐化出白边）
+CLARITY="${CLARITY:-0.0}"
 EDGE_SHARPEN="${EDGE_SHARPEN:-0.0}"
 # 采样步缓存（EasyCache/DiT 步跳过）: 默认开启; CACHE_MODE=disabled 关闭
 # CACHE_THRESHOLD 越低跳步越多（默认 0.2; 0.15 更激进, 0.3 更保守）
