@@ -1,5 +1,5 @@
 diff --git a/include/stable-diffusion.h b/include/stable-diffusion.h
-index 9173240..bc943cb 100644
+index 9173240..46a25bc 100644
 --- a/include/stable-diffusion.h
 +++ b/include/stable-diffusion.h
 @@ -212,6 +212,7 @@ typedef struct {
@@ -18,7 +18,7 @@ index 9173240..bc943cb 100644
      SD_HIRES_UPSCALER_COUNT,
  };
  
-@@ -381,6 +383,52 @@ typedef struct {
+@@ -381,6 +383,59 @@ typedef struct {
      int custom_sigmas_count;
  } sd_hires_params_t;
  
@@ -55,6 +55,13 @@ index 9173240..bc943cb 100644
 +
 +typedef struct {
 +    bool enabled;
++    float scale_low;
++    float scale_high;
++    int freq_cutoff;
++} sd_fresca_params_t;
++
++typedef struct {
++    bool enabled;
 +    float sigma_min;
 +    float sigma_max;
 +} sd_sigma_range_params_t;
@@ -71,7 +78,7 @@ index 9173240..bc943cb 100644
  typedef struct {
      const sd_lora_t* loras;
      uint32_t lora_count;
-@@ -407,6 +455,15 @@ typedef struct {
+@@ -407,6 +462,16 @@ typedef struct {
      sd_tiling_params_t vae_tiling_params;
      sd_cache_params_t cache;
      sd_hires_params_t hires;
@@ -80,6 +87,7 @@ index 9173240..bc943cb 100644
 +    sd_dynamic_cfg_params_t dynamic_cfg;
 +    sd_rescale_cfg_params_t rescale_cfg;
 +    sd_video_cfg_params_t video_cfg;
++    sd_fresca_params_t fresca;
 +    sd_sigma_range_params_t sigma_range;
 +    const sd_area_cond_t* area_conds;
 +    int area_cond_count;
@@ -87,7 +95,7 @@ index 9173240..bc943cb 100644
      int qwen_image_layers;
      bool circular_x;
      bool circular_y;
-@@ -513,6 +570,12 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
+@@ -513,6 +578,12 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
                             sd_image_t** images_out,
                             int* num_images_out);
  
@@ -645,7 +653,7 @@ index 1c8ddf4..80e4c39 100644
                         *diffusion_params.x,
                         *diffusion_params.timesteps,
 diff --git a/src/pipeline/diffusion_engine.cpp b/src/pipeline/diffusion_engine.cpp
-index e020a2d..7c398d4 100644
+index e020a2d..96d939b 100644
 --- a/src/pipeline/diffusion_engine.cpp
 +++ b/src/pipeline/diffusion_engine.cpp
 @@ -26,6 +26,7 @@
@@ -736,7 +744,21 @@ index e020a2d..7c398d4 100644
      const bool apply_denoise_mask = !denoise_mask.empty() &&
                                      std::any_of(denoise_mask.values().begin(), denoise_mask.values().end(),
                                                  [](float value) { return value != 1.f; });
-@@ -2414,6 +2452,11 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2280,7 +2318,12 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+     if (use_apg_guidance) {
+         LOG_INFO("using Adaptive Projected Guidance (APG)");
+     }
+-    sd::guidance::ClassifierFreeGuidance classifier_free_guidance(cfg_scale, img_cfg_scale);
++    sd::guidance::FreqEnhanceParams freq_enhance;  // FreSca（本项目 patch）
++    freq_enhance.enabled     = fresca_enabled;
++    freq_enhance.scale_low   = fresca_scale_low;
++    freq_enhance.scale_high  = fresca_scale_high;
++    freq_enhance.freq_cutoff = fresca_freq_cutoff;
++    sd::guidance::ClassifierFreeGuidance classifier_free_guidance(cfg_scale, img_cfg_scale, freq_enhance);
+     sd::guidance::AdaptiveProjectedGuidance adaptive_projected_guidance(cfg_scale, img_cfg_scale, apg_params);
+     const sd::guidance::BaseGuidance& primary_guidance = use_apg_guidance
+                                                              ? static_cast<const sd::guidance::BaseGuidance&>(adaptive_projected_guidance)
+@@ -2414,6 +2457,11 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
                      nvf = static_cast<int>(noised_input.shape()[3]);
                  }
                  UNetDiffusionExtra unet_extra{nvf, &controls, control_strength};
@@ -748,7 +770,7 @@ index e020a2d..7c398d4 100644
                  const auto& ip_tokens = use_uncond_ip ? ip_adapter_uncond_tokens : ip_adapter_tokens;
                  if (!ip_tokens.empty()) {
                      unet_extra.ip_context = &ip_tokens;
-@@ -2476,6 +2519,18 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2476,6 +2524,18 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
                  diffusion_params.extra = std::monostate{};
              }
  
@@ -767,7 +789,7 @@ index e020a2d..7c398d4 100644
              sd::Tensor<float> cached_output;
              if (step_cache.before_condition(&condition, noised_input, &cached_output)) {
                  return std::move(cached_output);
-@@ -2513,6 +2568,35 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2513,6 +2573,35 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
              return {};
          }
  
@@ -803,7 +825,7 @@ index e020a2d..7c398d4 100644
          if (!uncond.empty()) {
              if (!step_cache.is_step_skipped()) {
                  compute_sample_controls(control_image,
-@@ -2552,7 +2636,10 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2552,7 +2641,10 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
          guidance_input.pred_uncond     = uncond_out.empty() ? nullptr : &uncond_out;
          guidance_input.pred_img_uncond = img_uncond_out.empty() ? nullptr : &img_uncond_out;
  
@@ -815,7 +837,7 @@ index e020a2d..7c398d4 100644
          if (guided.pred.empty()) {
              return {};
          }
-@@ -2573,6 +2660,127 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2573,6 +2665,127 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
              return {};
          }
  
@@ -944,7 +966,7 @@ index e020a2d..7c398d4 100644
          sd::guidance::GuiderOutput output;
          output.pred = denoised;
 diff --git a/src/pipeline/diffusion_engine.h b/src/pipeline/diffusion_engine.h
-index f2f8a8c..4bff69e 100644
+index f2f8a8c..84e816c 100644
 --- a/src/pipeline/diffusion_engine.h
 +++ b/src/pipeline/diffusion_engine.h
 @@ -13,7 +13,9 @@
@@ -957,7 +979,7 @@ index f2f8a8c..4bff69e 100644
  #include "core/ggml_graph_cut.h"
  #include "core/tensor.hpp"
  #include "core/util.h"
-@@ -106,6 +108,50 @@ public:
+@@ -106,6 +108,56 @@ public:
      bool is_using_v_parameterization     = false;
      bool is_using_edm_v_parameterization = false;
  
@@ -987,6 +1009,12 @@ index f2f8a8c..4bff69e 100644
 +    int video_cfg_mode     = 0;  // 0 = linear, 1 = triangle
 +    float video_cfg_min    = 1.0f;
 +
++    // FreSca 频域 guidance 增强（本项目 patch，ComfyUI comfy_extras/nodes_fresca.py）
++    bool  fresca_enabled     = false;
++    float fresca_scale_low   = 1.0f;
++    float fresca_scale_high  = 1.25f;
++    int   fresca_freq_cutoff = 20;
++
 +    // ModelNoiseScale（本项目 patch）：ancestral 噪声缩放
 +    float noise_scale = 1.0f;
 +
@@ -1008,7 +1036,7 @@ index f2f8a8c..4bff69e 100644
      std::shared_ptr<ModelManager> model_manager;
  
      enum class RunnerGroup { Core,
-@@ -334,6 +380,9 @@ public:
+@@ -334,6 +386,9 @@ public:
  
      bool build_denoiser();
  
@@ -1018,7 +1046,7 @@ index f2f8a8c..4bff69e 100644
      bool build_runners(const RunnerGroups& groups);
  
      bool is_using_v_parameterization_for_sd2(bool is_inpaint = false);
-@@ -375,6 +424,10 @@ public:
+@@ -375,6 +430,10 @@ public:
  
      sd::Tensor<float> get_audio_embedding(const sd_audio_t& audio);
  
@@ -1030,7 +1058,7 @@ index f2f8a8c..4bff69e 100644
  
      std::vector<float> process_timesteps(const std::vector<float>& timesteps,
 diff --git a/src/pipeline/image.cpp b/src/pipeline/image.cpp
-index 4c90150..5883256 100644
+index 4c90150..9ead9ee 100644
 --- a/src/pipeline/image.cpp
 +++ b/src/pipeline/image.cpp
 @@ -523,6 +523,26 @@ namespace sd::pipeline {
@@ -1206,7 +1234,7 @@ index 4c90150..5883256 100644
          if (request.hires.upscaler == SD_HIRES_UPSCALER_LATENT ||
              request.hires.upscaler == SD_HIRES_UPSCALER_LATENT_NEAREST ||
              request.hires.upscaler == SD_HIRES_UPSCALER_LATENT_NEAREST_EXACT ||
-@@ -809,6 +961,46 @@ namespace sd::pipeline {
+@@ -809,6 +961,52 @@ namespace sd::pipeline {
              return false;
          sd->apply_circular_axes(sd_img_gen_params->circular_x, sd_img_gen_params->circular_y);
  
@@ -1236,6 +1264,12 @@ index 4c90150..5883256 100644
 +        if (sd_img_gen_params->video_cfg.enabled) {
 +            sd->video_cfg_mode = sd_img_gen_params->video_cfg.mode;
 +            sd->video_cfg_min  = sd_img_gen_params->video_cfg.min_cfg;
++        }
++        sd->fresca_enabled = sd_img_gen_params->fresca.enabled;
++        if (sd_img_gen_params->fresca.enabled) {
++            sd->fresca_scale_low   = sd_img_gen_params->fresca.scale_low;
++            sd->fresca_scale_high  = sd_img_gen_params->fresca.scale_high;
++            sd->fresca_freq_cutoff = sd_img_gen_params->fresca.freq_cutoff;
 +        }
 +        // ModelNoiseScale（本项目 patch）
 +        sd->noise_scale = sd_img_gen_params->noise_scale;
@@ -1316,8 +1350,238 @@ index 416859e..062e912 100644
  }
  
  static std::tuple<float, float, float> get_ancestral_step(float sigma_from,
+diff --git a/src/runtime/freq_filter.h b/src/runtime/freq_filter.h
+new file mode 100644
+index 0000000..4378dce
+--- /dev/null
++++ b/src/runtime/freq_filter.h
+@@ -0,0 +1,115 @@
++#ifndef __SD_RUNTIME_FREQ_FILTER_H__
++#define __SD_RUNTIME_FREQ_FILTER_H__
++
++#include <algorithm>
++#include <cmath>
++#include <cstdint>
++#include <vector>
++
++// FreSca 频域 guidance 增强（本项目 patch）
++// 复刻 ComfyUI comfy_extras/nodes_fresca.py Fourier_filter：
++//   x_freq = fftshift(fftn(x, dim=(-2,-1)))
++//   mask   = scale_high，中心盒 [cc-f_c, cc+f_c) 置 scale_low
++//            （每轴 cc = n//2, f_c = min(freq_cutoff, cc)）
++//   x_out  = real(ifftn(ifftshift(mask * x_freq)))
++//
++// 等价闭式：x_out = scale_high*x + (scale_low - scale_high) * Re{IDFT(box·DFT(x))}
++// 其中 box = 频率 k ∈ [-f_c, f_c-1]（fftshift 盒映回未移位坐标）。
++// 掩码可分离（rect⊗rect），Re{IDFT} 拆成沿 W、沿 H 各一次 1D 圆卷积
++// （复 Dirichlet 核 g[j] = (1/N)·Σ_{k=-T}^{T-1} e^{i2πkj/N}），
++// 免 FFT：O(planes·(H·W² + W·H²))，仅对实张量生效（取 Re）。
++namespace sd::guidance {
++
++// data: 行主序连续张量，numel = planes*H*W（最后两维为空间轴，与 fftn(dim=(-2,-1)) 对齐）
++inline void freq_band_filter(float*  data,
++                             int64_t planes,
++                             int64_t H,
++                             int64_t W,
++                             float   scale_low,
++                             float   scale_high,
++                             int     freq_cutoff) {
++    if (data == nullptr || planes <= 0 || H <= 0 || W <= 0) return;
++
++    const float delta = scale_low - scale_high;
++    if (delta == 0.0f) {
++        // 均匀掩码 → 整体缩放
++        const int64_t n = planes * H * W;
++        for (int64_t i = 0; i < n; ++i) data[i] *= scale_low;
++        return;
++    }
++
++    const int T_h = std::min(freq_cutoff, (int)(H / 2));
++    const int T_w = std::min(freq_cutoff, (int)(W / 2));
++
++    // 每轴复核：T=0（f_c=0 或轴长 1）→ 全零 → 盒为空
++    auto make_kernel = [](int64_t n, int T, std::vector<double>& gre, std::vector<double>& gim) {
++        gre.assign((size_t)n, 0.0);
++        gim.assign((size_t)n, 0.0);
++        if (T <= 0) return;
++        const double inv_n = 1.0 / (double)n;
++        for (int64_t j = 0; j < n; ++j) {
++            double sr = 0.0, si = 0.0;
++            for (int k = -T; k <= T - 1; ++k) {
++                const double ang = 2.0 * M_PI * (double)k * (double)j * inv_n;
++                sr += std::cos(ang);
++                si += std::sin(ang);
++            }
++            gre[(size_t)j] = sr * inv_n;
++            gim[(size_t)j] = si * inv_n;
++        }
++    };
++
++    std::vector<double> gw_re, gw_im, gh_re, gh_im;
++    make_kernel(W, T_w, gw_re, gw_im);
++    make_kernel(H, T_h, gh_re, gh_im);
++
++    const int64_t hw       = H * W;
++    std::vector<double> yr((size_t)hw), yi((size_t)hw), ur((size_t)hw);
++
++    for (int64_t p = 0; p < planes; ++p) {
++        const float* xp = data + p * hw;
++
++        // Pass 1：沿 W 行圆卷积（复核，实/虚部分存）
++        for (int64_t i = 0; i < H; ++i) {
++            const float* row = xp + i * W;
++            double*      yrp = yr.data() + i * W;
++            double*      yip = yi.data() + i * W;
++            for (int64_t n = 0; n < W; ++n) {
++                double sr = 0.0, si = 0.0;
++                for (int64_t m = 0; m < W; ++m) {
++                    const int64_t j   = n - m;
++                    const int64_t idx = j >= 0 ? j : j + W;
++                    const double  xv  = (double)row[m];
++                    sr += gw_re[(size_t)idx] * xv;
++                    si += gw_im[(size_t)idx] * xv;
++                }
++                yrp[n] = sr;
++                yip[n] = si;
++            }
++        }
++
++        // Pass 2：沿 H 列圆卷积取实部：Re{g_h ⊛ y} = Re(g_h)⊛Re(y) − Im(g_h)⊛Im(y)
++        for (int64_t j = 0; j < W; ++j) {
++            for (int64_t n = 0; n < H; ++n) {
++                double sr = 0.0;
++                for (int64_t m = 0; m < H; ++m) {
++                    const int64_t j0  = n - m;
++                    const int64_t idx = j0 >= 0 ? j0 : j0 + H;
++                    sr += gh_re[(size_t)idx] * yr[(size_t)m * W + j] -
++                          gh_im[(size_t)idx] * yi[(size_t)m * W + j];
++                }
++                ur[(size_t)n * W + j] = sr;
++            }
++        }
++
++        // 合成：out = scale_high*x + delta*u
++        float* op = data + p * hw;
++        for (int64_t i = 0; i < hw; ++i) {
++            op[i] = (float)((double)scale_high * (double)xp[i] + (double)delta * ur[(size_t)i]);
++        }
++    }
++}
++
++}  // namespace sd::guidance
++
++#endif  // __SD_RUNTIME_FREQ_FILTER_H__
+diff --git a/src/runtime/guidance.cpp b/src/runtime/guidance.cpp
+index bfb773b..81779a8 100644
+--- a/src/runtime/guidance.cpp
++++ b/src/runtime/guidance.cpp
+@@ -8,6 +8,7 @@
+ #include <utility>
+ 
+ #include "core/util.h"
++#include "runtime/freq_filter.h"
+ 
+ namespace sd::guidance {
+ 
+@@ -141,9 +142,31 @@ namespace sd::guidance {
+     }
+ 
+     ClassifierFreeGuidance::ClassifierFreeGuidance(float guidance_scale,
+-                                                   float image_guidance_scale)
++                                                   float image_guidance_scale,
++                                                   FreqEnhanceParams freq_params)
+         : guidance_scale_(guidance_scale),
+-          image_guidance_scale_(image_guidance_scale) {
++          image_guidance_scale_(image_guidance_scale),
++          freq_params_(std::move(freq_params)) {
++    }
++
++    // FreSca（本项目 patch）：对 guidance 差值做频带缩放（模型无关，DiT 可用）
++    void ClassifierFreeGuidance::apply_freq_enhance(sd::Tensor<float>& delta) const {
++        if (!freq_params_.enabled || delta.empty()) {
++            return;
++        }
++        const std::vector<int64_t>& shp = delta.shape();
++        if (shp.size() < 2) {
++            return;
++        }
++        const int64_t H = shp[shp.size() - 2];
++        const int64_t W = shp[shp.size() - 1];
++        if (H <= 0 || W <= 0) {
++            return;
++        }
++        const int64_t planes = delta.numel() / (H * W);
++        freq_band_filter(delta.data(), planes, H, W,
++                         freq_params_.scale_low, freq_params_.scale_high,
++                         freq_params_.freq_cutoff);
+     }
+ 
+     GuiderOutput ClassifierFreeGuidance::forward(const GuidanceInput& input,
+@@ -161,18 +184,22 @@ namespace sd::guidance {
+         output.pred                        = pred_cond;
+         if (has_tensor(input.pred_uncond)) {
+             const sd::Tensor<float>& pred_uncond = *input.pred_uncond;
++            sd::Tensor<float>        delta       = pred_cond - pred_uncond;
++            apply_freq_enhance(delta);  // FreSca（本项目 patch）
+             if (has_tensor(input.pred_img_uncond)) {
+                 const sd::Tensor<float>& pred_img_uncond = *input.pred_img_uncond;
+                 output.pred                              = pred_img_uncond +
+                               image_guidance_scale_ * (pred_uncond - pred_img_uncond) +
+-                              guidance_scale * (pred_cond - pred_uncond);
++                              guidance_scale * delta;
+ 
+             } else {
+-                output.pred = pred_uncond + guidance_scale * (pred_cond - pred_uncond);
++                output.pred = pred_uncond + guidance_scale * delta;
+             }
+         } else if (has_tensor(input.pred_img_uncond)) {
+             const sd::Tensor<float>& pred_img_uncond = *input.pred_img_uncond;
+-            output.pred                              = pred_img_uncond + guidance_scale * (pred_cond - pred_img_uncond);
++            sd::Tensor<float>        delta           = pred_cond - pred_img_uncond;
++            apply_freq_enhance(delta);  // FreSca（本项目 patch）
++            output.pred                              = pred_img_uncond + guidance_scale * delta;
+         }
+ 
+         return output;
+diff --git a/src/runtime/guidance.h b/src/runtime/guidance.h
+index 3de3370..1d0f008 100644
+--- a/src/runtime/guidance.h
++++ b/src/runtime/guidance.h
+@@ -25,6 +25,16 @@ namespace sd::guidance {
+         float norm_threshold_smoothing = 0.0f;
+     };
+ 
++    // FreSca 频域 guidance 增强（本项目 patch）
++    // ComfyUI comfy_extras/nodes_fresca.py：对 cond-uncond 的 guidance 差值做
++    // FFT 频带缩放（低频 ×scale_low，高频 ×scale_high），与模型结构无关 → DiT 可用。
++    struct FreqEnhanceParams {
++        bool  enabled     = false;
++        float scale_low   = 1.0f;
++        float scale_high  = 1.25f;
++        int   freq_cutoff = 20;
++    };
++
+     AdaptiveProjectedGuidanceParams parse_adaptive_projected_guidance_args(const char* extra_sample_args);
+     bool is_adaptive_projected_guidance_enabled(const AdaptiveProjectedGuidanceParams& params);
+     bool parse_skip_layer_guidance_uncond_arg(const char* extra_sample_args);
+@@ -51,10 +61,14 @@ namespace sd::guidance {
+     class ClassifierFreeGuidance : public BaseGuidance {
+         float guidance_scale_       = 1.0f;
+         float image_guidance_scale_ = 1.0f;
++        FreqEnhanceParams freq_params_;  // FreSca（本项目 patch）
++
++        void apply_freq_enhance(sd::Tensor<float>& delta) const;  // FreSca（本项目 patch）
+ 
+     public:
+         ClassifierFreeGuidance(float guidance_scale,
+-                               float image_guidance_scale);
++                               float image_guidance_scale,
++                               FreqEnhanceParams freq_params = {});
+ 
+         GuiderOutput forward(const GuidanceInput& input,
+                              GuiderOutput previous,
 diff --git a/src/stable-diffusion.cpp b/src/stable-diffusion.cpp
-index c533f2c..1d41748 100644
+index c533f2c..5dcd696 100644
 --- a/src/stable-diffusion.cpp
 +++ b/src/stable-diffusion.cpp
 @@ -245,6 +245,7 @@ const char* hires_upscaler_to_str[] = {
@@ -1328,7 +1592,7 @@ index c533f2c..1d41748 100644
  };
  
  const char* sd_hires_upscaler_name(enum sd_hires_upscaler_t upscaler) {
-@@ -514,6 +515,9 @@ void sd_img_gen_params_init(sd_img_gen_params_t* sd_img_gen_params) {
+@@ -514,12 +515,16 @@ void sd_img_gen_params_init(sd_img_gen_params_t* sd_img_gen_params) {
      sd_img_gen_params->batch_count         = 1;
      sd_img_gen_params->control_strength    = 0.9f;
      sd_img_gen_params->ip_adapter_strength = 1.0f;
@@ -1338,7 +1602,14 @@ index c533f2c..1d41748 100644
      sd_img_gen_params->qwen_image_layers   = 3;
      sd_img_gen_params->circular_x          = false;
      sd_img_gen_params->circular_y          = false;
-@@ -745,6 +749,20 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
+     sd_img_gen_params->pm_params           = {nullptr, 0, nullptr, 20.f};
+     sd_img_gen_params->pulid_params        = {nullptr, 1.0f};
+     sd_img_gen_params->vae_tiling_params   = {false, false, 0, 0, 0.5f, 0.0f, 0.0f, nullptr};
++    sd_img_gen_params->fresca              = {false, 1.0f, 1.25f, 20};
+     sd_cache_params_init(&sd_img_gen_params->cache);
+     sd_hires_params_init(&sd_img_gen_params->hires);
+ }
+@@ -745,6 +750,20 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
      return execution.ready && sd::pipeline::generate_image(sd_ctx->sd, params, images_out, num_images_out);
  }
  

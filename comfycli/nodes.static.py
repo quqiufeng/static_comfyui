@@ -1613,6 +1613,21 @@ register_node("RescaleCFG", "RescaleCFG",
               "rescale_cfg", ("MODEL",), False)
 
 
+def fresca(inputs):
+    m: SDPipelineHandle = dict_get(inputs, "model")
+    if m is None:
+        return (None,)
+    scale_low = get_float(inputs, "scale_low", 1.0)
+    scale_high = get_float(inputs, "scale_high", 1.25)
+    freq_cutoff = get_int(inputs, "freq_cutoff", 20)
+    sd_set_fresca(m.pipeline, scale_low, scale_high, freq_cutoff)
+    return (m,)
+
+
+register_node("FreSca", "FreSca",
+              "fresca", ("MODEL",), False)
+
+
 def model_compute_dtype(inputs):
     m: SDPipelineHandle = dict_get(inputs, "model")
     if m is None:
@@ -1998,7 +2013,7 @@ def register_group(types: list, group: int):
         i = i + 1
 
 register_group(py_list("DualCLIPLoader", "CLIPTextEncode", "CLIPSetLastLayer", "ConditioningCombine", "ConditioningConcat", "ConditioningAverage"), 1)
-register_group(py_list("CheckpointLoaderSimple", "KSampler", "KSamplerAdvanced", "LORALoader", "DiffusionModelLoader", "HiResFix", "ADetailer", "IPAdapterApply", "CLIPVisionLoader", "IPAdapterModelLoader", "CheckpointLoader", "UNETLoader", "VAELoader", "CLIPLoader", "LoraLoader", "LoraLoaderModelOnly", "LoraLoaderBypass", "LoraLoaderBypassModelOnly", "CLIPMergeSimple", "CLIPMergeAdd", "CLIPMergeSubtract", "ModelSamplingFlux", "ModelSamplingSD3", "ModelSamplingAuraFlow", "ModelComputeDtype", "ModelAttentionBackend", "RescaleCFG", "ModelSamplingContinuousEDM", "ModelSamplingContinuousV", "ModelNoiseScale", "ModelSamplingDiscrete", "ModelSamplingStableCascade", "CheckpointSave", "VAESave", "CLIPSave", "ModelSave", "ModelMergeSimple", "ModelMergeAdd", "ModelMergeSubtract", "DiffusersLoader", "unCLIPCheckpointLoader", "ImageOnlyCheckpointLoader", "ImageOnlyCheckpointSave", "ModelPatchLoader", "VideoLinearCFGGuidance", "VideoTriangleCFGGuidance"), 2)
+register_group(py_list("CheckpointLoaderSimple", "KSampler", "KSamplerAdvanced", "LORALoader", "DiffusionModelLoader", "HiResFix", "ADetailer", "IPAdapterApply", "CLIPVisionLoader", "IPAdapterModelLoader", "CheckpointLoader", "UNETLoader", "VAELoader", "CLIPLoader", "LoraLoader", "LoraLoaderModelOnly", "LoraLoaderBypass", "LoraLoaderBypassModelOnly", "CLIPMergeSimple", "CLIPMergeAdd", "CLIPMergeSubtract", "ModelSamplingFlux", "ModelSamplingSD3", "ModelSamplingAuraFlow", "ModelComputeDtype", "ModelAttentionBackend", "RescaleCFG", "FreSca", "ModelSamplingContinuousEDM", "ModelSamplingContinuousV", "ModelNoiseScale", "ModelSamplingDiscrete", "ModelSamplingStableCascade", "CheckpointSave", "VAESave", "CLIPSave", "ModelSave", "ModelMergeSimple", "ModelMergeAdd", "ModelMergeSubtract", "DiffusersLoader", "unCLIPCheckpointLoader", "ImageOnlyCheckpointLoader", "ImageOnlyCheckpointSave", "ModelPatchLoader", "VideoLinearCFGGuidance", "VideoTriangleCFGGuidance"), 2)
 register_group(py_list("EmptyLatentImage", "LatentUpscale", "LatentCrop", "SaveLatent", "LoadLatent", "LatentUpscaleBy", "LatentRotate", "LatentFlip", "LatentComposite", "LatentBlend", "RepeatLatentBatch", "LatentFromBatch", "SetLatentNoiseMask"), 3)
 register_group(py_list("VAEDecode", "VAEEncode", "VAEEncodeTiled", "LoadImageMask", "VAEEncodeForInpaint", "LoadImage", "ImageScale", "ImageScaleBy", "ImageInvert", "EmptyImage", "ImagePadForOutpaint", "ImageBlur", "ImageBatch", "ImageCompositeMasked", "ImageCrop", "ImageToMask", "MaskToImage", "CLIPVisionEncode", "LoadImageOutput", "PreviewImage", "Reroute", "SaveImage", "WebcamCapture", "VAEDecodeTiled"), 4)
 register_group(py_list("StyleModelLoader", "StyleModelApply", "unCLIPConditioning", "GLIGENLoader", "GLIGENTextBoxApply", "SVD_img2vid_Conditioning", "ConditioningSetAreaPercentageVideo", "AnimaLLLiteApply", "QwenImageDiffsynthControlnet", "ZImageFunControlnet", "WanUni3CControlnetApply", "SUPIRApply", "USOStyleReference", "ConditioningZeroOut", "ControlNetLoader", "DiffControlNetLoader", "ControlNetApply", "ControlNetApplyAdvanced", "InpaintModelConditioning", "PreviewAny", "ConditioningSetArea", "ConditioningSetAreaPercentage", "ConditioningSetAreaStrength", "ConditioningSetMask", "ConditioningMultiply", "ConditioningSetTimestepRange"), 5)
@@ -2062,6 +2077,8 @@ def dispatch_model(class_type: str, inputs):
         return model_attention_backend(inputs)
     elif class_type == "RescaleCFG":
         return rescale_cfg(inputs)
+    elif class_type == "FreSca":
+        return fresca(inputs)
     elif class_type == "ModelSamplingContinuousEDM" or class_type == "ModelSamplingContinuousV":
         return model_sampling_sigma_range(inputs)
     elif class_type == "ModelNoiseScale":

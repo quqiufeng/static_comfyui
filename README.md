@@ -239,15 +239,15 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 
 ## 已实现节点
 
-`comfycli/nodes.static.py` 注册 **132 个节点**，覆盖 ComfyUI 全部 **120 个内置节点名（100%）**。
+`comfycli/nodes.static.py` 注册 **133 个节点**，覆盖 ComfyUI 全部 **120 个内置节点名（100%）**。
 
-> **对齐度说明（重要）**：节点**名称**已 100% 对齐（132 注册 / 120 内置名）。**行为：115 真实实现 / 17 透传**。
+> **对齐度说明（重要）**：节点**名称**已 100% 对齐（133 注册 / 120 内置名）。**行为：116 真实实现 / 17 透传**。
 >
 > **推理后端原则**：出图一律走 sd.cpp/ggml（专为推理优化：量化、算子融合、低显存）。torch helper 仅用于 ggml 没有的**权重级**操作（合并/导出），不在主出图路径上。
 >
 > **真实实现**（主要来源）：
 > - sd.cpp 原生能力：模型加载、采样、VAE、LoRA、ControlNet、IPAdapter、图像算子、`LoadLatent/SaveLatent`、`PreviewAny`、`Reroute`
-> - **sd.cpp patch**：`CLIPSetLastLayer`(clip_skip)、`ModelSamplingFlux/SD3/AuraFlow`(flow_shift)、`ModelComputeDtype`(wtype)、`ModelAttentionBackend`(flash_attn)、`ModelSamplingContinuousEDM/ContinuousV`(sigma 区间)、`RescaleCFG`、`VideoLinear/TriangleCFGGuidance`、`ModelNoiseScale`、`ModelSamplingDiscrete`、区域条件 `ConditioningSetArea/SetAreaPercentage/SetAreaStrength/Multiply`（采样循环逐区合成，显存 ~2.7GB）、`LatentRotate/Flip/Composite/Blend`、`RepeatLatentBatch/LatentFromBatch/SetLatentNoiseMask`
+> - **sd.cpp patch**：`CLIPSetLastLayer`(clip_skip)、`ModelSamplingFlux/SD3/AuraFlow`(flow_shift)、`ModelComputeDtype`(wtype)、`ModelAttentionBackend`(flash_attn)、`ModelSamplingContinuousEDM/ContinuousV`(sigma 区间)、`RescaleCFG`、`FreSca`(CFG 层频域 guidance，DiT 可用)、`VideoLinear/TriangleCFGGuidance`、`ModelNoiseScale`、`ModelSamplingDiscrete`、区域条件 `ConditioningSetArea/SetAreaPercentage/SetAreaStrength/Multiply`（采样循环逐区合成，显存 ~2.7GB）、`LatentRotate/Flip/Composite/Blend`、`RepeatLatentBatch/LatentFromBatch/SetLatentNoiseMask`
 > - **libtorch helper（权重级）**：`ModelMerge*`(20)、`CLIPMerge*`(3)、`CheckpointSave/VAESave/CLIPSave/ModelSave/ImageOnlyCheckpointSave`（可选库 `libcomfycli_torch.so`，缺失时相关节点不可用、其余功能不受影响）
 >
 > **仍透传/占位（17）**：`ConditioningSetMask`/`SetTimestepRange`、模型专属 conditioning（`AnimaLLLiteApply`/`QwenImageDiffsynthControlnet`/`ZImageFunControlnet`/`WanUni3CControlnetApply`/`SUPIRApply`/`USOStyleReference`/`ConditioningSetAreaPercentageVideo`）、`CLIPVisionEncode`、`StyleModel*`(2)、`unCLIPConditioning`、`GLIGEN*`(2，模块/注入已实现，加载器待完成)、`ModelSamplingStableCascade`、`ModelPatchLoader`、`SVD_img2vid_Conditioning`、`WebcamCapture`。待验证清单见 `TODO.md`。
@@ -340,6 +340,7 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 | `ModelComputeDtype` | `MODEL` | 真实实现（映射 sd.cpp `wtype`，重载 ctx） |
 | `ModelAttentionBackend` | `MODEL` | 部分实现（`flash_attn` → sd.cpp diffusion flash attention） |
 | `RescaleCFG` | `MODEL` | 真实实现（sd.cpp patch 采样循环，1:1 复刻 ComfyUI） |
+| `FreSca` | `MODEL` | 真实实现（sd.cpp patch CFG 层频带滤波，`nodes_fresca.py` 同款；UNet/DiT 均生效） |
 | `ModelNoiseScale` | `MODEL` | 真实实现（sd.cpp patch 缩放 ancestral 噪声） |
 | `VideoLinearCFGGuidance` / `VideoTriangleCFGGuidance` | `MODEL` | 真实实现（按 batch/帧逐元素改 CFG scale） |
 
@@ -593,7 +594,7 @@ ComfyUI 是 Python ML 生态中最复杂的纯推理项目之一：
 - 无自定义节点动态加载——自定义节点需编译期注册
 - CLI 先行，无 WebSocket/HTTP UI
 - 同步执行，无 asyncio
-- 已实现 132 个节点（ComfyUI 120 个内置节点名全覆盖）；核心链路真实实现，其余受 sd.cpp 能力边界限制（详见「对齐度说明」）
+- 已实现 133 个节点（ComfyUI 120 个内置节点名全覆盖）；核心链路真实实现，其余受 sd.cpp 能力边界限制（详见「对齐度说明」）
 - 执行引擎为简化版：拓扑排序 + 校验 + 输出缓存，但无 list 输入广播 / lazy 求值 / ExecutionBlocker / 子图
 - 数据类型为占位（LATENT/CONDITIONING/MODEL 非真实张量），节点间无法做张量级操作
 

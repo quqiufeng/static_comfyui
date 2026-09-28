@@ -123,7 +123,7 @@ comfycli-bin workflow.json --output-dir ./output
 ## 已搭建的基础设施
 - `staticpy/` — StaticPy 工具链（上游 `/opt/ReScheme` 拷贝，`static_translate.py` 有 6 处本地补丁，prelude/stdlib 原样）+ `static_build_comfycli.sh` 本地构建胶水
 - `comfycli/comfycli_ffi.scm` — sd.cpp 共享库加载 + 上游缺失的内置（`dict_keys`/`is_none`/`is_link`/`path_dirname` 等）；可选库 `libcomfycli_torch.so` 按是否加载定义 torch 绑定（否则报错桩，避免 AOT 载入期符号缺失）
-- `cpp/sd/` — stable-diffusion.cpp 推理后端封装 (`sdcpp_adapter.h/.cpp` + `build.sh` / `build_sd_dl.sh`)；`patches/sdcpp-freeu-sag-v2.patch` 为上游补丁（FreeU/SAG/DynCFG/RescaleCFG/video CFG/sigma 区间/区域条件/GLIGEN 注入等）
+- `cpp/sd/` — stable-diffusion.cpp 推理后端封装 (`sdcpp_adapter.h/.cpp` + `build.sh` / `build_sd_dl.sh`)；`patches/sdcpp-freeu-sag-v2.patch` 为上游补丁（FreeU/SAG/DynCFG/RescaleCFG/video CFG/FreSca/sigma 区间/区域条件/GLIGEN 注入等）
 - `cpp/libtorch_std_helper.cpp` + `cpp/build_torch_std_helper.sh` — 可选 torch helper（`libcomfycli_torch.so`），仅用于 ggml 没有的**权重级**操作（模型/CLIP 合并、权重导出）与备用独立管线
 - `TODO.md` — 待验证节点与所需模型清单
 - `build.sh` — 编译 ELF + `libsdcpp_adapter.so`

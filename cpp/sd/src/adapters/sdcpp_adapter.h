@@ -228,6 +228,9 @@ public:
     // Video CFG guidance override (per-batch CFG scale; mode 0=linear, 1=triangle)
     void set_video_cfg(bool enabled, int mode, float min_cfg);
 
+    // FreSca frequency guidance enhancement (ComfyUI nodes_fresca.py; model-agnostic)
+    void set_fresca(bool enabled, float scale_low, float scale_high, int freq_cutoff);
+
     // Sigma range override (ModelSamplingContinuousEDM / ModelSamplingContinuousV)
     void set_sigma_range(bool enabled, float sigma_min, float sigma_max);
 
@@ -477,6 +480,9 @@ int sd_pipeline_set_rescale_cfg(sd_pipeline_t pipeline, int enabled, float multi
 
 /** Configure video CFG guidance (mode 0=linear, 1=triangle). */
 int sd_pipeline_set_video_cfg(sd_pipeline_t pipeline, int enabled, int mode, float min_cfg);
+
+/** Configure FreSca frequency guidance enhancement (model-agnostic; works on DiT). */
+int sd_pipeline_set_fresca(sd_pipeline_t pipeline, int enabled, float scale_low, float scale_high, int freq_cutoff);
 
 /** Override sampling sigma range (ModelSamplingContinuousEDM/V). */
 int sd_pipeline_set_sigma_range(sd_pipeline_t pipeline, int enabled, float sigma_min, float sigma_max);

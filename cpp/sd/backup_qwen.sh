@@ -30,7 +30,8 @@
 #   - 后处理默认开启：clarity 0.3 / sharpen 0.3 / smart 0.5 / edge 2.0
 #   - 正向自动追加写实词（REALISM=0 关）；负向加 anime/cartoon/illustration/
 #     3d render 等反动漫词 + 皮肤油腻词
-#   - 不传 --freeu（Qwen 是 DiT，ComfyUI FreeU 只挂 UNet → 恒为空操作）
+#   - 不传 --freeu（Qwen 是 DiT，ComfyUI FreeU 只挂 UNet → 恒为空操作）；
+#     频域细节增强走 FreSca（模型无关, nodes_fresca.py 同款），默认开启，FRESCA=0 关闭
 #   - POSTPROC=0 关闭后处理；OFFLOAD=0 默认权重上卡（显存紧张时 =1 留 RAM）
 #   - NO_QUALITY_PREFIX=1 默认（关 img_hires 内置 masterpiece 前缀, 避免动漫化）
 #
@@ -292,6 +293,11 @@ EDGE_SHARPEN="${EDGE_SHARPEN:-0.0}"
 REALISM="${REALISM:-1}"
 # 默认关质量前缀（masterpiece/best quality 会把 Qwen 拉向动漫）；NO_QUALITY_PREFIX=0 可开
 NO_QUALITY_PREFIX="${NO_QUALITY_PREFIX:-1}"
+# FreSca 频域 guidance 增强（ComfyUI nodes_fresca.py 同款, DiT/UNet 模型无关）: 默认开启, FRESCA=0 关闭
+FRESCA="${FRESCA:-1}"
+FRESCA_LOW="${FRESCA_LOW:-1.0}"
+FRESCA_HIGH="${FRESCA_HIGH:-1.25}"
+FRESCA_CUTOFF="${FRESCA_CUTOFF:-20}"
 # 采样步缓存（与 backup.sh 同步）: 默认开; CACHE_MODE=disabled 关
 CACHE_MODE="${CACHE_MODE:-easycache}"
 CACHE_THRESHOLD="${CACHE_THRESHOLD:-0.2}"
@@ -357,6 +363,9 @@ echo -e "HiRes Upscaler: ${CYAN}$HIRES_UPSCALER${NC}"
 echo -e "Sampler: ${CYAN}$SAMPLING_METHOD${NC} + ${CYAN}$SCHEDULER${NC}"
 echo -e "VAE Tiling: ${VAE_TILE_SIZE} overlap ${VAE_TILE_OVERLAP}"
 echo -e "Post-processing: ${POSTPROC} (0=off), realism=${REALISM}"
+if [ "$FRESCA" -eq 1 ]; then
+    echo "FreSca: low=$FRESCA_LOW high=$FRESCA_HIGH cutoff=$FRESCA_CUTOFF"
+fi
 echo -e "Offload to CPU: ${OFFLOAD}"
 if [ "$CACHE_MODE" != "disabled" ]; then
     echo -e "Cache: ${CYAN}$CACHE_MODE${NC} threshold=$CACHE_THRESHOLD range=[$CACHE_START,$CACHE_END]"
@@ -410,6 +419,9 @@ if [ "$OFFLOAD" -eq 1 ]; then
 fi
 if [ "$NO_QUALITY_PREFIX" -eq 1 ]; then
   SD_CMD+=(--no-quality-prefix)
+fi
+if [ "$FRESCA" -eq 1 ]; then
+  SD_CMD+=(--fresca --fresca-low "$FRESCA_LOW" --fresca-high "$FRESCA_HIGH" --fresca-cutoff "$FRESCA_CUTOFF")
 fi
 
 SD_CMD+=("$PROMPT" "$OUTPUT_PATH")

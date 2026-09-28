@@ -14,7 +14,7 @@
 ├── build_sd.sh                     # 编译 sd.cpp（静态链接，旧，已废弃）
 ├── build_sd_dl.sh                  # 编译 sd.cpp（动态后端，当前默认）
 ├── patches/
-│   └── sdcpp-freeu-sag-v2.patch    # 唯一 patch：FreeU/SAG/DynCFG/RescaleCFG/video CFG/sigma 区间/区域条件/GLIGEN 等（12 文件 1361 行）
+│   └── sdcpp-freeu-sag-v2.patch    # 唯一 patch：FreeU/SAG/DynCFG/RescaleCFG/video CFG/FreSca/sigma 区间/区域条件/GLIGEN 等（15 文件 1632 行）
 ├── src/
 │   ├── adapters/
 │   │   ├── sdcpp_adapter.h         # C++ SDPipeline 类 + C API 声明
@@ -26,9 +26,10 @@
 │   ├── sdxl_txt2img.cpp            # 独立测试程序
 │   └── img_hires.cpp               # HiRes Fix 测试程序
 ├── tests/
-│   ├── run.sh                      # FreeU 数学自测（编译 + 运行，依赖 build_sd_dl.sh）
+│   ├── run.sh                      # FreeU/FreSca 数学自测（编译 + 运行，依赖 build_sd_dl.sh）
 │   ├── test_fourier.cpp            # Fourier_filter: ggml 闭式投影 vs 朴素 DFT
-│   └── test_freeu_v2.cpp           # FreeU_V2 backbone vs torch 参考（含 batch=2）
+│   ├── test_freeu_v2.cpp           # FreeU_V2 backbone vs torch 参考（含 batch=2）
+│   └── test_fresca.cpp             # FreSca 频带滤波 vs 朴素 DFT（奇偶尺寸/截断/空盒）
 └── scripts/
     └── build.sh                    # 编译适配层（被根目录 build.sh 调用）
 ```
@@ -63,23 +64,26 @@ StaticPy extern fn ← sdcpp_adapter.h (C API) ← sdcpp_adapter.cpp ← stable-
 
 ## 4. 我们对 sd.cpp 的改动
 
-所有改动集中在 **一个 patch 文件** `patches/sdcpp-freeu-sag-v2.patch`（1361 行），修改 sd.cpp 的 **12 个文件**（含新增 `gligen.hpp`、`ggml_fourier.h`）。当前基准 commit：**`6dcb5bb`**（见 `SD_VERSION.lock`）。
+所有改动集中在 **一个 patch 文件** `patches/sdcpp-freeu-sag-v2.patch`（1632 行），修改 sd.cpp 的 **15 个文件**（含新增 `gligen.hpp`、`ggml_fourier.h`、`freq_filter.h`）。当前基准 commit：**`6dcb5bb`**（见 `SD_VERSION.lock`）。
 
 | patch 中的文件 | 新增行数 | § |
 |---|---|---|
-| `include/stable-diffusion.h` | 63 | 4.1 |
+| `include/stable-diffusion.h` | 71 | 4.1 |
 | `src/core/ggml_fourier.h`（新增） | 185 | 4.2 |
 | `src/model/diffusion/unet.hpp` | 81 | 4.2 |
-| `src/pipeline/diffusion_engine.h` | 53 | 4.3 |
-| `src/pipeline/diffusion_engine.cpp` | 213 | 4.4 / 4.7 |
-| `src/pipeline/image.cpp` | 192 | 4.5 |
+| `src/pipeline/diffusion_engine.h` | 59 | 4.3 |
+| `src/pipeline/diffusion_engine.cpp` | 219 | 4.4 / 4.7 |
+| `src/pipeline/image.cpp` | 198 | 4.5 |
 | `src/model_loader.cpp` | （已删除） | 4.6 |
 | `src/model/diffusion/model.hpp` | 3 | 4.8 |
 | `src/model/diffusion/gligen.hpp`（新增） | 136 | 4.9 |
 | `src/core/ggml_runner.h` | 12 | 4.10 |
 | `src/model/common/block.hpp` | 4 | 4.11 |
 | `src/runtime/denoiser.hpp` | 21 | 4.12 |
-| `src/stable-diffusion.cpp` | 18 | 4.13 |
+| `src/stable-diffusion.cpp` | 19 | 4.13 |
+| `src/runtime/freq_filter.h`（新增） | 115 | 4.17 |
+| `src/runtime/guidance.h` | 15 | 4.17 |
+| `src/runtime/guidance.cpp` | 32 | 4.17 |
 
 > **注意**：sd.cpp 在 `7f410a3` 做了大重构（#1956/#1957），生成管线从 `src/stable-diffusion.cpp` 拆到 `src/pipeline/`。patch 已随之重定位。`6dcb5bb` 起上游又移除了 `unused_tensors`/`vision_model.` 过滤（#1984），旧的 `model_loader.cpp` hunk 已废弃、从 patch 中删除。
 
@@ -88,6 +92,7 @@ StaticPy extern fn ← sdcpp_adapter.h (C API) ← sdcpp_adapter.cpp ← stable-
 - `sd_freeu_params_t`：`{enabled, b1, b2, s1, s2}`
 - `sd_sag_params_t`：`{enabled, scale}`
 - `sd_dynamic_cfg_params_t`：`{enabled, percentile, mimic_scale, threshold_percentile}`
+- `sd_fresca_params_t`：`{enabled, scale_low, scale_high, freq_cutoff}`（FreSca 频域 guidance，§4.17）
 
 > IP-Adapter 现用 **sd.cpp 原生**（`sd_ctx_params_t.ip_adapter_path` + `sd_img_gen_params_t.ip_adapter_image/ip_adapter_strength`），不再自定义结构体/注入。
 
@@ -120,9 +125,10 @@ StaticPy extern fn ← sdcpp_adapter.h (C API) ← sdcpp_adapter.cpp ← stable-
 - FreeU: `freeu_enabled`, `freeu_b1/b2/s1/s2`
 - SAG: `sag_enabled`, `sag_scale`
 - Dynamic CFG: `dynamic_cfg_enabled`, `dynamic_cfg_percentile/mimic_scale/threshold_percentile`
+- FreSca: `fresca_enabled`, `fresca_scale_low/scale_high/freq_cutoff`（§4.17）
 
 ### 4.4 `src/pipeline/diffusion_engine.cpp`
-三处改动：
+四处改动：
 
 **A. 顶部 include**：`#include "model/diffusion/unet.hpp"`（FreeU 的 `dynamic_cast<UNetModelRunner*>` 需要完整定义）
 
@@ -140,8 +146,10 @@ if (sd_version_is_unet(version)) {
 - SAG：`guided.pred = pred * scale + uncond * (1-scale)`
 - Dynamic CFG：找到 `pred` 最大绝对值，若 >1 则全张量除以该值
 
+**D. `ClassifierFreeGuidance` 构造处**（FreSca，§4.17）——把 `fresca_*` 字段打包成 `FreqEnhanceParams` 传入 CFG；`forward()` 内对 guidance 差值做频带滤波后再乘 `guidance_scale`。
+
 ### 4.5 `src/pipeline/image.cpp`
-一处改动：`generate_image()` 中从 `sd_img_gen_params_t` 读取 freeu/sag/dynamic_cfg 存入 `sd->*` 字段。
+一处改动：`generate_image()` 中从 `sd_img_gen_params_t` 读取 freeu/sag/dynamic_cfg/rescale_cfg/video_cfg/**fresca** 存入 `sd->*` 字段。
 
 ### 4.6 `src/model_loader.cpp` ⚠️ 已从 patch 移除（`6dcb5bb`）
 历史修复（从 `unused_tensors` 移除 `"vision_model."`）在 `6dcb5bb` 上游已通过 #1984 删除整个 `unused_tensors[]` 过滤逻辑，hunk 自动作废，不再需要 patch。若将来 patch 再出现 `model_loader.cpp` 冲突，优先确认上游是否已删除该过滤。
@@ -173,7 +181,7 @@ Transformer 块中唯一的调用点：在 self-attn 之后、cross-attn 之前�
 ### 4.13 `src/stable-diffusion.cpp`
 C API 兜底与注册：
 - `sd_hires_upscaler` 枚举追加 `"Latent (bislerp)"`
-- `sd_img_gen_params_init` 补默认值 `area_conds` / `area_cond_count` / `noise_scale`
+- `sd_img_gen_params_init` 补默认值 `area_conds` / `area_cond_count` / `noise_scale` / `fresca = {false, 1.0f, 1.25f, 20}`
 - 新增导出 `sd_clip_vision_encode()`（CLIPVisionEncode 节点）与 `sd_set_prediction()`（ModelSamplingDiscrete）
 
 ### 4.14 `src/model/vae/vae.hpp` — 不移除 ⚠️ 未修改
@@ -194,6 +202,32 @@ FreeU 参数从右上到左下垂直传递，**不污染**水平方向的现有�
 LoRA、ControlNet、HiRes Fix、**VAE tiling（含 tile cap）**、sampler/scheduler 枚举、PhotoMaker、ESRGAN upscale、TAESD——全部通过 `sd_ctx_params_t` / `sd_img_gen_params_t` 的标准字段控制，不需要 patch。
 
 其中 VAE tile cap（防止 OOM）在 `sdcpp_adapter.cpp` 的 `SDPipeline::generate()` 中实现：tile 尺寸上限 128 个 latent 像素（对应 scale=8 的 VAE 输出 1024px）。
+
+### 4.17 `src/runtime/freq_filter.h` + `src/runtime/guidance.{h,cpp}`（FreSca：模型无关的频域 guidance 增强）
+ComfyUI `comfy_extras/nodes_fresca.py` 的 1:1 复刻。与 FreeU（U-Net 结构级，靠 skip/backbone）不同，FreSca 挂在 **CFG 层**——对 `cond − uncond` 的 guidance 差值做频带缩放后再乘 `guidance_scale`——与网络结构无关，因此 **UNet 与 DiT（z_image/Qwen/Flux）均生效**。
+
+- **`freq_filter.h`（新增，纯头文件、零依赖）**：
+  `out = scale_high·x + (scale_low − scale_high)·Re{IDFT(box·DFT(x))}`，
+  box = 频率 `k ∈ [−T, T−1]`（对应 ComfyUI fftshift 后窗口 `[cc−f_c, cc+f_c)`，`T = min(freq_cutoff, n//2)`）。
+  掩码可分离（rect⊗rect）→ 拆成沿 W/H 各一次 1D 圆卷积（复 Dirichlet 核
+  `g[j] = (1/N)·Σ_{k=−T}^{T−1} e^{i2πkj/N}`，取实部组合），**免 FFT**，
+  `O(planes·(H·W² + W·H²))`，实张量上直接 host 计算。
+- **`guidance.{h,cpp}`**：新增 `FreqEnhanceParams {enabled, scale_low, scale_high, freq_cutoff}`；
+  `ClassifierFreeGuidance` 持有该参数（构造函数第三参，默认关），`forward()` 先算
+  `delta = pred_cond − pred_uncond`，启用时对 `delta` 做 `freq_band_filter` 再乘
+  `guidance_scale`——与 ComfyUI pre_cfg 语义一致（`uncond + g·F(delta)`）。
+  APG 路径未接（APG 默认关，需 `extra_sample_args` 显式开启）。
+- **配线**：`sd_fresca_params_t`（§4.1）→ `image.cpp`（§4.5）→ `StableDiffusionGGML::fresca_*`（§4.3）→ CFG 构造（§4.4-D）。只在 plain CFG 生效，hires 第二遍同样生效。
+- **暴露面**（与 rescale_cfg 同款 setter，**不改** 5 个 `sd_pipeline_generate*` 签名）：
+  - adapter：`SDPipeline::set_fresca()` + C 导出 `sd_pipeline_set_fresca`
+  - `img_hires`：`--fresca` / `--fresca-low` / `--fresca-high` / `--fresca-cutoff`
+  - comfycli：`FreSca` 节点（`nodes.static.py`，`MODEL` 进 `MODEL` 出；`sd_backend.static.py` extern + wrapper）
+  - 脚本：`backup.sh` / `backup_qwen.sh` 默认 `FRESCA=1` 开启（`FRESCA=0` 关，附 `FRESCA_LOW/HIGH/CUTOFF`）
+- **测试**：`tests/test_fresca.cpp` vs 朴素 DFT 参考（严格复刻 nodes_fresca.py 的 fftshift/mask/.real），
+  覆盖奇偶尺寸、cutoff 超长截断、空盒（cutoff=0）、`low==high`、轴长 1，8 例 max_abs ≤ 1.2e-7。
+- **默认**：sd.cpp API / `FreSca` 节点默认关（不传即关闭，零回归）；`backup.sh` / `backup_qwen.sh`
+  默认 `FRESCA=1` 开启。开启时默认参数 `1.0/1.25/20`（= ComfyUI 节点默认）。注意：极低步数
+  （如 6 步 raw SDXL base）+ 强高频增益会有振铃/条纹，属参数敏感（20 步即正常），不是实现偏差。
 
 ---
 
@@ -272,7 +306,7 @@ patch 修改了 **3 个文件**，需要逐一检查每个文件在新版中的�
 
 | patch 涉及的文件 | 对比命令 | 需要检查什么 |
 |-----------------|----------|-------------|
-| `include/stable-diffusion.h` | `git diff <old>..<new> -- include/stable-diffusion.h` | `sd_img_gen_params_t` 末尾是否新增字段；FreeU/SAG/DynCFG/IPAdapter 是否已被官方合入 |
+| `include/stable-diffusion.h` | `git diff <old>..<new> -- include/stable-diffusion.h` | `sd_img_gen_params_t` 末尾是否新增字段；FreeU/SAG/DynCFG/FreSca/IPAdapter 是否已被官方合入 |
 | `src/model/diffusion/unet.hpp` | `git diff <old>..<new> -- src/model/diffusion/unet.hpp` | `UnetModelBlock::forward()` 签名/基类；`UNetModelRunner` 位置 |
 | `src/pipeline/diffusion_engine.h` | `git diff <old>..<new> -- src/pipeline/diffusion_engine.h` | `StableDiffusionGGML` class fields 位置（在 `is_using_edm_v_parameterization` 之后） |
 | `src/pipeline/diffusion_engine.cpp` | `git diff <old>..<new> -- src/pipeline/diffusion_engine.cpp` | `run_condition` lambda 的 `diffusion_params.extra` 链末尾；采样循环 `guided.pred` post-compute；include 块 |
@@ -379,8 +413,8 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
   GGML_BACKEND_PATH=/opt/sd/build-dl/bin/libggml-cuda.so \
   ./comfycli-bin test_sdxl.json --output-dir /tmp/regression
 
-# 2. FreeU/SAG 必须验证「开/关输出不同」，否则说明参数没生效
-#    （固定 seed 跑同一 workflow，仅切换 freeu/sag，比较 md5）
+# 2. FreeU/SAG/FreSca 必须验证「开/关输出不同」，否则说明参数没生效
+#    （固定 seed 跑同一 workflow，仅切换 freeu/sag/fresca，比较 md5）
 #    历史教训：nodes.parse_sampler_opts 曾硬编码 freeu=0，导致 KSampler 的 FreeU 静默失效
 ```
 
@@ -390,11 +424,11 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 # build_sd_dl.sh 会自动更新 lock；手工核对：
 cd /opt/sd && git rev-parse --short HEAD > /opt/static_comfyui/cpp/sd/SD_VERSION.lock
 
-# 重新生成 patch（排除 submodule 指针；gligen.hpp / ggml_fourier.h 是 untracked，需先 intent-to-add）
+# 重新生成 patch（排除 submodule 指针；gligen.hpp / ggml_fourier.h / freq_filter.h 是 untracked，需先 intent-to-add）
 cd /opt/sd
-git add -N src/model/diffusion/gligen.hpp src/core/ggml_fourier.h
+git add -N src/model/diffusion/gligen.hpp src/core/ggml_fourier.h src/runtime/freq_filter.h
 git diff -- include src > /opt/static_comfyui/cpp/sd/patches/sdcpp-freeu-sag-v2.patch
-git reset src/model/diffusion/gligen.hpp src/core/ggml_fourier.h   # 保持 untracked，避免误提交
+git reset src/model/diffusion/gligen.hpp src/core/ggml_fourier.h src/runtime/freq_filter.h   # 保持 untracked，避免误提交
 # 生成后在干净 worktree 验证：git worktree add /tmp/x 6dcb5bb --detach && cd /tmp/x &&
 #   git apply --check /opt/static_comfyui/cpp/sd/patches/sdcpp-freeu-sag-v2.patch
 ```
@@ -455,8 +489,9 @@ git reset src/model/diffusion/gligen.hpp src/core/ggml_fourier.h   # 保持 untr
 | HiRes Fix | ✅ | ❌ | ✅ `sd_pipeline_generate_hires` | ✅ `HiResFix` |
 | LoRA | ✅ | ❌ | ✅ `sd_pipeline_load_lora` | ✅ `LORALoader` |
 | VAE Tiling | ✅ (tile cap 在 adapter) | ❌ | ✅ `vae_tiling` / `vae_tile_size` 参数 | ✅ `HiResFix` / `KSampler` |
-| FreeU | ❌ | ✅ | ✅ `freeu` / `freeu_b1` / `freeu_b2` 参数 | ✅ `HiResFix` / `KSampler` |
+| FreeU | ❌ | ✅ | ✅ `freeu` / `freeu_b1` / `freeu_b2` 参数 | ✅ `HiResFix` / `KSampler`（仅 UNet） |
 | SAG | ❌ | ✅ | ✅ `sag` / `sag_scale` 参数 | ✅ `HiResFix` / `KSampler` |
+| FreSca（频域 guidance） | ❌ | ✅ | ✅ `sd_pipeline_set_fresca` setter | ✅ `FreSca` 节点（UNet/DiT 均生效） |
 | ADetailer | ✅ | ❌ | ✅ `sd_pipeline_generate_adetailer` | ✅ `ADetailer` 节点 |
 | ControlNet | ✅ | ❌ | ✅ `sd_pipeline_load_control_net` + `control_strength` | ✅ `ControlNetLoader` / `ControlNetApply(-Advanced)` |
 | IPAdapter | ✅（原生） | ✅（clip vision 前缀回归修复，§4.7） | ✅ `sd_pipeline_set_ipadapter(_enabled)` | ✅ `IPAdapterModelLoader` / `CLIPVisionLoader` / `IPAdapterApply` |

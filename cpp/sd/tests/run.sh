@@ -5,6 +5,8 @@
 #                  （复刻 ComfyUI Fourier_filter，覆盖 f32/f16、奇偶尺寸）
 #   test_freeu_v2  ggml_ext_freeu_v2_backbone vs torch 参考
 #                  （hidden_mean 归一化 + 前半通道动态缩放，覆盖 batch=2、f16）
+#   test_fresca    freq_band_filter（FreSca 频域 guidance）vs 朴素 DFT 参考
+#                  （复刻 ComfyUI nodes_fresca.py，覆盖奇偶尺寸/截断/空盒）
 # 依赖：/opt/sd/build-dl（先跑 cpp/sd/build_sd_dl.sh）
 # 用法：./run.sh
 # =============================================================================
@@ -23,7 +25,7 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 fail=0
-for t in test_fourier test_freeu_v2; do
+for t in test_fourier test_freeu_v2 test_fresca; do
     g++ "${CXXFLAGS[@]}" "${TEST_DIR}/${t}.cpp" -o "${WORK}/${t}" "${LDFLAGS[@]}"
     "${WORK}/${t}" || fail=1
 done

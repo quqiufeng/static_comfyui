@@ -67,6 +67,12 @@ public:
     int video_cfg_mode     = 0;
     float video_cfg_min    = 1.0f;
 
+    // FreSca frequency guidance enhancement
+    bool fresca_enabled      = false;
+    float fresca_scale_low   = 1.0f;
+    float fresca_scale_high  = 1.25f;
+    int fresca_freq_cutoff   = 20;
+
     // Sigma range override (ModelSamplingContinuousEDM/V)
     bool sigma_range_enabled = false;
     float sigma_range_min    = 0.0f;
@@ -438,6 +444,14 @@ void SDPipeline::set_video_cfg(bool enabled, int mode, float min_cfg) {
     impl_->video_cfg_min     = min_cfg;
 }
 
+void SDPipeline::set_fresca(bool enabled, float scale_low, float scale_high, int freq_cutoff) {
+    if (!impl_) return;
+    impl_->fresca_enabled     = enabled;
+    impl_->fresca_scale_low   = scale_low;
+    impl_->fresca_scale_high  = scale_high;
+    impl_->fresca_freq_cutoff = freq_cutoff;
+}
+
 void SDPipeline::set_sigma_range(bool enabled, float sigma_min, float sigma_max) {
     if (!impl_) return;
     impl_->sigma_range_enabled = enabled;
@@ -661,6 +675,14 @@ std::vector<Image> SDPipeline::generate(const ImageGenerationParams& params) {
     if (impl_->video_cfg_enabled) {
         img_params.video_cfg.mode    = impl_->video_cfg_mode;
         img_params.video_cfg.min_cfg = impl_->video_cfg_min;
+    }
+
+    // FreSca
+    img_params.fresca.enabled = impl_->fresca_enabled;
+    if (impl_->fresca_enabled) {
+        img_params.fresca.scale_low   = impl_->fresca_scale_low;
+        img_params.fresca.scale_high  = impl_->fresca_scale_high;
+        img_params.fresca.freq_cutoff = impl_->fresca_freq_cutoff;
     }
 
     // Sigma range override
@@ -1413,6 +1435,12 @@ int sd_pipeline_set_rescale_cfg(sd_pipeline_t pipeline, int enabled, float multi
 int sd_pipeline_set_video_cfg(sd_pipeline_t pipeline, int enabled, int mode, float min_cfg) {
     if (!pipeline) return -1;
     static_cast<sd::SDPipeline*>(pipeline)->set_video_cfg(enabled != 0, mode, min_cfg);
+    return 0;
+}
+
+int sd_pipeline_set_fresca(sd_pipeline_t pipeline, int enabled, float scale_low, float scale_high, int freq_cutoff) {
+    if (!pipeline) return -1;
+    static_cast<sd::SDPipeline*>(pipeline)->set_fresca(enabled != 0, scale_low, scale_high, freq_cutoff);
     return 0;
 }
 

@@ -68,6 +68,10 @@ static void print_usage(const char* argv0) {
     std::fprintf(stderr, "  --freeu-b2 <float>        FreeU backbone2 scale (default: 1.4)\n");
     std::fprintf(stderr, "  --sag                     Enable Self-Attention Guidance\n");
     std::fprintf(stderr, "  --sag-scale <float>       SAG blend scale (default: 1.0)\n");
+    std::fprintf(stderr, "  --fresca                  Enable FreSca frequency guidance (model-agnostic)\n");
+    std::fprintf(stderr, "  --fresca-low <float>      FreSca low-frequency scale (default: 1.0)\n");
+    std::fprintf(stderr, "  --fresca-high <float>     FreSca high-frequency scale (default: 1.25)\n");
+    std::fprintf(stderr, "  --fresca-cutoff <int>     FreSca frequency cutoff (default: 20)\n");
     std::fprintf(stderr, "  --diffusion-fa            Enable diffusion flash attention\n");
     std::fprintf(stderr, "  --cache-mode <name>       Sample-step cache: easycache (DiT) | disabled (default)\n");
     std::fprintf(stderr, "  --cache-threshold <float> EasyCache reuse threshold (default 0.2; lower = more skips)\n");
@@ -172,6 +176,11 @@ int main(int argc, char** argv) {
 
     bool sag = false;
     float sag_scale = 1.0f;
+
+    bool fresca = false;
+    float fresca_low = 1.0f;
+    float fresca_high = 1.25f;
+    int fresca_cutoff = 20;
 
     bool diffusion_fa = false;
     bool quality_prefix = true;
@@ -279,6 +288,14 @@ int main(int argc, char** argv) {
             sag = true;
         } else if (std::strcmp(argv[i], "--sag-scale") == 0 && i + 1 < argc) {
             sag_scale = std::atof(argv[++i]);
+        } else if (std::strcmp(argv[i], "--fresca") == 0) {
+            fresca = true;
+        } else if (std::strcmp(argv[i], "--fresca-low") == 0 && i + 1 < argc) {
+            fresca_low = std::atof(argv[++i]);
+        } else if (std::strcmp(argv[i], "--fresca-high") == 0 && i + 1 < argc) {
+            fresca_high = std::atof(argv[++i]);
+        } else if (std::strcmp(argv[i], "--fresca-cutoff") == 0 && i + 1 < argc) {
+            fresca_cutoff = std::atoi(argv[++i]);
         } else if (std::strcmp(argv[i], "--diffusion-fa") == 0) {
             diffusion_fa = true;
         } else if (std::strcmp(argv[i], "--cache-mode") == 0 && i + 1 < argc) {
@@ -423,6 +440,7 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "Model loaded (%.2fs)\n", now_sec() - t_load0);
 
     pipeline.set_hires_upscaler(hires_upscaler, hires_upscaler_model);
+    pipeline.set_fresca(fresca, fresca_low, fresca_high, fresca_cutoff);
 
     sd::ImageGenerationParams gen_params;
     gen_params.prompt          = prompt;

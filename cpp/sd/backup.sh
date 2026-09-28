@@ -46,6 +46,7 @@
 #   3. 综合 = E1 与 MIN 参数取中点(即本配方), 二者互补: E1 纹理真, MIN 柔自然。
 #   4. FreeU 只对 UNet 生效（现已 1:1 对齐 ComfyUI FreeU_V2，见 cpp/sd/design.md）；
 #      z_image/Qwen 是 DiT 依旧空操作，故本脚本不再传 --freeu。
+#      DiT 的频域细节增强走 FreSca（模型无关, nodes_fresca.py 同款），脚本默认开启，FRESCA=0 关闭。
 #   5. 蒸馏 turbo 模型步数收益低: 40→80 反而更差; z_image 走 discrete, Qwen 必须 flux。
 #   6. 质量前缀(QUALITY_PREFIX)在宽画幅+close-up 会诱导主体复制, 需 SKIP_QUALITY_PREFIX=1。
 #   7. ESRGAN(model) hires 内部路径高分辨率必崩(weight preparation), 只用 latent 路径。
@@ -221,6 +222,12 @@ CACHE_MODE="${CACHE_MODE:-easycache}"
 CACHE_THRESHOLD="${CACHE_THRESHOLD:-0.2}"
 CACHE_START="${CACHE_START:-0.15}"
 CACHE_END="${CACHE_END:-0.95}"
+# FreSca 频域 guidance 增强（ComfyUI nodes_fresca.py 同款, DiT/UNet 模型无关）: 默认开启, FRESCA=0 关闭
+# 低频 ×FRESCA_LOW / 高频 ×FRESCA_HIGH, latent 频率盒半宽 FRESCA_CUTOFF（默认 1.0/1.25/20）
+FRESCA="${FRESCA:-1}"
+FRESCA_LOW="${FRESCA_LOW:-1.0}"
+FRESCA_HIGH="${FRESCA_HIGH:-1.25}"
+FRESCA_CUTOFF="${FRESCA_CUTOFF:-20}"
 
 echo -e "${BLUE}[INFO] $([ "$WIDTH" -ge 1920 ] && echo "Ultra HD" || echo "HD") Mode: steps=$STEPS, cfg=$CFG_SCALE, sampler=$SAMPLING_METHOD${NC}"
 
@@ -325,6 +332,9 @@ if [ "$CACHE_MODE" != "disabled" ]; then
     echo -e "Cache: ${CYAN}$CACHE_MODE${NC} threshold=$CACHE_THRESHOLD range=[$CACHE_START,$CACHE_END]"
 fi
 echo -e "Post: clarity=$CLARITY sharpen=$SHARPEN smart=$SMART_SHARPEN edge=$EDGE_SHARPEN | prefix: $([ "$NO_QUALITY_PREFIX" = "1" ] && echo off || echo on)"
+if [ "$FRESCA" -eq 1 ]; then
+    echo "FreSca: low=$FRESCA_LOW high=$FRESCA_HIGH cutoff=$FRESCA_CUTOFF"
+fi
 if [ "$UPSCALE_FLAG" -eq 1 ]; then
     UPSCALED_W=$((WIDTH * 2))
     UPSCALED_H=$((HEIGHT * 2))
@@ -388,6 +398,10 @@ SD_CMD=("$SD_CLI"
 # 彻底关 img_hires 内置质量前缀（默认关, 维持既有配方）
 if [ "$NO_QUALITY_PREFIX" = "1" ]; then
     SD_CMD+=(--no-quality-prefix)
+fi
+
+if [ "$FRESCA" -eq 1 ]; then
+    SD_CMD+=(--fresca --fresca-low "$FRESCA_LOW" --fresca-high "$FRESCA_HIGH" --fresca-cutoff "$FRESCA_CUTOFF")
 fi
 
 if [ "$HIRES_UPSCALER" = "model" ]; then
