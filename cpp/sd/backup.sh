@@ -71,11 +71,12 @@
 #   128×128 |  6.7 GB    | ~15.6 GB  | 20G+ (RTX 3080 Ti / 4060 Ti)
 #   256×256 | 18.7 GB    | ~20.7 GB  | 24G  (RTX 4090 / 3090)
 #   512×512 | 23.4 GB    | ~27.0 GB  | 32G+ (A100, 不推荐)
-#   默认 128x128, 设 VAE_TILE_SIZE=256x256 切高性能模式
+#   默认 128x128。注意: adapter (sdcpp_adapter.cpp:599) 把 tile 硬夹到 128 latent
+#   （= scale-8 VAE 输出 1024px），传 256 会被静默降回 128，"高性能模式"当前不生效。
 #
 # 【示例】
 #   20G 卡:  ./backup.sh "portrait" ~/out.png 2560 1440
-#   24G 卡:  VAE_TILE_SIZE=256x256 ./backup.sh "portrait" ~/out.png 2560 1440
+#   24G 卡:  VAE_TILE_SIZE=256x256 ./backup.sh "portrait" ~/out.png 2560 1440   # 现被夹到 128
 #   LoRA:    ./backup.sh "prompt" ~/out.png 2560 1440 --lora style.safetensors:0.8
 #
 # 【采样加速（2026-09-24 实测，默认已开）】
@@ -201,8 +202,18 @@ HIRES_STRENGTH="${HIRES_STRENGTH:-0.25}"
 # HiRes 上采样方式: latent-bicubic（默认，MIN 柔化档）| latent-bislerp（保细节）| model（ESRGAN 高分辨率会崩）
 HIRES_UPSCALER="${HIRES_UPSCALER:-latent-bicubic}"
 # 后处理（甜点见头部注释）: MIN 默认 clarity 0（需纹理可调 0.15）; edge-sharpen 必须 0（白底轮廓锐化出白边）
+# sharpen / smart-sharpen 默认非 0（USM 0.3 + Sobel 加权 0.5），但 sharpen-threshold 无 CLI 入口
+# → 阈值恒 0 = 全图锐化（平坦皮肤/纯色背景也加强）。想"真·无锐化痕迹"设 SHARPEN=0 SMART_SHARPEN=0。
 CLARITY="${CLARITY:-0.0}"
 EDGE_SHARPEN="${EDGE_SHARPEN:-0.0}"
+SHARPEN="${SHARPEN:-0.3}"
+SHARPEN_RADIUS="${SHARPEN_RADIUS:-1}"
+SMART_SHARPEN="${SMART_SHARPEN:-0.5}"
+SMART_SHARPEN_RADIUS="${SMART_SHARPEN_RADIUS:-2}"
+# 彻底关质量前缀（img_hires 内置那份）。默认 0 = 维持现状（前缀仍生效）
+NO_QUALITY_PREFIX="${NO_QUALITY_PREFIX:-0}"
+# CPU 线程数（LLM 文本编码等）, 默认跟 img_hires 的 8
+THREADS="${THREADS:-8}"
 # 采样步缓存（EasyCache/DiT 步跳过）: 默认开启; CACHE_MODE=disabled 关闭
 # CACHE_THRESHOLD 越低跳步越多（默认 0.2; 0.15 更激进, 0.3 更保守）
 CACHE_MODE="${CACHE_MODE:-easycache}"
@@ -213,8 +224,9 @@ CACHE_END="${CACHE_END:-0.95}"
 echo -e "${BLUE}[INFO] $([ "$WIDTH" -ge 1920 ] && echo "Ultra HD" || echo "HD") Mode: steps=$STEPS, cfg=$CFG_SCALE, sampler=$SAMPLING_METHOD${NC}"
 
 QUALITY_PREFIX="masterpiece, best quality, ultra-detailed, sharp focus, 8k uhd, photorealistic, highly detailed, crisp, clear, centered composition, professional portrait, medium shot, realistic skin texture, soft lighting"
-# 默认关闭自动前缀（E1xMIN 复现配方无前缀）; 宽画幅 + close-up 加前缀会诱导主体复制
-# 需要时 SKIP_QUALITY_PREFIX=0 打开
+# 脚本层前缀默认关（SKIP_QUALITY_PREFIX=1）；但 img_hires 仍会自加同一份（quality_prefix 默认开，
+# 见 img_hires.cpp:361），所以最终 prompt 里前缀其实只有一份、且是 C++ 那份。
+# 宽画幅 + close-up 加前缀会诱导主体复制 → 彻底对照需 NO_QUALITY_PREFIX=1（脚本据此传 --no-quality-prefix）。
 if [ "${SKIP_QUALITY_PREFIX:-1}" != "1" ] && [[ "$PROMPT" != *"masterpiece"* ]]; then
     PROMPT="$QUALITY_PREFIX, $PROMPT"
 fi
@@ -311,6 +323,7 @@ echo -e "Sampler: ${CYAN}$SAMPLING_METHOD${NC} + ${CYAN}$SCHEDULER${NC}"
 if [ "$CACHE_MODE" != "disabled" ]; then
     echo -e "Cache: ${CYAN}$CACHE_MODE${NC} threshold=$CACHE_THRESHOLD range=[$CACHE_START,$CACHE_END]"
 fi
+echo -e "Post: clarity=$CLARITY sharpen=$SHARPEN smart=$SMART_SHARPEN edge=$EDGE_SHARPEN | prefix: $([ "$NO_QUALITY_PREFIX" = "1" ] && echo off || echo on)"
 if [ "$UPSCALE_FLAG" -eq 1 ]; then
     UPSCALED_W=$((WIDTH * 2))
     UPSCALED_H=$((HEIGHT * 2))
@@ -348,13 +361,14 @@ SD_CMD=("$SD_CLI"
   --freeu-b1 1.3
   --freeu-b2 1.4
   --clarity "$CLARITY"
-  --sharpen 0.3
-  --sharpen-radius 1
-  --smart-sharpen 0.5
-  --smart-sharpen-radius 2
+  --sharpen "$SHARPEN"
+  --sharpen-radius "$SHARPEN_RADIUS"
+  --smart-sharpen "$SMART_SHARPEN"
+  --smart-sharpen-radius "$SMART_SHARPEN_RADIUS"
   --edge-sharpen "$EDGE_SHARPEN"
   --edge-sharpen-radius 2
   --edge-sharpen-threshold 0.3
+  -t "$THREADS"
   -W "$LOW_W" -H "$LOW_H"
   --steps "$STEPS"
   --hires
@@ -371,6 +385,11 @@ SD_CMD=("$SD_CLI"
   "$PROMPT"
   "$OUTPUT_PATH"
 )
+
+# 彻底关 img_hires 内置质量前缀（默认关, 维持既有配方）
+if [ "$NO_QUALITY_PREFIX" = "1" ]; then
+    SD_CMD+=(--no-quality-prefix)
+fi
 
 if [ "$HIRES_UPSCALER" = "model" ]; then
     check_file "$UPSCALE_MODEL"
