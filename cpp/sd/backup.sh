@@ -10,14 +10,16 @@
 #
 # 【默认配方（2026-09-27 更新）】
 #   默认已切到「MIN 全低配」人像档（Q5 模型 / seed 时间戳随机 / 皮肤词负面已固化）:
-#   CFG=2.0  Steps=16→30  HiRes strength=0.25  upscaler=latent-bicubic
+#   CFG=2.0  Steps=20→40  HiRes strength=0.25  upscaler=latent-bicubic
 #   clarity=0.0  edge-sharpen=0.0  Sampler=euler  Scheduler=discrete
-#   效果: 皮肤白净柔和、无锐化痕迹（胜出图 ~/scan_MIN_q5_20260927_171626.png）。
+#   效果: 皮肤白净柔和、无锐化痕迹（原胜出图 ~/scan_MIN_q5_20260927_171626.png, 16→30 步）。
+#   步数（2026-09-28 定稿）: 16→30 提到甜点 20→40, 细节更足（出图
+#     ~/sweet_2560_20260928_174619.png、~/sweet_1440_20260928_175058.png）。
 #   分辨率（2026-09-28 定稿）: 默认 2560x1440（参考图 ~/min_default_green_2560_20260927_181523.png）;
 #     无参 ./backup.sh 即出同款; 竖版 3:4 传 1440 1920。
 #   默认提示词（2026-09-27 更新）: 白底 → 浅草绿纯色背景
 #     （solid soft light green / sage green / clean seamless plain background, no props）。
-#   注: 该档低于下方「甜点范围」下限, 属刻意柔化取向; 想要毛孔纹理可回
+#   注: cfg 2.0 仍低于下方「甜点范围」下限 3.0, 属刻意柔化取向; 想要毛孔纹理可回
 #       E1xMIN 中点档（CFG=3.0/20→40/0.4/latent-bislerp/clarity0.15,
 #       2026-09-23 扫描, 图 zimage_p_E1xMIN.png）。
 #   质量前缀: 带 img_hires 内置前缀（同本脚本文本, 单份）。
@@ -31,7 +33,7 @@
 #   base steps    20        (16~25)
 #   hires steps   40        (30~50)
 #     原理: 二次采样细节量。蒸馏 turbo 不吃步数, 40→80 被否(更慢更差);
-#           16→30 可用但细节不足, 甜点 20→40。
+#           16→30 可用但细节不足, 甜点 20→40（0928 起已设为默认）。
 #   strength      0.4       (0.35~0.5)
 #     原理: HiRes 二次改写幅度。0.25 皮肤无纹理(磨皮假感); 0.75 跑构图出噪点。
 #   upscaler      bislerp   (latent-bislerp)
@@ -69,7 +71,7 @@
 #     复现: CFG_SCALE=2.0 STEPS=16 HIRES_STEPS=30 HIRES_STRENGTH=0.25 \
 #           HIRES_UPSCALER=latent-bicubic CLARITY=0 EDGE_SHARPEN=0 SEED=25630 \
 #           cpp/sd/backup.sh "<默认肖像提示词>" ~/out.png 2560 1440
-#   注: 下方默认值已按最终选定更新为 MIN 档; 想要纹理可显式回 E1xMIN 中点档。
+#   注: 下方默认值已按最终选定更新为 MIN 档（步数 0928 起另提至甜点 20→40）; 想要纹理可显式回 E1xMIN 中点档。
 #
 # 【VAE Tiling 峰值参考】
 #   Tile    | VAE Buffer | 峰值估算  | 适用显卡
@@ -201,8 +203,8 @@ echo -e "${GREEN}✓ All checks passed${NC}"
 SAMPLING_METHOD="${SAMPLING_METHOD:-euler}"
 SCHEDULER="${SCHEDULER:-discrete}"
 CFG_SCALE="${CFG_SCALE:-2.0}"
-STEPS="${STEPS:-16}"
-HIRES_STEPS="${HIRES_STEPS:-30}"
+STEPS="${STEPS:-20}"
+HIRES_STEPS="${HIRES_STEPS:-40}"
 HIRES_STRENGTH="${HIRES_STRENGTH:-0.25}"
 # HiRes 上采样方式: latent-bicubic（默认，MIN 柔化档）| latent-bislerp（保细节）| model（ESRGAN 高分辨率会崩）
 HIRES_UPSCALER="${HIRES_UPSCALER:-latent-bicubic}"
