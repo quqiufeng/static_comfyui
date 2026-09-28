@@ -9,7 +9,7 @@
 # 环境变量: PRESET, CFG, STEPS, HIRES_STEPS, HIRES_STRENGTH, HIRES_UPSCALER,
 #           SAMPLING_METHOD, SCHEDULER, VAE_TILE_SIZE, VAE_TILE_OVERLAP,
 #           OFFLOAD, POSTPROC, CLARITY, SHARPEN, SMART_SHARPEN, EDGE_SHARPEN,
-#           FREEU, REALISM, MODEL_DIR
+#           REALISM, MODEL_DIR
 # =============================================================================
 #
 # 【v2 相对旧版 backup_qwen.sh 的修正】（旧脚本已删除，保留变更说明）
@@ -30,7 +30,7 @@
 #   - 后处理默认开启：clarity 0.3 / sharpen 0.3 / smart 0.5 / edge 2.0
 #   - 正向自动追加写实词（REALISM=0 关）；负向加 anime/cartoon/illustration/
 #     3d render 等反动漫词 + 皮肤油腻词
-#   - FreeU 默认关（Qwen 为 DiT，FreeU 空操作；FREEU=1 可开）
+#   - 不传 --freeu（Qwen 是 DiT，ComfyUI FreeU 只挂 UNet → 恒为空操作）
 #   - POSTPROC=0 关闭后处理；OFFLOAD=0 默认权重上卡（显存紧张时 =1 留 RAM）
 #   - NO_QUALITY_PREFIX=1 默认（关 img_hires 内置 masterpiece 前缀, 避免动漫化）
 #
@@ -289,7 +289,6 @@ CLARITY="${CLARITY:-0.15}"
 SHARPEN="${SHARPEN:-0.3}"
 SMART_SHARPEN="${SMART_SHARPEN:-0.5}"
 EDGE_SHARPEN="${EDGE_SHARPEN:-0.0}"
-FREEU="${FREEU:-0}"
 REALISM="${REALISM:-1}"
 # 默认关质量前缀（masterpiece/best quality 会把 Qwen 拉向动漫）；NO_QUALITY_PREFIX=0 可开
 NO_QUALITY_PREFIX="${NO_QUALITY_PREFIX:-1}"
@@ -358,7 +357,6 @@ echo -e "HiRes Upscaler: ${CYAN}$HIRES_UPSCALER${NC}"
 echo -e "Sampler: ${CYAN}$SAMPLING_METHOD${NC} + ${CYAN}$SCHEDULER${NC}"
 echo -e "VAE Tiling: ${VAE_TILE_SIZE} overlap ${VAE_TILE_OVERLAP}"
 echo -e "Post-processing: ${POSTPROC} (0=off), realism=${REALISM}"
-echo -e "FreeU: ${FREEU} (DiT 空操作)"
 echo -e "Offload to CPU: ${OFFLOAD}"
 if [ "$CACHE_MODE" != "disabled" ]; then
     echo -e "Cache: ${CYAN}$CACHE_MODE${NC} threshold=$CACHE_THRESHOLD range=[$CACHE_START,$CACHE_END]"
@@ -406,9 +404,6 @@ if [ "$POSTPROC" -eq 1 ]; then
              --edge-sharpen-threshold 0.3)
 else
     SD_CMD+=(--clarity 0 --sharpen 0 --smart-sharpen 0 --edge-sharpen 0)
-fi
-if [ "$FREEU" -eq 1 ]; then
-    SD_CMD+=(--freeu --freeu-b1 1.3 --freeu-b2 1.4)
 fi
 if [ "$OFFLOAD" -eq 1 ]; then
   SD_CMD+=(--offload-to-cpu)

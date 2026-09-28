@@ -286,9 +286,6 @@ SD_CMD=("$SD_CLI"
   --vae-tiling
   --vae-tile-size "$VAE_TILE_INT"
   --vae-tile-overlap "$VAE_TILE_OVERLAP"
-  --freeu
-  --freeu-b1 1.3
-  --freeu-b2 1.4
   --clarity "$CLARITY"
   --sharpen 0.3
   --sharpen-radius 1

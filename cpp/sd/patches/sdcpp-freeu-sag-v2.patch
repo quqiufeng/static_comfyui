@@ -100,6 +100,197 @@ index 9173240..bc943cb 100644
  enum sd_cancel_mode_t {
      // Stop the current generation as soon as possible.
      SD_CANCEL_ALL,
+diff --git a/src/core/ggml_fourier.h b/src/core/ggml_fourier.h
+new file mode 100644
+index 0000000..0a5fdff
+--- /dev/null
++++ b/src/core/ggml_fourier.h
+@@ -0,0 +1,185 @@
++#ifndef __SD_CORE_GGML_FOURIER_H__
++#define __SD_CORE_GGML_FOURIER_H__
++
++// =============================================================================
++// FreeU（本项目 patch）— 对应 ComfyUI comfy_extras/nodes_freelunch.py::FreeU_V2
++//
++// 两部分：
++//   1. skip 连接的频域调制 ggml_ext_fourier_filter_lowfreq（见下方注释）；
++//   2. backbone 前半通道的动态缩放 ggml_ext_freeu_v2_backbone。
++//
++// Fourier_filter 1:1 复刻 ComfyUI：
++//     x_freq = fftshift(fftn(x.float(), dim=(-2, -1)))
++//     mask[..., crow-t : crow+t, ccol-t : ccol+t] = scale
++//     return ifftn(ifftshift(x_freq * mask)).real.to(x.dtype)
++// ComfyUI 只用 threshold=1，即把 fftshift 后频谱中心 2x2（频率 {-1,0} x {-1,0}）
++// 的 4 个 DFT bin 乘以 scale，其余 bin 不变 —— 用来压掉 skip 连接里的低频。
++//
++// 这里不做 FFT，改用完全等价的闭式投影（threshold=1 时中心块只有 4 个 bin）：
++//     x' = x + (scale - 1) * Re{P(x)}
++//     Re{P} = 1/(H*W) * [ S00 + (Cθ·cosθ + Sθ·sinθ) + (Cφ·cosφ + Sφ·sinφ)
++//                        + (Cθφ·cos(θ+φ) + Sθφ·sin(θ+φ)) ]
++// 其中 θ = 2πi/H、φ = 2πj/W，C/S 是 x 在对应频率上的 DFT 系数实部/虚部。
++// 复杂度 O(H*W*C)：几个 elementwise + 两次规约，不需要 ggml 引入 FFT 算子。
++//
++// 张量布局按 ggml 约定 ne0=W（torch 最后一维）、ne1=H、ne2=C、ne3=B，
++// 与 torch (B, C, H, W) 的 dim(-2,-1) = (H, W) 一一对应。
++// =============================================================================
++
++#include "ggml.h"
++
++// ggml_permute 的参数是「源轴 i 放到哪个目标轴」：permute(a, d0, d1, d2, d3) => ne[d_i] = a->ne[i]。
++
++// 空间求和（ne0 x ne1），保留通道：[W,H,C,N] -> [1,1,C,N]
++inline static ggml_tensor* ggml_ext_sum_spatial(ggml_context* ctx,
++                                                ggml_tensor*  x) {
++    ggml_tensor* p = ggml_cont(ctx, x);                                // [W,H,C,N]
++    p              = ggml_cont(ctx, ggml_permute(ctx, p, 1, 0, 2, 3)); // [H,W,C,N]
++    p              = ggml_sum_rows(ctx, p);                            // [1,W,C,N]
++    p              = ggml_cont(ctx, ggml_permute(ctx, p, 1, 0, 2, 3)); // [W,1,C,N]
++    return ggml_sum_rows(ctx, p);                                      // [1,1,C,N]
++}
++
++// 对通道维（ne2）取均值：[W,H,C,N] -> [W,H,1,N]（对应 torch h.mean(1)，h 为 [B,C,H,W]）
++inline static ggml_tensor* ggml_ext_mean_channels(ggml_context* ctx, ggml_tensor* x) {
++    ggml_tensor* p = ggml_cont(ctx, x);                                // [W,H,C,N]
++    p              = ggml_cont(ctx, ggml_permute(ctx, p, 1, 2, 0, 3)); // [C,W,H,N]
++    p              = ggml_sum_rows(ctx, p);                            // [1,W,H,N]
++    p              = ggml_cont(ctx, ggml_permute(ctx, p, 2, 0, 1, 3)); // [W,H,1,N]
++    return ggml_scale(ctx, p, 1.0f / (float)x->ne[2]);
++}
++
++// 空间维（ne0 x ne1）全局最大，逐 (C,N)：[W,H,C,N] -> [1,1,C,N]
++inline static ggml_tensor* ggml_ext_global_max_spatial(ggml_context* ctx, ggml_tensor* x) {
++    x            = ggml_cont(ctx, x);
++    const int k0 = (int)x->ne[0];
++    const int k1 = (int)x->ne[1];
++    return ggml_pool_2d(ctx, x, GGML_OP_POOL_MAX, k0, k1, k0, k1, 0.0f, 0.0f);
++}
++
++// FreeU_V2 的 backbone 缩放：h[:, :ch//2] *= (b-1) * hidden_mean + 1，
++// hidden_mean 是通道均值在空间维按 min/max 归一化到 [0,1] 的结果
++// （1:1 复刻 comfy_extras/nodes_freelunch.py::FreeU_V2 的 output_block_patch 前半段）。
++// 返回拼接后的同形张量；b == 1 或通道数 < 2 时原样返回。
++inline static ggml_tensor* ggml_ext_freeu_v2_backbone(ggml_context* ctx,
++                                                      ggml_tensor*  h,
++                                                      float         b) {
++    const int64_t ch     = h->ne[2];
++    const int64_t half_c = ch / 2;
++    if (b == 1.0f || half_c <= 0) {
++        return h;
++    }
++    // 均值/池化在 f32 下算，最后转回原 dtype
++    const enum ggml_type src_type = h->type;
++    ggml_tensor*         hf       = (src_type == GGML_TYPE_F32) ? h : ggml_cast(ctx, h, GGML_TYPE_F32);
++    hf                             = ggml_cont(ctx, hf);
++
++    // hidden_mean 在空间维归一化：(hm - min) / (max - min)，随后 factor = (b-1)*hidden_mean + 1
++    // 改写成 [span + (b-1)*(hm - min)] / span，避免引入常量张量（span == 0 时与 torch 一样得 NaN）
++    ggml_tensor* hm    = ggml_ext_mean_channels(ctx, hf);                 // [W,H,1,N]
++    ggml_tensor* hmax  = ggml_ext_global_max_spatial(ctx, hm);            // [1,1,1,N]
++    ggml_tensor* hmin  = ggml_scale(ctx,
++                                    ggml_ext_global_max_spatial(ctx, ggml_scale(ctx, hm, -1.0f)),
++                                    -1.0f);                                // [1,1,1,N]
++    ggml_tensor* span  = ggml_sub(ctx, hmax, hmin);                       // [1,1,1,N]
++    ggml_tensor* scale = ggml_div(ctx,
++                                  ggml_add(ctx,
++                                           ggml_scale(ctx, ggml_sub(ctx, hm, hmin), b - 1.0f),
++                                           span),
++                                  span);                                   // [W,H,1,N]
++
++    ggml_tensor* h_first  = ggml_cont(ctx, ggml_view_4d(ctx,
++                                                        hf,
++                                                        hf->ne[0],
++                                                        hf->ne[1],
++                                                        half_c,
++                                                        hf->ne[3],
++                                                        hf->nb[1],
++                                                        hf->nb[2],
++                                                        hf->nb[3],
++                                                        0));
++    h_first               = ggml_mul(ctx, h_first, scale);
++    ggml_tensor* h_second = ggml_cont(ctx, ggml_view_4d(ctx,
++                                                        hf,
++                                                        hf->ne[0],
++                                                        hf->ne[1],
++                                                        ch - half_c,
++                                                        hf->ne[3],
++                                                        hf->nb[1],
++                                                        hf->nb[2],
++                                                        hf->nb[3],
++                                                        half_c * hf->nb[2]));
++    ggml_tensor* out      = ggml_concat(ctx, h_first, h_second, 2);
++    if (src_type != GGML_TYPE_F32) {
++        out = ggml_cast(ctx, out, src_type);
++    }
++    return out;
++}
++
++// FreeU 的 skip 频域调制，见文件头注释。
++// threshold 只支持 1（ComfyUI FreeU/FreeU_V2 唯一取值）；scale == 1 时原样返回。
++inline static ggml_tensor* ggml_ext_fourier_filter_lowfreq(ggml_context* ctx,
++                                                           ggml_tensor*  x,
++                                                           float         scale,
++                                                           int           threshold = 1) {
++    GGML_ASSERT(threshold == 1 && "ggml_ext_fourier_filter_lowfreq: only threshold=1 is supported");
++    if (scale == 1.0f) {
++        return x;
++    }
++
++    const enum ggml_type src_type = x->type;
++    ggml_tensor*         xf       = (src_type == GGML_TYPE_F32) ? x : ggml_cast(ctx, x, GGML_TYPE_F32);
++    xf                             = ggml_cont(ctx, xf);
++
++    const int64_t W      = xf->ne[0];
++    const int64_t H      = xf->ne[1];
++    const float   kTwoPi = 6.28318530717959f;
++
++    // 频率基：theta = 2πi/H（ne1 方向）、phi = 2πj/W（ne0 方向）
++    ggml_tensor* theta = ggml_arange(ctx, 0.0f, (float)H, 1.0f);
++    theta              = ggml_reshape_4d(ctx, ggml_scale(ctx, theta, kTwoPi / (float)H), 1, H, 1, 1);
++    ggml_tensor* phi   = ggml_arange(ctx, 0.0f, (float)W, 1.0f);
++    phi                = ggml_reshape_4d(ctx, ggml_scale(ctx, phi, kTwoPi / (float)W), W, 1, 1, 1);
++
++    ggml_tensor* cos_i = ggml_cos(ctx, theta);  // [1,H,1,1]
++    ggml_tensor* sin_i = ggml_sin(ctx, theta);  // [1,H,1,1]
++    ggml_tensor* cos_j = ggml_cos(ctx, phi);    // [W,1,1,1]
++    ggml_tensor* sin_j = ggml_sin(ctx, phi);    // [W,1,1,1]
++
++    // 全尺寸基（结果要落回 [W,H,C,N]，用它们当 mul 的左操作数即可免去后续 repeat）
++    ggml_tensor* ci = ggml_repeat(ctx, cos_i, xf);
++    ggml_tensor* si = ggml_repeat(ctx, sin_i, xf);
++    ggml_tensor* cj = ggml_repeat(ctx, cos_j, xf);
++    ggml_tensor* sj = ggml_repeat(ctx, sin_j, xf);
++
++    // cos(θ+φ) = cosθcosφ - sinθsinφ ； sin(θ+φ) = sinθcosφ + cosθsinφ
++    ggml_tensor* ct = ggml_sub(ctx, ggml_mul(ctx, ci, cj), ggml_mul(ctx, si, sj));
++    ggml_tensor* st = ggml_add(ctx, ggml_mul(ctx, si, cj), ggml_mul(ctx, ci, sj));
++
++    // 各频率上的 DFT 系数（逐通道标量）[1,1,C,N]
++    ggml_tensor* w00 = ggml_ext_sum_spatial(ctx, xf);
++    ggml_tensor* wci = ggml_ext_sum_spatial(ctx, ggml_mul(ctx, xf, cos_i));
++    ggml_tensor* wsi = ggml_ext_sum_spatial(ctx, ggml_mul(ctx, xf, sin_i));
++    ggml_tensor* wcj = ggml_ext_sum_spatial(ctx, ggml_mul(ctx, xf, cos_j));
++    ggml_tensor* wsj = ggml_ext_sum_spatial(ctx, ggml_mul(ctx, xf, sin_j));
++    ggml_tensor* wct = ggml_ext_sum_spatial(ctx, ggml_mul(ctx, xf, ct));
++    ggml_tensor* wst = ggml_ext_sum_spatial(ctx, ggml_mul(ctx, xf, st));
++
++    // Re{P(x)}
++    ggml_tensor* p = ggml_add(ctx, ggml_repeat(ctx, w00, xf), ggml_mul(ctx, ci, wci));
++    p              = ggml_add(ctx, p, ggml_mul(ctx, si, wsi));
++    p              = ggml_add(ctx, p, ggml_mul(ctx, cj, wcj));
++    p              = ggml_add(ctx, p, ggml_mul(ctx, sj, wsj));
++    p              = ggml_add(ctx, p, ggml_mul(ctx, ct, wct));
++    p              = ggml_add(ctx, p, ggml_mul(ctx, st, wst));
++    p              = ggml_scale(ctx, p, 1.0f / (float)(W * H));
++
++    ggml_tensor* out = ggml_add(ctx, xf, ggml_scale(ctx, p, scale - 1.0f));
++
++    if (src_type != GGML_TYPE_F32) {
++        out = ggml_cast(ctx, out, src_type);
++    }
++    return out;
++}
++
++#endif  // __SD_CORE_GGML_FOURIER_H__
 diff --git a/src/core/ggml_runner.h b/src/core/ggml_runner.h
 index 9084db1..c08b10a 100644
 --- a/src/core/ggml_runner.h
@@ -302,10 +493,15 @@ index fb4e362..9050665 100644
  
  struct SkipLayerDiffusionExtra {
 diff --git a/src/model/diffusion/unet.hpp b/src/model/diffusion/unet.hpp
-index 1c8ddf4..344d52c 100644
+index 1c8ddf4..80e4c39 100644
 --- a/src/model/diffusion/unet.hpp
 +++ b/src/model/diffusion/unet.hpp
-@@ -8,6 +8,7 @@
+@@ -4,10 +4,12 @@
+ #include <algorithm>
+ #include <vector>
+ #include "core/ggml_tensor_utils.h"
++#include "core/ggml_fourier.h"
+ 
  #include "model.h"
  #include "model/common/block.hpp"
  #include "model/diffusion/animatediff.hpp"
@@ -313,7 +509,7 @@ index 1c8ddf4..344d52c 100644
  #include "model/diffusion/model.hpp"
  
  /*==================================================== UnetModel =====================================================*/
-@@ -302,6 +303,20 @@ class UnetModelBlock : public GGMLBlock {
+@@ -302,6 +304,20 @@ class UnetModelBlock : public GGMLBlock {
  public:
      UNetConfig config;
  
@@ -334,7 +530,7 @@ index 1c8ddf4..344d52c 100644
      explicit UnetModelBlock(UNetConfig config = {})
          : config(config) {
          const SDVersion version           = this->config.version;
-@@ -513,15 +528,21 @@ public:
+@@ -513,15 +529,21 @@ public:
                                           ggml_tensor* x,
                                           ggml_tensor* context,
                                           int timesteps) {
@@ -349,16 +545,16 @@ index 1c8ddf4..344d52c 100644
  
 -            return block->forward(ctx, x, context);
 +            out = block->forward(ctx, x, context);
-         }
++        }
 +        // GLIGEN：transformer_index 随每个 SpatialTransformer 递增（本项目 patch）
 +        if (ctx->gligen_applier != nullptr) {
 +            ctx->gligen_index++;
-+        }
+         }
 +        return out;
      }
  
      ggml_tensor* forward(GGMLRunnerContext* ctx,
-@@ -539,6 +560,9 @@ public:
+@@ -539,6 +561,9 @@ public:
          // c_concat: [N, in_channels, h, w] or [1, in_channels, h, w]
          // y: [N, adm_in_channels] or [1, adm_in_channels]
          // return: [N, out_channels, h, w]
@@ -368,14 +564,15 @@ index 1c8ddf4..344d52c 100644
          const SDVersion version           = config.version;
          const int model_channels          = config.model_channels;
          const int num_res_blocks          = config.num_res_blocks;
-@@ -700,6 +724,46 @@ public:
+@@ -700,6 +725,28 @@ public:
                      control_offset--;
                  }
  
 +                if (freeu_enabled) {
-+                    // FreeU: runtime activation scaling on backbone and skip connections
-+                    // Matches ComfyUI nodes_freelunch.py: scales first half of backbone channels by b,
-+                    // scales skip connection by s (simplified spatial scaling instead of Fourier filter).
++                    // FreeU_V2（本项目 patch）— 1:1 复刻 comfy_extras/nodes_freelunch.py::FreeU_V2：
++                    //   backbone 前半通道 ×((b-1)*hidden_mean+1)，hidden_mean 是通道均值在空间维按
++                    //   min/max 归一化到 [0,1] 的结果；skip 连接走 Fourier_filter(hsp, threshold=1,
++                    //   scale=s)。按 model_channels*4 / *2 两档取 b1/s1、b2/s2；实现见 core/ggml_fourier.h。
 +                    float b = 1.0f;
 +                    float s = 1.0f;
 +                    int64_t ch = h->ne[2];
@@ -387,35 +584,16 @@ index 1c8ddf4..344d52c 100644
 +                        b = freeu_b2;
 +                        s = freeu_s2;
 +                    }
-+                    if (b != 1.0f && ch > 1) {
-+                        int64_t half_c = ch / 2;
-+                        if (half_c > 0) {
-+                            if (!ggml_is_contiguous(h)) {
-+                                h = ggml_cont(ctx->ggml_ctx, h);
-+                            }
-+                            auto h_first_view = ggml_view_4d(ctx->ggml_ctx, h,
-+                                                               h->ne[0], h->ne[1], half_c, h->ne[3],
-+                                                               h->nb[1], h->nb[2], h->nb[3], 0);
-+                            auto h_first      = ggml_cont(ctx->ggml_ctx, h_first_view);
-+                            h_first           = ggml_scale(ctx->ggml_ctx, h_first, b);
-+
-+                            auto h_second_view = ggml_view_4d(ctx->ggml_ctx, h,
-+                                                              h->ne[0], h->ne[1], ch - half_c, h->ne[3],
-+                                                              h->nb[1], h->nb[2], h->nb[3], half_c * h->nb[2]);
-+                            auto h_second      = ggml_cont(ctx->ggml_ctx, h_second_view);
-+
-+                            h = ggml_concat(ctx->ggml_ctx, h_first, h_second, 2);
-+                        }
-+                    }
++                    h = ggml_ext_freeu_v2_backbone(ctx->ggml_ctx, h, b);
 +                    if (s != 1.0f) {
-+                        h_skip = ggml_ext_scale(ctx->ggml_ctx, h_skip, s);
++                        h_skip = ggml_ext_fourier_filter_lowfreq(ctx->ggml_ctx, h_skip, s);
 +                    }
 +                }
 +
                  h = ggml_concat(ctx->ggml_ctx, h, h_skip, 2);
  
                  std::string name = "output_blocks." + std::to_string(output_block_idx) + ".0";
-@@ -750,6 +814,24 @@ struct UNetModelRunner : public DiffusionModelRunner {
+@@ -750,6 +797,24 @@ struct UNetModelRunner : public DiffusionModelRunner {
      UNetConfig config;
      UnetModelBlock unet;
  
@@ -440,7 +618,7 @@ index 1c8ddf4..344d52c 100644
      UNetModelRunner(ggml_backend_t backend,
                      const String2TensorStorage& tensor_storage_map,
                      const std::string prefix,
-@@ -800,6 +882,11 @@ struct UNetModelRunner : public DiffusionModelRunner {
+@@ -800,6 +865,11 @@ struct UNetModelRunner : public DiffusionModelRunner {
          auto runner_ctx       = get_context();
          runner_ctx.ip_context = ip_context;
          runner_ctx.ip_scale   = ip_scale;
@@ -452,7 +630,7 @@ index 1c8ddf4..344d52c 100644
  
          ggml_tensor* out = unet.forward(&runner_ctx,
                                          x,
-@@ -845,6 +932,13 @@ struct UNetModelRunner : public DiffusionModelRunner {
+@@ -845,6 +915,13 @@ struct UNetModelRunner : public DiffusionModelRunner {
          GGML_ASSERT(diffusion_params.timesteps != nullptr);
          const auto* extra = diffusion_extra_as<UNetDiffusionExtra>(diffusion_params);
          static const std::vector<sd::Tensor<float>> empty_controls;

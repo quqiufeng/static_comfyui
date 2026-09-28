@@ -14,7 +14,7 @@
 ├── build_sd.sh                     # 编译 sd.cpp（静态链接，旧，已废弃）
 ├── build_sd_dl.sh                  # 编译 sd.cpp（动态后端，当前默认）
 ├── patches/
-│   └── sdcpp-freeu-sag-v2.patch    # 唯一 patch：FreeU/SAG/DynCFG/RescaleCFG/video CFG/sigma 区间/区域条件/GLIGEN 等（11 文件 1183 行）
+│   └── sdcpp-freeu-sag-v2.patch    # 唯一 patch：FreeU/SAG/DynCFG/RescaleCFG/video CFG/sigma 区间/区域条件/GLIGEN 等（12 文件 1361 行）
 ├── src/
 │   ├── adapters/
 │   │   ├── sdcpp_adapter.h         # C++ SDPipeline 类 + C API 声明
@@ -25,11 +25,15 @@
 ├── examples/
 │   ├── sdxl_txt2img.cpp            # 独立测试程序
 │   └── img_hires.cpp               # HiRes Fix 测试程序
+├── tests/
+│   ├── run.sh                      # FreeU 数学自测（编译 + 运行，依赖 build_sd_dl.sh）
+│   ├── test_fourier.cpp            # Fourier_filter: ggml 闭式投影 vs 朴素 DFT
+│   └── test_freeu_v2.cpp           # FreeU_V2 backbone vs torch 参考（含 batch=2）
 └── scripts/
     └── build.sh                    # 编译适配层（被根目录 build.sh 调用）
 ```
 
-其他目录（`api/`, `native/sampler/`, `native/attention/`, `tests/`, `scripts/upgrade_sdcpp.sh` 等）是蓝图，尚未创建。
+其他目录（`api/`, `native/sampler/`, `native/attention/`, `scripts/upgrade_sdcpp.sh` 等）是蓝图，尚未创建。
 
 ---
 
@@ -59,12 +63,13 @@ StaticPy extern fn ← sdcpp_adapter.h (C API) ← sdcpp_adapter.cpp ← stable-
 
 ## 4. 我们对 sd.cpp 的改动
 
-所有改动集中在 **一个 patch 文件** `patches/sdcpp-freeu-sag-v2.patch`（1183 行），修改 sd.cpp 的 **11 个文件**（含新增 `gligen.hpp`）。当前基准 commit：**`6dcb5bb`**（见 `SD_VERSION.lock`）。
+所有改动集中在 **一个 patch 文件** `patches/sdcpp-freeu-sag-v2.patch`（1361 行），修改 sd.cpp 的 **12 个文件**（含新增 `gligen.hpp`、`ggml_fourier.h`）。当前基准 commit：**`6dcb5bb`**（见 `SD_VERSION.lock`）。
 
 | patch 中的文件 | 新增行数 | § |
 |---|---|---|
 | `include/stable-diffusion.h` | 63 | 4.1 |
-| `src/model/diffusion/unet.hpp` | 96 | 4.2 |
+| `src/core/ggml_fourier.h`（新增） | 185 | 4.2 |
+| `src/model/diffusion/unet.hpp` | 81 | 4.2 |
 | `src/pipeline/diffusion_engine.h` | 53 | 4.3 |
 | `src/pipeline/diffusion_engine.cpp` | 213 | 4.4 / 4.7 |
 | `src/pipeline/image.cpp` | 192 | 4.5 |
@@ -86,14 +91,23 @@ StaticPy extern fn ← sdcpp_adapter.h (C API) ← sdcpp_adapter.cpp ← stable-
 
 > IP-Adapter 现用 **sd.cpp 原生**（`sd_ctx_params_t.ip_adapter_path` + `sd_img_gen_params_t.ip_adapter_image/ip_adapter_strength`），不再自定义结构体/注入。
 
-### 4.2 `src/model/diffusion/unet.hpp`
+### 4.2 `src/model/diffusion/unet.hpp` + `src/core/ggml_fourier.h`
 两处独立改动：
 
 **A. `UnetModelBlock` 类**（FreeU 核心计算）
 - 新增 5 个字段 + `set_freeu()` 方法
-- 在 `forward()` 的 output block 中加入 FreeU 通道缩放逻辑：
-  - 匹配 ComfyUI `nodes_freelunch.py`：backbone 前半通道 × `b`，skip connection × `s`
+- 在 `forward()` 的 output block 中加入 FreeU，**1:1 复刻 ComfyUI `FreeU_V2`**
+  （`comfy_extras/nodes_freelunch.py`）：
+  - **backbone**：`h[:, :ch//2] *= (b-1)*hidden_mean + 1`，其中 `hidden_mean` = 通道均值
+    在空间维按 min/max 归一化到 `[0,1]`（`ggml_ext_freeu_v2_backbone`）
+  - **skip**：`Fourier_filter(hsp, threshold=1, scale=s)`——频谱 fftshift 后中心 2×2 bin
+    乘 `s`（`ggml_ext_fourier_filter_lowfreq`）。不引 FFT，用等价闭式投影
+    `x' = x + (s-1)·Re{P(x)}`，O(H·W·C)（见 `ggml_fourier.h` 头注释）
   - `channel == model_channels*4` → 用 `{b1,s1}`；`channel == model_channels*2` → 用 `{b2,s2}`
+  - **仅 UNet 生效**：`sd_version_is_unet()`（SD1/2/SDXL）才 `set_freeu_params`；z_image/Qwen/Flux/SD3
+    是 DiT，ComfyUI 同样只挂 UNet → 恒为空操作（`backup.sh` 等 DiT 脚本因此不传 `--freeu`）
+  - 数学自测：`tests/run.sh`（`test_fourier` ggml vs 朴素 DFT，f32/f16/奇偶尺寸；
+    `test_freeu_v2` vs torch 参考，含 batch=2）均 `ALL OK`
   - **关键设计**：`UnetModelBlock` 只存储 FreeU 参数，不关心来源
 
 **B. `UNetModelRunner` 类**（FreeU 参数传递层）
@@ -376,11 +390,13 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 # build_sd_dl.sh 会自动更新 lock；手工核对：
 cd /opt/sd && git rev-parse --short HEAD > /opt/static_comfyui/cpp/sd/SD_VERSION.lock
 
-# 重新生成 patch（排除 submodule 指针；gligen.hpp 是 untracked，需先 intent-to-add）
+# 重新生成 patch（排除 submodule 指针；gligen.hpp / ggml_fourier.h 是 untracked，需先 intent-to-add）
 cd /opt/sd
-git add -N src/model/diffusion/gligen.hpp
+git add -N src/model/diffusion/gligen.hpp src/core/ggml_fourier.h
 git diff -- include src > /opt/static_comfyui/cpp/sd/patches/sdcpp-freeu-sag-v2.patch
-git reset src/model/diffusion/gligen.hpp   # 保持 untracked，避免误提交
+git reset src/model/diffusion/gligen.hpp src/core/ggml_fourier.h   # 保持 untracked，避免误提交
+# 生成后在干净 worktree 验证：git worktree add /tmp/x 6dcb5bb --detach && cd /tmp/x &&
+#   git apply --check /opt/static_comfyui/cpp/sd/patches/sdcpp-freeu-sag-v2.patch
 ```
 
 > 更新 `design.md` §4（patch 目标文件/位置）与本文档的基准 commit。  

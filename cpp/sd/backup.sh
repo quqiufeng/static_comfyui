@@ -44,7 +44,8 @@
 #   2. MIN(全低配: 2.0/16→30/0.25/bicubic/clarity0/edge0) 好看但皮肤过腻 —
 #      真实皮肤纹理必须由 strength+clarity+bislerp+足量步数四项同时供给。
 #   3. 综合 = E1 与 MIN 参数取中点(即本配方), 二者互补: E1 纹理真, MIN 柔自然。
-#   4. FreeU 对 z_image/Qwen(DiT) 是空操作(diffusion_engine 仅 UNet 生效), 加了无害但无效。
+#   4. FreeU 只对 UNet 生效（现已 1:1 对齐 ComfyUI FreeU_V2，见 cpp/sd/design.md）；
+#      z_image/Qwen 是 DiT 依旧空操作，故本脚本不再传 --freeu。
 #   5. 蒸馏 turbo 模型步数收益低: 40→80 反而更差; z_image 走 discrete, Qwen 必须 flux。
 #   6. 质量前缀(QUALITY_PREFIX)在宽画幅+close-up 会诱导主体复制, 需 SKIP_QUALITY_PREFIX=1。
 #   7. ESRGAN(model) hires 内部路径高分辨率必崩(weight preparation), 只用 latent 路径。
@@ -345,6 +346,7 @@ if ! [[ "$VAE_TILE_INT" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
+# FreeU 只对 UNet 生效，z_image 是 DiT → 不传 --freeu（传了也是空操作）
 SD_CMD=("$SD_CLI"
   --diffusion-model "$DIFFUSION_MODEL"
   --vae "$VAE_MODEL"
@@ -357,9 +359,6 @@ SD_CMD=("$SD_CLI"
   --vae-tiling
   --vae-tile-size "$VAE_TILE_INT"
   --vae-tile-overlap "$VAE_TILE_OVERLAP"
-  --freeu
-  --freeu-b1 1.3
-  --freeu-b2 1.4
   --clarity "$CLARITY"
   --sharpen "$SHARPEN"
   --sharpen-radius "$SHARPEN_RADIUS"
