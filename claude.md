@@ -1,5 +1,13 @@
 # SDXL Pipeline 参考实现
 
+> **文档状态：历史对照记录（2026-07-07）。** 本文记录后端选型阶段的三套 SDXL 参考实现，
+> 用于验证「C++ 实现 ↔ Python 参考逐像素对齐」的思路，**不是当前链路**。
+>
+> - `cpp/stable-diffusion-cli_v1.cpp` **已删除**，其静态链接路线已废弃
+> - `img.sh` 依赖外部项目 `/opt/my-img/build/myimg-cli`，与本仓库无耦合
+> - 当前生产链路是 `comfycli-bin`（StaticPy 编排）与 `cpp/sd/img_hires` + `backup*.sh`（见 [`remote_server.md`](./remote_server.md) 路线 B）
+> - 现行 sd.cpp 架构说明见 [`cpp/sd/README.md`](./cpp/sd/README.md)
+
 ## sdxl_pipeline.py
 
 基于 ComfyUI 原生 `sample()` 的 SDXL txt2img 参考实现。

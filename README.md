@@ -5,7 +5,8 @@
 > **给 AI 阅读者：如何理解 StaticPy 语言**
 >
 > StaticPy 是面向 AI Agent 的 ML 编译语言，语法是 Python 子集 + FFI 扩展。
-> `staticpy/` 下的编译器核心是上游 `/opt/ReScheme` 的**原样拷贝**，项目侧只维护胶水。
+> `staticpy/` 下的编译器核心拷贝自上游 `/opt/ReScheme`：`static_prelude.scm` / `static_stdlib.scm` 原样，
+> `static_translate.py` 有 6 处本地补丁；项目侧另维护 FFI 胶水与构建脚本。
 >
 > 阅读以下文件即可掌握这门语言：
 >
@@ -21,7 +22,7 @@
 > 4. **项目胶水** — [`comfycli/comfycli_ffi.scm`](./comfycli/comfycli_ffi.scm)
 >    - `load-shared-object` 加载 `libsdcpp_adapter.so` + 上游缺失的内置
 >
-> **本地对翻译器的 3 处补丁**（`is None` / `break-continue` / 模块全局）见 [BUILD.md](./BUILD.md)。
+> **本地对翻译器 `static_translate.py` 的 6 处补丁**（`is None` / `break`-`continue` / 模块级变量 / 顶层语句 / `float` ABI / 类型收集递归）见 [BUILD.md](./BUILD.md)。
 > **学习路径：**翻译器定义"能写什么"→ 运行时定义"编译成什么"→ 胶水定义"能调什么"。
 
 ## 远景
@@ -417,7 +418,7 @@ comfycli/*.static.py  ──→  concat_src.py  ──→  _bundle.static.py
                          C launcher + objcopy + gcc  ──→  comfycli-bin (ELF)
 ```
 
-> `staticpy/` 下的编译器核心（`static_translate.py` / `static_prelude.scm` / `static_stdlib.scm`）是 `/opt/ReScheme` 上游的**原样拷贝**；comfycli 特有的 FFI 与缺失内置放在 `comfycli/comfycli_ffi.scm`，构建脚本为 `staticpy/static_build_comfycli.sh`。详见 [BUILD.md](./BUILD.md)。
+> `staticpy/` 下的编译器核心拷贝自 `/opt/ReScheme`：`static_prelude.scm` / `static_stdlib.scm` 原样，`static_translate.py` 有 6 处本地补丁；comfycli 特有的 FFI 与缺失内置放在 `comfycli/comfycli_ffi.scm`，构建脚本为 `staticpy/static_build_comfycli.sh`。详见 [BUILD.md](./BUILD.md)。
 >
 > `_bundle.static.py` 是 `concat_src.py` 生成的构建产物，**不入库**（`.gitignore`）；`build.sh` 会在缺失/过期时自动重建。
 
@@ -447,8 +448,9 @@ comfycli/*.static.py  ──→  concat_src.py  ──→  _bundle.static.py
 pip install torch torchvision ...  # ~2GB, 20+ 包
 apt-get install ...                 # 系统依赖
 
-# ComfyCLI — 只需要
-LD_LIBRARY_PATH=./lib ./comfycli-bin workflow.json  # 单文件
+# ComfyCLI — 只需要（或直接 bash run.sh workflow.json）
+LD_LIBRARY_PATH=./lib:. GGML_BACKEND_PATH=./libggml-cuda.so \
+  ./comfycli-bin workflow.json
 ```
 
 - 不需要 Python 解释器
@@ -599,14 +601,22 @@ ComfyUI 是 Python ML 生态中最复杂的纯推理项目之一：
 
 ### 文档
 
-| 文件 | 说明 |
-|------|------|
-| [设计文档](./design.md) | 技术架构、模块映射、翻译策略、工程顺序 |
-| [编译流水线](./BUILD.md) | 本地编译、增量编译、编译产物说明 |
-| [部署文档](./deploy.md) | 纯二进制部署、GLIBC 兼容方案、远程要求 |
-| [远程 GPU 部署](./remote_server.md) | Xiangongyun 实例；路线 A comfycli-bin workflow 一键 / 路线 B img_hires 出图管线手动 scp 清单 / 路线 C sd-cli 图片编辑（edit.sh） |
-| [ComfyUI 分析报告](./comfyui_analysis.md) | code search 语义索引结果 (797 文件, 25,586 chunks) |
-| [code search 使用文档](https://github.com/quqiufeng/my_db/blob/main/coding.md) | 语义搜索 + 向量查询工具用法 |
+| 文件 | 说明 | 状态 |
+|------|------|------|
+| [设计文档](./design.md) | 三层架构、职责边界、运行命令、code search | 现行 |
+| [编译流水线](./BUILD.md) | 本地编译、增量编译、编译产物、StaticPy 语言约束 | 现行 |
+| [部署文档](./deploy.md) | 纯二进制部署、GLIBC 兼容方案、三种打包规格 | 现行 |
+| [远程 GPU 部署](./remote_server.md) | Xiangongyun 实例；路线 A comfycli-bin workflow 一键 / 路线 B img_hires 出图管线手动 scp 清单 / 路线 C sd-cli 图片编辑（edit.sh） | 现行 |
+| [TODO](./TODO.md) | 缺模型待验证节点、HiResFix 质量标定、采样加速记录 | 现行 |
+| [ComfyUI 分析报告](./comfyui_analysis.md) | code search 语义索引结果 (797 文件, 25,586 chunks)，v0.35.0 行号级 | 现行（翻译依据） |
+| [sd.cpp 集成与升级指南](./cpp/sd/design.md) | **patch 逐文件说明 + sd.cpp 升级 playbook + 功能矩阵** | 现行（权威） |
+| [sd.cpp 架构报告](./cpp/sd/README.md) | sd.cpp 全量架构 + v2 适配层实现与验证 | 基准 `bb84971`，路径/行号偏旧 |
+| [IPAdapter 实现记录](./IPAdapter.md) | 改用 sd.cpp 原生方案的设计与验证 | 现行 |
+| [code search 使用文档](https://github.com/quqiufeng/my_db/blob/main/coding.md) | 语义搜索 + 向量查询工具用法 | 现行 |
+| [sd.cpp 调用路径 & API](./api.md) | 符号定位表 + 提取方案 | **历史**（重构前行号已失效，提取方案未实施） |
+| [SDXL 参考实现对照](./claude.md) | 三套 SDXL 参考实现的调用链与性能对比 | **历史**（v1 CLI 已删除） |
+| [sd.cpp 源码分析](./stable-diffusion.cpp_analysis.md) | 从零实现 SDXL 引擎阶段的原理分析 | **历史**（已被 cpp/sd/README.md 取代） |
+| [AI 开发指引](./AGENTS.md) | 项目目标、语言约束、开发流程、Phase 清单 | 现行 |
 
 ### 脚本
 
@@ -620,7 +630,7 @@ ComfyUI 是 Python ML 生态中最复杂的纯推理项目之一：
 
 | 目录 | 说明 |
 |------|------|
-| [`staticpy/`](./staticpy/) | StaticPy 工具链（上游 `/opt/ReScheme` 原样拷贝）+ `static_build_comfycli.sh` 构建胶水 |
+| [`staticpy/`](./staticpy/) | StaticPy 工具链（上游 `/opt/ReScheme` 拷贝，`translate.py` 有本地补丁）+ `static_build_comfycli.sh` 构建胶水 |
 | [`comfycli/`](./comfycli/) | StaticPy 编排层源码（节点、DAG、CLI）+ `comfycli_ffi.scm`（FFI/内置） |
 | [`cpp/sd/`](./cpp/sd/) | stable-diffusion.cpp 适配器 (`sdcpp_adapter.h/.cpp` + build 脚本) |
 

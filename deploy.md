@@ -10,19 +10,25 @@
 ┌────────────────────┐                     Python ❌
 │  comfycli-bin (ELF)│ ──scp──→           pip ❌
 │  comfycli-bin.so   │                     venv ❌
-│  libsdcpp_adapter. │                     CUDA toolkit ❌
-│    so              │                     ┌──────────────────────┐
-│  lib/              │                     │ comfycli-bin       │
-│    libc.so.6       │                     │ comfycli-bin.so    │
-│    libstdc++.so.6  │                     │ libsdcpp_adapter.so│
-│    libtorch.so     │                     │ lib/               │
-│    ...             │                     │ run.sh             │
-└────────────────────┘                     └──────────────────────┘
+│  libsdcpp_adapter. │                     CUDA toolkit ⚠️（可选，见下）
+│    so              │                     ┌──────────────────────────┐
+│  libstable-        │                     │ comfycli-bin           │
+│    diffusion.so    │                     │ comfycli-bin.so        │
+│  libggml.so /      │                     │ libsdcpp_adapter.so    │
+│    libggml-base.so │                     │ libstable-diffusion.so │
+│  libggml-cuda.so   │                     │ libggml*.so            │
+│  lib/              │                     │ libggml-cuda.so        │
+│    libc.so.6       │                     │ lib/                   │
+│    libstdc++.so.6  │                     │ run.sh                 │
+│    ...             │                     └──────────────────────────┘
+└────────────────────┘
 ```
 
 **远程只要求**：
-- NVIDIA 驱动（兼容本地 CUDA 版本）
+- NVIDIA 驱动（兼容本地 CUDA 版本）——若用 `WITH_CUDA_BACKEND=0` 打 CPU-only 包则不需要
 - GLIBC ≥ 目标版本（通过 `lib/` 兼容层解决）
+- CUDA Runtime（`libcudart.so.12` / `libcublas.so.12` / `libcublasLt.so.12`），通常 CUDA toolkit 自带；
+  远程没有时用 `WITH_CUDA=1 ./deploy.sh` 把它们一并打包
 
 ---
 
@@ -33,9 +39,14 @@
 ./build.sh
 
 # 产物
-#   comfycli-bin                   — 独立 ELF 二进制 (~4MB)
-#   comfycli-bin.so                — Chez AOT 编译产物 (~1.6MB)
-#   cpp/sd/build/libsdcpp_adapter.so — stable-diffusion.cpp 推理后端 (~185MB)
+#   comfycli-bin                    — 独立 ELF 二进制 (~4.2MB)
+#   comfycli-bin.so                 — Chez AOT 编译产物 (~2.0MB)
+#   cpp/sd/build/libsdcpp_adapter.so — 推理适配层 (~134KB，动态链接 sd.cpp)
+#
+# 推理后端的 .so 来自 sd.cpp 动态构建（SD_BACKEND_DL=1，默认）：
+#   /opt/sd/build-dl/bin/libstable-diffusion.so  (~39MB)
+#   /opt/sd/build-dl/bin/libggml.so + libggml-base.so + libggml-cpu.so  (~2MB)
+#   /opt/sd/build-dl/bin/libggml-cuda.so         (~129MB，CUDA 后端插件)
 ```
 
 编译详情见 [BUILD.md](./BUILD.md)。
@@ -58,7 +69,11 @@ GLIBC_TARGET=2.35 ./deploy.sh
 dist/
 ├── comfycli-bin                 # ELF 二进制
 ├── comfycli-bin.so              # Chez AOT 编译产物
-├── libsdcpp_adapter.so          # stable-diffusion.cpp 推理后端
+├── libsdcpp_adapter.so          # 推理适配层（C API 封装）
+├── libstable-diffusion.so       # sd.cpp 推理实现
+├── libggml.so / libggml-base.so / libggml-cpu*.so
+├── libggml-cuda.so              # CUDA 后端插件（WITH_CUDA_BACKEND=0 时不打包）
+├── libcudart.so.12 / libcublas*.so.12   # 仅 WITH_CUDA=1
 ├── lib/                          # GLIBC 兼容层 + 基础运行时
 │   ├── ld-linux-x86-64.so.2     # 动态链接器 (GLIBC 兼容)
 │   ├── libc.so.6                 # GLIBC 兼容
@@ -68,10 +83,20 @@ dist/
 │   ├── libdl.so.2                # GLIBC 兼容
 │   ├── libstdc++.so.6            # libstdc++ 兼容
 │   └── libgomp.so.1              # OpenMP 运行时
-├── run.sh                        # 启动脚本 (自动设 LD_LIBRARY_PATH)
+├── run.sh                        # 启动脚本 (设 LD_LIBRARY_PATH + GGML_BACKEND_PATH)
 ├── check_env.sh                  # 环境检查脚本
-└── comfycli_deploy[_glibc2.35].tar.gz  # 部署 tarball
+└── comfycli_deploy[_glibc2.35][_cuda].tar.gz  # 部署 tarball
 ```
+
+### 三种打包规格
+
+| 命令 | 体积 | 远程要求 |
+|------|------|---------|
+| `./deploy.sh` | ~57MB | 已装 CUDA 12.x Runtime（含 `libggml-cuda.so`） |
+| `WITH_CUDA=1 ./deploy.sh` | ~439MB | 仅需 NVIDIA 驱动（自带 cudart/cublas） |
+| `WITH_CUDA_BACKEND=0 ./deploy.sh` | ~35MB | 无需 GPU（CPU-only，不带 `libggml-cuda.so`） |
+
+详见 [remote_server.md](./remote_server.md) 的「打包体积」表。
 
 ### 打包内容说明
 
@@ -79,11 +104,14 @@ dist/
 |------|------|---------|
 | `comfycli-bin` | 本地编译 | 主程序（编排逻辑） |
 | `comfycli-bin.so` | 本地编译 | Chez AOT Scheme 机器码 |
-| `libsdcpp_adapter.so` | 本地编译 | stable-diffusion.cpp 推理 API |
+| `libsdcpp_adapter.so` | 本地编译 | sd.cpp 的 C API 适配层（`extern fn` 目标） |
+| `libstable-diffusion.so` / `libggml*.so` | `/opt/sd/build-dl/bin/` | 推理实现（sd.cpp + GGML） |
+| `libggml-cuda.so` | `/opt/sd/build-dl/bin/` | CUDA 后端插件，由 `GGML_BACKEND_PATH` 加载 |
+| `libcudart.so.12` / `libcublas*.so.12` | `$CUDA_DIR` | 仅 `WITH_CUDA=1` 时打包的 CUDA Runtime |
 | `libgomp.so.1` | `/lib/x86_64-linux-gnu/` | OpenMP 并行 |
 | `libc.so.6` / `libm.so.6` / `libpthread.so.0` / `librt.so.1` / `libdl.so.2` / `ld-linux-x86-64.so.2` | `/lib/x86_64-linux-gnu/` (或 `/opt/deb/<version>/`) | **GLIBC 兼容层**，远程系统 GLIBC 过旧时用这里打包的版本 |
 | `libstdc++.so.6` | `/lib/x86_64-linux-gnu/` (或 `/opt/deb/<version>/`) | C++ ABI 兼容 |
-| `run.sh` | deploy.sh 生成 | 自动设 `LD_LIBRARY_PATH=lib/` 后启动 |
+| `run.sh` | deploy.sh 生成 | 自动设 `LD_LIBRARY_PATH=lib/` + `GGML_BACKEND_PATH` 后启动 |
 | `check_env.sh` | deploy.sh 生成 | 远程环境诊断 |
 
 ---
@@ -122,9 +150,11 @@ NVIDIA 驱动: 550.120
 CUDA 可用: 是
 
 === 依赖 .so 检查 ===
-  ✓ libtorch.so
-  ✓ libc10.so
-  ✗ libcudart.so (未找到)
+  ✓ libsdcpp_adapter.so
+  ✓ libstable-diffusion.so
+  ✓ libggml.so.0
+  ✓ libggml-base.so.0
+  CUDA 后端: libggml-cuda.so
   LD_LIBRARY_PATH=/opt/comfycli/lib:/opt/comfycli
 ```
 
@@ -246,8 +276,9 @@ objdump -T comfycli-bin | grep -oP 'GLIBC_\S+' | sort -t. -k1,1n -k2,2n -k3,3n |
 | 显存 | 4GB | 8GB+ |
 
 远程需要：
-- NVIDIA 驱动（兼容本地 CUDA 版本）
-- CUDA Runtime（`libcudart.so.12`）和 cuBLAS（`libcublas.so.12` / `libcublasLt.so.12`），通常安装 CUDA toolkit 后自带
+- NVIDIA 驱动（兼容本地 CUDA 版本）——CPU-only 包（`WITH_CUDA_BACKEND=0`）不需要
+- CUDA Runtime（`libcudart.so.12`）和 cuBLAS（`libcublas.so.12` / `libcublasLt.so.12`），通常安装 CUDA toolkit 后自带；
+  远程没有则用 `WITH_CUDA=1 ./deploy.sh` 打进包里
 - GLIBC ≥ 目标版本（通过 `lib/` 兼容层解决）
 
 远程不需要：
@@ -296,17 +327,27 @@ ssh root@remote_host "ls -la /opt/comfycli/output/"
 
 ---
 
-## 体积优化
+## 体积优化（已完成 + 后续方向）
 
-本次已移除 `libtorch.so` 等 PyTorch 运行时依赖，部署包从 ~700MB 降到约 ~200MB。
+瘦身是分两步完成的：
+
+1. **移除 PyTorch 运行时**（~700MB → ~200MB）：后端从 libtorch 切到 stable-diffusion.cpp，
+   不再打包 `libtorch.so` / `libc10.so` 等；IPAdapter 也改用 sd.cpp 原生实现，去掉 ONNX Runtime（79MB → 57MB）。
+2. **拆分 CUDA 后端为动态插件**（~200MB → 57MB）：`SD_BACKEND_DL=1` 下
+   `libsdcpp_adapter.so` 只有 ~134KB，sd.cpp 拆成 `libstable-diffusion.so`（~39MB），
+   CUDA 单独成 `libggml-cuda.so`（~129MB）按需分发——于是有了 57MB / 35MB 两档。
 
 当前体积主要来源：
 
-- `libsdcpp_adapter.so` 静态嵌入了 sd.cpp + ggml + CUDA 后端 (~185MB)
-- GLIBC / libstdc++ 兼容层 (~20MB)
-- `comfycli-bin` / `comfycli-bin.so` (~6MB)
+| 内容 | 大小 |
+|------|------|
+| `libggml-cuda.so`（CUDA 后端插件） | ~129MB（CPU-only 包不含） |
+| `libstable-diffusion.so` | ~39MB |
+| GLIBC / libstdc++ 兼容层 | ~20MB |
+| `libggml*.so` + `libsdcpp_adapter.so` | ~2MB |
+| `comfycli-bin` / `comfycli-bin.so` | ~6MB |
 
 后续进一步瘦身方向：
-1. 对 `libsdcpp_adapter.so` 做动态依赖拆分（CUDA 后端单独 .so）
-2. 只打包目标架构需要的 CUDA 计算能力
-3. 可选：将 CUDA Runtime / cuBLAS 也打包到 `lib/`，实现真正的零外部依赖（但会显著增大包体积）
+1. 只打包目标架构需要的 CUDA 计算能力（`CMAKE_CUDA_ARCHITECTURES` 收窄）
+2. 用 `strip` + `--as-needed` 精简 `libstable-diffusion.so`
+3. 按需裁剪 sd.cpp 未使用的模型族代码（Wan/LTX/Z-Image 等）

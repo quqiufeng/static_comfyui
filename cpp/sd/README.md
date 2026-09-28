@@ -1,5 +1,10 @@
 # stable-diffusion.cpp 代码架构报告
 
+> **版本对应关系**：本报告基于 `/opt/sd` commit **`bb84971`**；**当前锁定基准是 `6dcb5bb`**（见 `SD_VERSION.lock`）。
+> 中间经历 `7f410a3` 大重构（#1956/#1957，生成管线移到 `src/pipeline/`，`src/model.cpp`、`src/unet.hpp`、
+> `src/clip.hpp`、`src/ggml_extend.hpp` 等旧路径已不存在），因此**下文的文件路径与行号按旧结构书写，
+> 查当前代码请以 `/opt/sd` 实际内容为准**。本项目的改动清单与升级流程见 [`design.md`](./design.md)。
+>
 > 本报告基于 `/opt/sd`（`stable-diffusion.cpp`）仓库，commit `bb84971`（`refactor: move model-specific args into model parsers (#1757)`），通过源码、`include/stable-diffusion.h` 公开 C API 以及代码缓存索引 `/opt/code_caches/sd_cache/` 进行整理。
 
 ---
@@ -11,7 +16,8 @@
 | 项目信息 | 说明 |
 |----------|------|
 | 仓库路径 | `/opt/sd` |
-| 当前 commit | `bb84971` / `bb84971129d2a094ab8051c6feed5406d3b4409d` |
+| 当前 commit（**报告基准**） | `bb84971` / `bb84971129d2a094ab8051c6feed5406d3b4409d` |
+| 仓库当前锁定 commit | `6dcb5bb`（见 `SD_VERSION.lock`） |
 | 主要语言 | C++17 / C11 |
 | 公开 API | `include/stable-diffusion.h`（纯 C） |
 | 依赖 | `ggml` 子模块、`thirdparty`（zip 等）、可选 `libwebp`/`libwebm` |
@@ -96,7 +102,7 @@
 | 扩散模型 | `src/model/diffusion/` | UNet、MMDiT、DiT、Flux、Wan、LTX 等 |
 | VAE | `src/model/vae/` | 解码潜在向量到图像 |
 | 采样器 | `src/runtime/denoiser.hpp` | sigma 调度、K-diffusion 采样 |
-| GGML 扩展 | `src/core/` | `ggml_extend.hpp`、backend 初始化、graph cut |
+| GGML 扩展 | `src/core/` | `ggml_extend.h/.cpp`、backend 初始化、graph cut |
 
 ---
 
@@ -364,7 +370,7 @@ const char* sd_version();
 
 ## 8. 后端与硬件加速
 
-`stable-diffusion.cpp` 通过 ggml 的 backend 系统支持异构计算。后端管理位于 `src/core/ggml_extend_backend.cpp` 和 `src/core/ggml_extend.hpp`。
+`stable-diffusion.cpp` 通过 ggml 的 backend 系统支持异构计算。后端管理位于 `src/core/ggml_extend_backend.cpp` 和 `src/core/ggml_extend.h`。
 
 ### 8.1 后端初始化
 
@@ -396,7 +402,7 @@ const char* sd_version();
 
 ### 8.4 Flash Attention
 
-`ggml_ext_attention_ext`（`src/core/ggml_extend.hpp:1315`）根据 `flash_attn` 标志与 mask 维度判断是否可调用 Flash Attention 内核；若不可行则回退到常规 reshape + matmul 实现。在 CUDA/Vulkan 等后端开启 `flash_attn` 可显著降低大上下文显存占用。
+`ggml_ext_attention_ext`（`src/core/ggml_extend.h`，行号见当前源码）根据 `flash_attn` 标志与 mask 维度判断是否可调用 Flash Attention 内核；若不可行则回退到常规 reshape + matmul 实现。在 CUDA/Vulkan 等后端开启 `flash_attn` 可显著降低大上下文显存占用。
 
 ### 8.5 本项目采样加速接线（EasyCache + CUDA graphs，2026-09）
 
@@ -799,29 +805,25 @@ cmake --build build -j$(nproc)
 
 ### 13.6 对 `/opt/sd` 的 patch 应用与维护
 
-为支持 FreeU/SAG，对 `/opt/sd` 做了最小修改。patch 文件作为本仓库的源文件维护，路径为：
+为支持 FreeU/SAG/DynCFG/RescaleCFG/区域条件/GLIGEN 等本项目需要、而 sd.cpp 原生没有的能力，
+对 `/opt/sd` 做了最小修改。patch 文件作为本仓库的源文件维护：
 
 ```
-cpp/sd/patches/sdcpp-freeu-sag-v2.patch
+cpp/sd/patches/sdcpp-freeu-sag-v2.patch    # 1183 行，11 个文件（含新增 gligen.hpp）
+cpp/sd/SD_VERSION.lock                     # 当前基准 commit（6dcb5bb）
 ```
 
-修改文件：
-
-| 文件 | 修改内容 |
-|------|----------|
-| `include/stable-diffusion.h` | 新增 `sd_freeu_params_t`、`sd_sag_params_t`、`sd_dynamic_cfg_params_t`；在 `sd_img_gen_params_t` 中加入对应字段 |
-| `src/model/diffusion/model.hpp` | 在 `DiffusionParams` 中加入 FreeU 参数 |
-| `src/model/diffusion/unet.hpp` | 在 `UnetModelBlock` 中加入 `set_freeu` 与输出块缩放逻辑 |
-| `src/stable-diffusion.cpp` | 在 `StableDiffusionGGML` 中加入 FreeU/SAG/Dynamic CFG 字段；在 `generate_image` 中读取参数；在采样循环中应用 SAG 与 Dynamic CFG |
-| `src/model/vae/vae.hpp` | 对 VAE decode tiling 的输出 tile 尺寸做上限保护（1024），避免消费级显卡 OOM |
+> ⚠️ **本节只给应用/重生成 patch 的操作步骤。逐文件改了什么、为什么改、升级时怎么检查，
+> 一律以 [`design.md`](./design.md) §4 / §5 为准**（本文早期版本记录的
+> `bb84971` 基准与 `src/model/diffusion/model.hpp` / `src/model/vae/vae.hpp` 文件表已过期）。
 
 #### 应用 patch（推荐方式）
 
-在新的 `/opt/sd` 仓库上应用 patch，需先切到 patch 对应的 commit（`bb84971`），再应用：
+在新的 `/opt/sd` 仓库上应用 patch，需先切到 `SD_VERSION.lock` 记录的 commit，再应用：
 
 ```bash
 cd /opt/sd
-# 确保子模块已初始化
+# 确保子模块已初始化（升级时必须 --force，否则 ggml 头文件与 sd.cpp 不匹配）
 git submodule update --init --recursive
 
 # 检查 patch 是否能干净应用
@@ -831,32 +833,42 @@ git apply --check /opt/static_comfyui/cpp/sd/patches/sdcpp-freeu-sag-v2.patch
 git apply /opt/static_comfyui/cpp/sd/patches/sdcpp-freeu-sag-v2.patch
 ```
 
-> 注意：patch 只包含 FreeU/SAG 相关代码改动，不包含 `examples/server/frontend` 子模块的 dirty 状态标记。应用时无需关心该子模块是否 clean。
+> 注意：patch 只包含源码改动，不包含 `examples/server/frontend` 子模块的 dirty 状态标记。
+> 应用时无需关心该子模块是否 clean。冲突时按 `design.md` §5.3 用 `--reject` 看 `.rej` 手动 rebase。
 
 #### 重新生成 patch
 
-如果在 `/opt/sd` 上继续修改了 FreeU/SAG 相关代码，并希望同步回 patch 文件，先清空 `cpp/sd/patches/` 目录，再从 `/opt/sd` 生成：
+如果在 `/opt/sd` 上继续修改了相关代码，并希望同步回 patch 文件，先清空 `cpp/sd/patches/` 目录，再从 `/opt/sd` 生成：
 
 ```bash
 # 1. 清空旧 patch
 rm -f /opt/static_comfyui/cpp/sd/patches/*
 
 # 2. 从 /opt/sd 当前改动生成新 patch（排除子模块 dirty 标记）
+#    gligen.hpp 是 untracked，需先 git add -N
 cd /opt/sd
+git add -N src/model/diffusion/gligen.hpp
 git diff -- . ':!examples/server/frontend' > /opt/static_comfyui/cpp/sd/patches/sdcpp-freeu-sag-v2.patch
 
-# 3. 检查生成结果
+# 3. 检查生成结果 + 锁版本
 wc -l /opt/static_comfyui/cpp/sd/patches/sdcpp-freeu-sag-v2.patch
+echo "$(git rev-parse --short HEAD)" > /opt/static_comfyui/cpp/sd/SD_VERSION.lock
 ```
 
 ### 13.7 已知问题与后续方向
 
-- 当前示例已支持 txt2img、HiRes Fix、VAE tiling、LoRA、FreeU、SAG；尚未接入 img2img、ControlNet、IP-Adapter 等 `/opt/sd` 已支持或需扩展的功能。
-- 适配层目前仅做最小封装，尚未实现 `design.md` 中规划的 `sd::Tensor` / `sd::nn::Module` / `sd::ops` 抽象。
-- 下一步可按 `design.md` Phase 2 推进：加入 img2img、ControlNet、扩展模块体系，并完善 C++/Python 双向绑定。
+> 本节写于 2026-07-08，其中的"尚未接入"项此后已陆续完成，**当前状态以根目录 [`README.md`](../../README.md) 的「对齐度说明」与 [`TODO.md`](../../TODO.md) 为准**。已补齐的有：img2img / inpainting / ControlNet / IP-Adapter（sd.cpp 原生）/ HiRes Fix 参数化 / ADetailer / batch 采样 / EasyCache + CUDA graphs 加速。
+
+仍未做（详见 `TODO.md`）：
+
+- 适配层仍是最小封装，未实现 `sd::Tensor` / `sd::nn::Module` / `sd::ops` 抽象（顶层 `design.md` 中的规划）
+- PhotoMaker / ESRGAN 的 C API 尚未暴露给 StaticPy（`img_hires` 二进制侧可用）
+- GLIGEN：ggml 模块与 UNet 注入已进 patch，缺权重 loader / PositionNet 节点接线
+- 执行引擎无 list 广播 / lazy 求值 / 子图；节点间数据类型仍是占位
 
 ---
 
 **报告更新时间**：2026-07-07（补充 v1 API 分析）
 **报告更新时间**：2026-07-08（补充 v2 适配层实现与端到端验证）
 **报告更新时间**：2026-07-08（补充 FreeU/SAG patch、img_hires 示例与 img_hires.sh）
+**报告更新时间**：2026-09-28（§13.6 patch 基准与文件表指向 design.md；§13.7 改为当前状态索引）

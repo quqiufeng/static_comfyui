@@ -14,7 +14,7 @@
 ├── build_sd.sh                     # 编译 sd.cpp（静态链接，旧，已废弃）
 ├── build_sd_dl.sh                  # 编译 sd.cpp（动态后端，当前默认）
 ├── patches/
-│   └── sdcpp-freeu-sag-v2.patch    # 唯一 patch：FreeU/SAG/DynCFG/RescaleCFG/video CFG/GLIGEN/IPAdapter 前缀 等（11 文件 ~1180 行）
+│   └── sdcpp-freeu-sag-v2.patch    # 唯一 patch：FreeU/SAG/DynCFG/RescaleCFG/video CFG/sigma 区间/区域条件/GLIGEN 等（11 文件 1183 行）
 ├── src/
 │   ├── adapters/
 │   │   ├── sdcpp_adapter.h         # C++ SDPipeline 类 + C API 声明
@@ -59,7 +59,22 @@ StaticPy extern fn ← sdcpp_adapter.h (C API) ← sdcpp_adapter.cpp ← stable-
 
 ## 4. 我们对 sd.cpp 的改动
 
-所有改动集中在 **一个 patch 文件** `patches/sdcpp-freeu-sag-v2.patch`（约 1180 行），修改 sd.cpp 的 **11 个文件**（含新增 `gligen.hpp`）。当前基准 commit：**`6dcb5bb`**（见 `SD_VERSION.lock`）。
+所有改动集中在 **一个 patch 文件** `patches/sdcpp-freeu-sag-v2.patch`（1183 行），修改 sd.cpp 的 **11 个文件**（含新增 `gligen.hpp`）。当前基准 commit：**`6dcb5bb`**（见 `SD_VERSION.lock`）。
+
+| patch 中的文件 | 新增行数 | § |
+|---|---|---|
+| `include/stable-diffusion.h` | 63 | 4.1 |
+| `src/model/diffusion/unet.hpp` | 96 | 4.2 |
+| `src/pipeline/diffusion_engine.h` | 53 | 4.3 |
+| `src/pipeline/diffusion_engine.cpp` | 213 | 4.4 / 4.7 |
+| `src/pipeline/image.cpp` | 192 | 4.5 |
+| `src/model_loader.cpp` | （已删除） | 4.6 |
+| `src/model/diffusion/model.hpp` | 3 | 4.8 |
+| `src/model/diffusion/gligen.hpp`（新增） | 136 | 4.9 |
+| `src/core/ggml_runner.h` | 12 | 4.10 |
+| `src/model/common/block.hpp` | 4 | 4.11 |
+| `src/runtime/denoiser.hpp` | 21 | 4.12 |
+| `src/stable-diffusion.cpp` | 18 | 4.13 |
 
 > **注意**：sd.cpp 在 `7f410a3` 做了大重构（#1956/#1957），生成管线从 `src/stable-diffusion.cpp` 拆到 `src/pipeline/`。patch 已随之重定位。`6dcb5bb` 起上游又移除了 `unused_tensors`/`vision_model.` 过滤（#1984），旧的 `model_loader.cpp` hunk 已废弃、从 patch 中删除。
 
@@ -120,13 +135,37 @@ if (sd_version_is_unet(version)) {
 ### 4.7 `src/pipeline/diffusion_engine.cpp`（clip vision 前缀，修复上游回归）
 clip vision 加载前缀从 `"clip_vision."` 改回 `"cond_stage_model.transformer."`。`#1957` 重构把旧版的 `cond_stage_model.transformer.` 误改成 `clip_vision.`，而 `FrozenCLIPVisionEmbedder` 仍按 `cond_stage_model.transformer.` 查找。
 
-### 4.6 `src/model/vae/vae.hpp` — 不移除 ⚠️ 未修改
-VAE tile 大小上限已从 patch 中移除，改由 adapter 层在调用 `generate_image` 前自行 cap。详见 §4.7。
+### 4.8 `src/model/diffusion/model.hpp`
+`UNetDiffusionExtra` 追加 2 个 GLIGEN 字段：`gligen_applier`（`void*`，不引入头文件依赖）、`gligen_objs`。
+> FreeU 参数**不经过** `DiffusionParams`——`UNetModelRunner` 通过自己的 `set_freeu_params()` 直接接收。
 
-### 4.5 `src/model/diffusion/model.hpp` ⚠️ 未修改
-FreeU 参数不再经过 `DiffusionParams`。`UNetModelRunner` 通过自己的 `set_freeu_params()` 直接接收。
+### 4.9 `src/model/diffusion/gligen.hpp`（新增文件）
+GLIGEN 的 ggml 模块：PositionNet（Fourier 坐标编码 + MLP）与 gated affine 的前向实现。
+> 状态：模块与 UNet 注入已完成，**尚未接线/未验证**（缺权重 loader 与节点接线），见 `TODO.md`。
 
-### 4.6 架构设计原则：参数流向
+### 4.10 `src/core/ggml_runner.h`
+- 定义抽象接口 `struct GligenApplier { virtual ggml_tensor* apply(GGMLRunnerContext*, ggml_tensor*, int) = 0; }`
+- `GGMLRunnerContext` 追加 `gligen_applier` / `gligen_objs` / `gligen_index`
+
+### 4.11 `src/model/common/block.hpp`
+Transformer 块中唯一的调用点：在 self-attn 之后、cross-attn 之前插入
+`if (ctx->gligen_applier) x = ctx->gligen_applier->apply(ctx, x, ctx->gligen_index);`
+
+### 4.12 `src/runtime/denoiser.hpp`
+- `Denoiser` 增加 `sigma_min_override` / `sigma_max_override` + `set_sigma_range()`——
+  支持 ComfyUI `ModelSamplingContinuousEDM` / `ModelSamplingContinuousV`（负数=用模型自带区间）
+- `sampler_noise_scale()` 全局量——支持 `ModelNoiseScale`（ancestral 噪声 `sigma_up * noise_scale`）
+
+### 4.13 `src/stable-diffusion.cpp`
+C API 兜底与注册：
+- `sd_hires_upscaler` 枚举追加 `"Latent (bislerp)"`
+- `sd_img_gen_params_init` 补默认值 `area_conds` / `area_cond_count` / `noise_scale`
+- 新增导出 `sd_clip_vision_encode()`（CLIPVisionEncode 节点）与 `sd_set_prediction()`（ModelSamplingDiscrete）
+
+### 4.14 `src/model/vae/vae.hpp` — 不移除 ⚠️ 未修改
+VAE tile 大小上限已从 patch 中移除，改由 adapter 层在调用 `generate_image` 前自行 cap。详见 §4.16。
+
+### 4.15 架构设计原则：参数流向
 ```
 StaticPy → adapter (sdcpp_adapter.cpp)
   → sd_img_gen_params_t.freeu  (C API struct)
@@ -137,7 +176,7 @@ StaticPy → adapter (sdcpp_adapter.cpp)
 ```
 FreeU 参数从右上到左下垂直传递，**不污染**水平方向的现有数据结构（如 `DiffusionParams`）。
 
-### 4.7 不需要改 sd.cpp 的功能（通过原生 C API 调用）
+### 4.16 不需要改 sd.cpp 的功能（通过原生 C API 调用）
 LoRA、ControlNet、HiRes Fix、**VAE tiling（含 tile cap）**、sampler/scheduler 枚举、PhotoMaker、ESRGAN upscale、TAESD——全部通过 `sd_ctx_params_t` / `sd_img_gen_params_t` 的标准字段控制，不需要 patch。
 
 其中 VAE tile cap（防止 OOM）在 `sdcpp_adapter.cpp` 的 `SDPipeline::generate()` 中实现：tile 尺寸上限 128 个 latent 像素（对应 scale=8 的 VAE 输出 1024px）。
@@ -403,10 +442,13 @@ git reset src/model/diffusion/gligen.hpp   # 保持 untracked，避免误提交
 | FreeU | ❌ | ✅ | ✅ `freeu` / `freeu_b1` / `freeu_b2` 参数 | ✅ `HiResFix` / `KSampler` |
 | SAG | ❌ | ✅ | ✅ `sag` / `sag_scale` 参数 | ✅ `HiResFix` / `KSampler` |
 | ADetailer | ✅ | ❌ | ✅ `sd_pipeline_generate_adetailer` | ✅ `ADetailer` 节点 |
-| ControlNet | ✅ | ❌ | ❌ | ❌ |
+| ControlNet | ✅ | ❌ | ✅ `sd_pipeline_load_control_net` + `control_strength` | ✅ `ControlNetLoader` / `ControlNetApply(-Advanced)` |
+| IPAdapter | ✅（原生） | ✅（clip vision 前缀回归修复，§4.7） | ✅ `sd_pipeline_set_ipadapter(_enabled)` | ✅ `IPAdapterModelLoader` / `CLIPVisionLoader` / `IPAdapterApply` |
 | PhotoMaker | ✅ | ❌ | ❌ | ❌ |
 | ESRGAN Upscale | ✅ | ❌ | ❌ | ❌ |
-| IPAdapter | ❌ | ❌ | ❌ | ❌ |
+
+> C API 未暴露 ≠ 不可用：`backup.sh` 走 `img_hires` 二进制可直接用 PhotoMaker / ESRGAN；
+> 要在 `comfycli-bin` 里用，需在 `sdcpp_adapter.h` 加 C API → `sd_backend.static.py` 加 `extern fn` → `nodes.static.py` 接线。
 
 ---
 

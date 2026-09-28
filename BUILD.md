@@ -23,25 +23,38 @@ comfycli/*.static.py  ──→  concat_src.py  ──→  comfycli/_bundle.stat
 
 ---
 
-## StaticPy 工具链：上游原样 + 项目胶水
+## StaticPy 工具链：上游拷贝 + 少量本地补丁 + 项目胶水
 
-`staticpy/` 下的编译器核心是 **`/opt/ReScheme` 的原样拷贝，不做任何修改**：
+`staticpy/` 下的编译器核心从 `/opt/ReScheme` 拷贝而来，**不是完全原样**：
 
-| 文件 | 说明 |
+| 文件 | 与上游关系 | 说明 |
+|------|-----------|------|
+| `staticpy/static_translate.py` | **有本地补丁**（见下表） | Python → Scheme 翻译器 |
+| `staticpy/static_prelude.scm` | 原样 | 值类型运行时 |
+| `staticpy/static_stdlib.scm` | 原样 | 公共标准库 |
+| `staticpy/static_build.sh` | 原样 | 上游构建脚本（**本项目的 `build.sh` 不使用它**） |
+
+`static_translate.py` 相对 `/opt/ReScheme/static_translate.py` 的本地改动（`diff` 约 107 行）：
+
+| 补丁 | 原因 |
 |------|------|
-| `staticpy/static_translate.py` | Python → Scheme 翻译器（上游原样） |
-| `staticpy/static_prelude.scm` | 值类型运行时（上游原样） |
-| `staticpy/static_stdlib.scm` | 公共标准库（上游原样） |
-| `staticpy/static_build.sh` | 上游构建脚本（**本项目的 `build.sh` 不使用它**） |
+| `is` / `is not`（None 判定）翻译 | 上游未处理，会生成非法的 `(None x y)` |
+| `break` / `continue`（`call/cc` 实现） | 上游 while/for 只生成 `(let loop ...)`，无法提前退出 |
+| 模块级变量进入 `module_env` 类型环境 | 上游只收 enum 常量，导致函数内引用模块变量被判 `undefined name` |
+| 顶层 `AnnAssign` / `Assign` / `Expr` 语句翻译 | 上游丢弃顶层语句，`concat_src.py` 生成的 bundle 头部会失效 |
+| `float` 映射为 `float`（非上游默认的 `double`） | C API（`sdcpp_adapter`）ABI 为 32 位 float，用 `double` 会传垃圾值 |
+| 类型收集递归进 `while`/`if`/`for`/`with` 体 | 上游只扫函数直层，控制流内的类型标注丢失 |
 
-项目只维护两处"胶水"，不 fork 翻译器：
+项目侧另维护两处"胶水"（不属于编译器补丁）：
 
 | 文件 | 说明 |
 |------|------|
 | `staticpy/static_build_comfycli.sh` | 本地构建脚本：项目相对路径、不链接 torch、支持 `GLIBC_SYSROOT`、产物输出到项目根目录 |
 | `comfycli/comfycli_ffi.scm` | FFI 声明 + 上游缺失的内置（见下） |
 
-> 这样上游迭代后，直接 `cp /opt/ReScheme/static_{translate.py,prelude.scm,stdlib.scm} staticpy/` 覆盖即可，无需再打补丁。
+> **升级上游时**：`prelude.scm` / `stdlib.scm` 可直接 `cp` 覆盖；
+> `static_translate.py` 覆盖后需重放上表 6 处补丁（`diff /opt/ReScheme/static_translate.py staticpy/static_translate.py` 列出差异），
+> 然后重跑 `./build.sh` 验证。
 
 ---
 
@@ -72,11 +85,12 @@ comfycli/*.static.py  ──→  concat_src.py  ──→  comfycli/_bundle.stat
 
 上游编译器比旧 fork 更严格，写 `comfycli/*.static.py` 时须遵守：
 
-1. **无模块级可变全局变量**：函数体内引用模块级变量会被判为 `undefined name`（硬错误，`--warn` 也拦截）。全局状态须改为参数传递或去掉。
-2. **无 `break` / `continue`**：翻译器不处理，会生成非法代码。用循环条件改写（如把 `break` 改为令循环条件为假）。
-3. **无 `is None` / `is not None`**：`translate_compare` 未处理 `is`/`is not`，会生成非法的 `(None x y)`。用 `is_none()` / `is_some()` 替代。
-4. **`list` 即 Scheme vector**：`len()` → `list_length`，索引 → `vector-ref`。
-5. 无类继承/异常/lambda 闭包（与旧版一致）。
+1. **模块级变量可读**（本地补丁已把模块级 `Assign`/`AnnAssign` 收进 `module_env`，故 `NODE_GROUP`、`QUALITY_PREFIX` 这类常量可在函数内引用）；**函数内重新赋值**模块级变量不支持，仍须改为参数传递。
+2. **`break` / `continue` 可用**（仅限直接位于循环体内；本地补丁用 `call/cc` 实现，见上文补丁表）。嵌套循环/函数返回仍须改写循环条件。
+3. **`is None` / `is not None` 可用**（本地补丁，翻译为 `(eq? x #f)`）；其他 `is` 比较仍不支持。
+4. **无 lambda 闭包 / `eval` / `exec` / 一等函数值**：`f = handler`（裸函数引用）会报 `undefined name`，需分发时按类分组为多个函数。
+5. **无类继承 / try-except**。
+6. **`list` 即 Scheme vector**：`len()` → `list_length`，索引 → `vector-ref`。
 
 ---
 
@@ -92,7 +106,7 @@ comfycli/                       # StaticPy 编排层源码（存活模块）
 ├── comfycli_ffi.scm            # FFI 加载 + 缺失内置（见上）
 └── _bundle.static.py           # concat_src.py 生成的合并源码（构建产物）
 
-staticpy/                       # 上游 StaticPy 工具链（原样）+ 本地构建胶水
+staticpy/                       # 上游 StaticPy 工具链（translate.py 有本地补丁）+ 本地构建胶水
 ├── static_translate.py         # 翻译器（上游）
 ├── static_prelude.scm          # 运行时（上游）
 ├── static_stdlib.scm           # 标准库（上游）
@@ -157,9 +171,12 @@ bash staticpy/static_build_comfycli.sh \
 
 | 文件 | 大小 | 说明 |
 |------|------|------|
-| `comfycli-bin` | ~4MB | 独立 ELF 二进制（主程序，含编排逻辑） |
-| `comfycli-bin.so` | ~1.5MB | Chez AOT 编译的 Scheme 机器码（运行时加载） |
-| `cpp/sd/build/libsdcpp_adapter.so` | ~96KB | stable-diffusion.cpp 适配层（动态加载 ggml 后端） |
+| `comfycli-bin` | ~4.2MB | 独立 ELF 二进制（主程序，含编排逻辑） |
+| `comfycli-bin.so` | ~2.0MB | Chez AOT 编译的 Scheme 机器码（运行时加载） |
+| `cpp/sd/build/libsdcpp_adapter.so` | ~134KB | sd.cpp 推理适配层（动态链接 `/opt/sd/build-dl` 的 `.so`） |
+
+> 推理后端本体（`libstable-diffusion.so` ~39MB、`libggml*.so`、`libggml-cuda.so` ~129MB）来自
+> `SD_BACKEND_DL=1` 的 sd.cpp 构建，由 `deploy.sh` 打包；见 [deploy.md](./deploy.md)。
 
 ---
 
@@ -198,15 +215,17 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 
 ## 与官方 StaticPy 的关系
 
-本项目从 `/opt/ReScheme`（StaticPy 官方仓库）拷贝编译器核心到 `staticpy/`，**保持原样、不打补丁**：
+本项目从 `/opt/ReScheme`（StaticPy 官方仓库）拷贝编译器核心到 `staticpy/`：
 
-| 文件 | 来源 |
-|------|------|
-| `staticpy/static_translate.py` | StaticPy（原样） |
-| `staticpy/static_prelude.scm` | StaticPy（原样） |
-| `staticpy/static_stdlib.scm` | StaticPy（原样） |
+| 文件 | 来源 | 本地改动 |
+|------|------|---------|
+| `staticpy/static_translate.py` | StaticPy | **6 处补丁**（`is None` / `break`-`continue` / 模块级变量 / 顶层语句 / `float` ABI / 类型收集递归），见本文「工具链」章节 |
+| `staticpy/static_prelude.scm` | StaticPy | 无（原样） |
+| `staticpy/static_stdlib.scm` | StaticPy | 无（原样） |
 
-所有 comfycli 特有的东西都放在**项目侧**（`comfycli/comfycli_ffi.scm` + `staticpy/static_build_comfycli.sh`），因此升级只需覆盖上游文件。
+编译器之外的 comfycli 特有内容全放在**项目侧**（`comfycli/comfycli_ffi.scm` + `staticpy/static_build_comfycli.sh`），因此升级上游只需重放 `static_translate.py` 的补丁。
+
+> 核对差异：`diff /opt/ReScheme/static_translate.py staticpy/static_translate.py`
 
 `cpp/sd/` 是独立维护的 stable-diffusion.cpp 适配器，不来自 StaticPy。
 
@@ -234,6 +253,6 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 |------|------|
 | 类型错误 | `python3 staticpy/static_translate.py comfycli/_bundle.static.py` 看 stderr |
 | Scheme 编译错误 | 查看 `/tmp/staticpy-cache/<stem>_<hash>.ss`（拼接后的完整 Scheme） |
-| 运行时找不到 .so | 设置 `LD_LIBRARY_PATH` 指向 `cpp/sd/build` |
+| 运行时找不到 `.so` | `LD_LIBRARY_PATH` 需同时含 `cpp/sd/build` 与 `/opt/sd/build-dl/bin`；CUDA 后端另需 `GGML_BACKEND_PATH=/opt/sd/build-dl/bin/libggml-cuda.so`（本地可直接 `bash run.sh <args>`） |
 | FFI 符号未找到 | `nm -D cpp/sd/build/libsdcpp_adapter.so \| grep symbol` |
 | 生成阶段 OOM | sd.cpp 已对大图自动启用 VAE tiling；仍 OOM 时降分辨率或显式调小 tile |

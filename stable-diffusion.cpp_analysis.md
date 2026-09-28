@@ -1,5 +1,9 @@
 # stable-diffusion.cpp 代码分析报告
 
+> **文档状态：早期调研产物（"从零实现 SDXL 引擎"阶段）。** 本文基于 `7f410a3` 重构**之前**的
+> sd.cpp 目录结构（`model.h/cpp`、`src/unet.hpp`、`ggml_extend.hpp` 等旧路径），已被
+> [`cpp/sd/README.md`](./cpp/sd/README.md) 取代（commit 更新、目录重构后）。保留本文仅作原理参考。
+>
 > 基于 code search 生成。用于指导从零实现 SDXL 推理引擎。
 
 ## 1. 整体架构

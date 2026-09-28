@@ -35,7 +35,10 @@ workflow.json / --prompt
 ┌──────────────────────────────┐
 │  /opt/sd                      │
 │  stable-diffusion.cpp 源码    │
-│  （编译为静态库，链接到适配器）│
+│  （动态后端 build-dl/，产出   │
+│   libstable-diffusion.so +    │
+│   libggml*.so，CUDA 为        │
+│   libggml-cuda.so 插件）      │
 └──────────┬───────────────────┘
            ▼
         GGML / CUDA
@@ -60,13 +63,15 @@ workflow.json / --prompt
 ## 参考实现
 
 ```bash
-# 本地 workflow 模式
-LD_LIBRARY_PATH=cpp/sd/build \
+# 本地 workflow 模式（或直接 bash run.sh <args>）
+LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
+  GGML_BACKEND_PATH=/opt/sd/build-dl/bin/libggml-cuda.so \
   ./comfycli-bin /tmp/test_workflow.json --output-dir /tmp/comfy_output
 # → /tmp/comfy_output/test_cat.png (1024×1024)
 
 # 本地 prompt 模式
-LD_LIBRARY_PATH=cpp/sd/build \
+LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
+  GGML_BACKEND_PATH=/opt/sd/build-dl/bin/libggml-cuda.so \
   ./comfycli-bin --checkpoint /data/models/image/sd_xl_base_1.0.safetensors \
   --prompt "a photo of a cat" --output /tmp/comfy_output/prompt_cat.png
 # → /tmp/comfy_output/prompt_cat.png (1024×1024)
@@ -80,8 +85,8 @@ LD_LIBRARY_PATH=cpp/sd/build \
   --repo /code/comfyui --type search \
   --analysis-dir /opt/code_caches/comfyui_cache
 
-# 搜索 stable-diffusion.cpp C API 用法
-/opt/my_db/tools/cache_query "generate_image" \
-  --repo /opt/sd --type search \
-  --analysis-dir /opt/code_caches/stable-diffusion.cpp_cache
+# 搜索 stable-diffusion.cpp（用仓库自带封装，索引 /opt/code_caches/sd_cache）
+bash cpp/sd/code_search.sh search "generate_image C API"
+bash cpp/sd/code_search.sh context StableDiffusionGGML
+bash cpp/sd/code_search.sh status
 ```

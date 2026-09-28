@@ -6,15 +6,15 @@
 
 ## 理解 StaticPy 语言
 
-编译器核心（`staticpy/static_{translate.py,prelude.scm,stdlib.scm}`）是 `/opt/ReScheme` 上游的**原样拷贝，项目不做修改**。三文件对照阅读：
+编译器核心（`staticpy/static_{translate.py,prelude.scm,stdlib.scm}`）拷贝自 `/opt/ReScheme` 上游。其中 `prelude.scm` / `stdlib.scm` **原样不动**；`static_translate.py` 有 **6 处本地补丁**（`is None`、`break`/`continue`、模块级变量、顶层语句、`float` ABI、类型收集递归），否则下面的语言约束不成立。三文件对照阅读：
 
 | 文件 | 读什么 |
 |------|--------|
-| `staticpy/static_translate.py` | 支持/不支持哪些 Python 语法 |
+| `staticpy/static_translate.py` | 支持/不支持哪些 Python 语法（对照 `diff /opt/ReScheme/static_translate.py` 可见 6 处补丁） |
 | `staticpy/static_prelude.scm` | int/float/bool 编译为 fixnum/flonum，文件 I/O/dict/JSON 等内置 |
 | `staticpy/static_stdlib.scm` | `extern fn` / 张量函数签名 |
 
-项目侧只维护两处**胶水**（不 fork 翻译器）：
+项目侧另维护两处**胶水**（编译器补丁之外）：
 - `comfycli/comfycli_ffi.scm` — `load-shared-object "libsdcpp_adapter.so"` + 上游缺失的内置
 - `staticpy/static_build_comfycli.sh` — 本地构建脚本（不链 torch、支持 GLIBC sysroot）
 
@@ -121,7 +121,7 @@ comfycli-bin workflow.json --output-dir ./output
 - `libsdcpp_adapter.so` 已封装 `sd_pipeline_create/load/generate/free` 等 C API，供 StaticPy FFI 调用
 
 ## 已搭建的基础设施
-- `staticpy/` — StaticPy 工具链（上游 `/opt/ReScheme` 原样拷贝）+ `static_build_comfycli.sh` 本地构建胶水
+- `staticpy/` — StaticPy 工具链（上游 `/opt/ReScheme` 拷贝，`static_translate.py` 有 6 处本地补丁，prelude/stdlib 原样）+ `static_build_comfycli.sh` 本地构建胶水
 - `comfycli/comfycli_ffi.scm` — sd.cpp 共享库加载 + 上游缺失的内置（`dict_keys`/`is_none`/`is_link`/`path_dirname` 等）；可选库 `libcomfycli_torch.so` 按是否加载定义 torch 绑定（否则报错桩，避免 AOT 载入期符号缺失）
 - `cpp/sd/` — stable-diffusion.cpp 推理后端封装 (`sdcpp_adapter.h/.cpp` + `build.sh` / `build_sd_dl.sh`)；`patches/sdcpp-freeu-sag-v2.patch` 为上游补丁（FreeU/SAG/DynCFG/RescaleCFG/video CFG/sigma 区间/区域条件/GLIGEN 注入等）
 - `cpp/libtorch_std_helper.cpp` + `cpp/build_torch_std_helper.sh` — 可选 torch helper（`libcomfycli_torch.so`），仅用于 ggml 没有的**权重级**操作（模型/CLIP 合并、权重导出）与备用独立管线
@@ -229,6 +229,6 @@ python3 xgc_ctl.py shutdown_destroy <instance_id>
 ## 关键设计决策
 - 命令版先不做 HTTP/WS，后续再补 UI 层
 - C++ 推理后端已切换为 stable-diffusion.cpp（`libsdcpp_adapter.so`），不再依赖 libtorch helper
-- StaticPy 编译器核心用 `/opt/ReScheme` **上游原样拷贝，不打补丁**；comfycli 特有内容全放项目侧（`comfycli_ffi.scm` + `static_build_comfycli.sh`），便于跟随上游升级
+- StaticPy 编译器核心拷贝自 `/opt/ReScheme`；`prelude.scm`/`stdlib.scm` 原样，`static_translate.py` 有 **6 处本地补丁**（`is None`/`break`-`continue`/模块级变量/顶层语句/`float` ABI/类型收集递归）。升级上游时 prelude/stdlib 直接覆盖、translate.py 需重放补丁；comfycli 特有内容放项目侧（`comfycli_ffi.scm` + `static_build_comfycli.sh`）
 - 编译（build.sh）和部署（deploy.sh）职责分离
 - 产物 ELF 命名为 `comfycli-bin`，避免与源码目录 `comfycli/` 冲突

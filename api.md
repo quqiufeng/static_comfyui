@@ -1,5 +1,16 @@
 # stable-diffusion.cpp 代码调用路径 & API 文档
 
+> **文档状态：历史调研产物（2026-07-07）。**
+>
+> 下文的调用树与三张符号表基于 sd.cpp **7f410a3 大重构之前**的目录结构，引用的
+> `src/model.cpp` / `src/unet.hpp` / `src/clip.hpp` / `src/ggml_extend.hpp` / `src/auto_encoder_kl.hpp`
+> 等路径**已不存在**（现为 `src/model/`、`src/pipeline/`、`src/core/`），行号全部失效。
+>
+> 当前权威文档：
+> - sd.cpp 架构与 C API → [`cpp/sd/README.md`](./cpp/sd/README.md)
+> - 本项目 patch 与升级流程 → [`cpp/sd/design.md`](./cpp/sd/design.md)
+> - 符号定位请用 code search 直接查 `/opt/sd`（见 `AGENTS.md`）
+
 ## 代码调用路径
 
 ```
@@ -176,7 +187,15 @@ main()
 | `ggml_nbytes()` | tensor 字节数 | — |
 | `ggml_nelements()` | tensor 元素数 | — |
 
-## v2 简化版提取方案
+## v2 简化版提取方案（已废弃，留作方案对照）
+
+> ⚠️ **此路线未实施，已被 `cpp/sd/` 的适配层方案取代。**
+>
+> 当时的前提文件均已不存在：`cpp/stable-diffusion-cli_v1.cpp` 已删除、`cpp/lib/sd/` 未创建、
+> `ggml_repo` 已移除、`/opt/stable-diffusion.cpp` 已换成 `/opt/sd`（动态后端 `build-dl/`）。
+>
+> 实际落地的做法是**不提取源码**，而是链接 `/opt/sd` 的产物 + `sdcpp_adapter.cpp` 适配层，
+> 见 [`cpp/sd/design.md`](./cpp/sd/design.md)。
 
 ### 背景与诉求
 
