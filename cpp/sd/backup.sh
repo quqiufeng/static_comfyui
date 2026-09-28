@@ -1,7 +1,9 @@
 #!/bin/bash
 # =============================================================================
 # img_hires 封装脚本 — HiRes Fix 两阶段出图，VAE Tiling 显存自适应
-# 用法: ./backup.sh "prompt" [output.png] [width] [height] [--flags...]
+# 用法: ./backup.sh ["prompt"] [output.png] [width] [height] [--flags...]
+#       ./backup.sh 1440 1920                    # 全默认, 图落到 $HOME
+#       ./backup.sh xhs.png 1440 1920            # 默认提示词 + 指定文件名
 # 环境变量: VAE_TILE_SIZE, VAE_TILE_OVERLAP, CFG_SCALE, SAMPLING_METHOD 等
 # =============================================================================
 #
@@ -150,10 +152,22 @@ while [ $i -lt $# ]; do
     i=$((i+1))
 done
 
-PROMPT="${ARGS[0]:-solo,single woman,half body portrait of a young woman, soft natural lighting, elegant pose, studio lighting, sharp eyes, solid soft light green background, sage green, clean seamless plain background, no props, flat solid color backdrop, fair skin, pale skin, smooth skin, matte skin, porcelain skin, flawless skin, medium close up}"
-OUTPUT_FILE="${ARGS[1]:-}"
-WIDTH="${ARGS[2]:-1280}"
-HEIGHT="${ARGS[3]:-720}"
+# 位置参数宽松解析: 纯数字 → width/height; 以 .png 结尾 → 输出文件名; 其余第一个 → prompt。
+# 三项均可省略 —— 省略输出文件名时图自动写到 $HOME (见下方 OUTPUT_DIR 分支)。
+_str=(); _num=()
+for a in "${ARGS[@]}"; do
+    if [[ "$a" =~ ^[0-9]+$ ]]; then _num+=("$a"); else _str+=("$a"); fi
+done
+PROMPT_ARG=""; OUTPUT_FILE=""
+for a in "${_str[@]}"; do
+    if [[ "$a" == *.png ]]; then [ -n "$OUTPUT_FILE" ] || OUTPUT_FILE="$a"
+    elif [ -z "$PROMPT_ARG" ]; then PROMPT_ARG="$a"; fi
+done
+
+PROMPT="${PROMPT_ARG:-solo,single woman,half body portrait of a young woman, soft natural lighting, elegant pose, studio lighting, sharp eyes, solid soft light green background, sage green, clean seamless plain background, no props, flat solid color backdrop, fair skin, pale skin, smooth skin, matte skin, porcelain skin, flawless skin, medium close up}"
+WIDTH="${_num[0]:-1280}"
+HEIGHT="${_num[1]:-720}"
+unset _str _num PROMPT_ARG
 
 if [[ "$OUTPUT_FILE" == ~* ]]; then
     OUTPUT_FILE="${HOME}${OUTPUT_FILE:1}"

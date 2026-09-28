@@ -1,7 +1,9 @@
 #!/bin/bash
 # =============================================================================
 # backup_scene.sh — 风景/场景/风格图 专用 HiRes 出图（人像用 backup.sh）
-# 用法: ./backup_scene.sh "prompt" [output.png] [width] [height] [--flags...]
+# 用法: ./backup_scene.sh ["prompt"] [output.png] [width] [height] [--flags...]
+#       ./backup_scene.sh 1920 1080            # 全默认, 图落到 $HOME
+#       ./backup_scene.sh scene.png 1920 1080  # 默认提示词 + 指定文件名
 # 环境变量: VAE_TILE_SIZE, VAE_TILE_OVERLAP, CFG_SCALE, SAMPLING_METHOD,
 #           NO_QUALITY_PREFIX, SEED 等
 # =============================================================================
@@ -96,10 +98,22 @@ while [ $i -lt $# ]; do
     i=$((i+1))
 done
 
-PROMPT="${ARGS[0]:-A tranquil ancient Chinese riverside village, traditional wooden houses beside calm jade green water, towering pine trees fading into mist, Shan Shui painting blended with watercolor and ink wash, aged rice paper texture, generous negative space, poetic atmosphere}"
-OUTPUT_FILE="${ARGS[1]:-}"
-WIDTH="${ARGS[2]:-1280}"
-HEIGHT="${ARGS[3]:-720}"
+# 位置参数宽松解析: 纯数字 → width/height; 以 .png 结尾 → 输出文件名; 其余第一个 → prompt。
+# 三项均可省略 —— 省略输出文件名时图自动写到 $HOME (见下方 OUTPUT_DIR 分支)。
+_str=(); _num=()
+for a in "${ARGS[@]}"; do
+    if [[ "$a" =~ ^[0-9]+$ ]]; then _num+=("$a"); else _str+=("$a"); fi
+done
+PROMPT_ARG=""; OUTPUT_FILE=""
+for a in "${_str[@]}"; do
+    if [[ "$a" == *.png ]]; then [ -n "$OUTPUT_FILE" ] || OUTPUT_FILE="$a"
+    elif [ -z "$PROMPT_ARG" ]; then PROMPT_ARG="$a"; fi
+done
+
+PROMPT="${PROMPT_ARG:-A tranquil ancient Chinese riverside village, traditional wooden houses beside calm jade green water, towering pine trees fading into mist, Shan Shui painting blended with watercolor and ink wash, aged rice paper texture, generous negative space, poetic atmosphere}"
+WIDTH="${_num[0]:-1280}"
+HEIGHT="${_num[1]:-720}"
+unset _str _num PROMPT_ARG
 
 if [[ "$OUTPUT_FILE" == ~* ]]; then
     OUTPUT_FILE="${HOME}${OUTPUT_FILE:1}"

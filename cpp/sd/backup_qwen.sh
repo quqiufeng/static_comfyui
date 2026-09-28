@@ -1,7 +1,9 @@
 #!/bin/bash
 # =============================================================================
 # backup_qwen.sh — Qwen-Image-2.1 HiRes 两阶段出图（Qwen 原生配方 v2）
-# 用法: ./backup_qwen.sh "prompt" [output.png] [width] [height]
+# 用法: ./backup_qwen.sh ["prompt"] [output.png] [width] [height]
+#       ./backup_qwen.sh 2560 1440                # 全默认, 图落到 $HOME
+#       ./backup_qwen.sh xhs.png 2560 1440        # 默认提示词 + 指定文件名
 #       PRESET=<预设名> ./backup_qwen.sh [output.png] [width] [height]
 #       ./backup_qwen.sh --list-presets        # 列出全部风格预设
 # 环境变量: PRESET, CFG, STEPS, HIRES_STEPS, HIRES_STRENGTH, HIRES_UPSCALER,
@@ -232,19 +234,30 @@ preset_prompt() {
     esac
 }
 
+# 位置参数宽松解析: 纯数字 → width/height; 以 .png 结尾 → 输出文件名; 其余第一个 → prompt。
+# 三项均可省略 —— 省略输出文件名时图自动写到 $HOME (见下方 OUTPUT_DIR 分支)。
+_str=(); _num=()
+for a in "${ARGS[@]}"; do
+    if [[ "$a" =~ ^[0-9]+$ ]]; then _num+=("$a"); else _str+=("$a"); fi
+done
+PROMPT_ARG=""; PNG_ARG=""
+for a in "${_str[@]}"; do
+    if [[ "$a" == *.png ]]; then [ -n "$PNG_ARG" ] || PNG_ARG="$a"
+    elif [ -z "$PROMPT_ARG" ]; then PROMPT_ARG="$a"; fi
+done
+
 # PRESET 模式: 从预设表取 prompt, 默认关写实后缀（REALISM=1 可覆盖）
 if [ -n "${PRESET:-}" ]; then
     PROMPT="$(preset_prompt "$PRESET")" || { echo -e "${RED}Error: unknown PRESET '$PRESET' (用 --list-presets 查看)${NC}" >&2; exit 1; }
     REALISM="${REALISM:-0}"
-    OUTPUT_FILE="${ARGS[0]:-}"
-    WIDTH="${ARGS[1]:-1024}"
-    HEIGHT="${ARGS[2]:-1024}"
+    OUTPUT_FILE="${PNG_ARG:-${_str[0]:-}}"
 else
-    PROMPT="${ARGS[0]:-solo,single woman,half body portrait of a young woman, soft natural lighting, elegant pose, studio lighting, sharp eyes, pure white background, fair skin, pale skin, smooth skin, matte skin, porcelain skin, flawless skin, medium close up}"
-    OUTPUT_FILE="${ARGS[1]:-}"
-    WIDTH="${ARGS[2]:-1024}"
-    HEIGHT="${ARGS[3]:-1024}"
+    PROMPT="${PROMPT_ARG:-solo,single woman,half body portrait of a young woman, soft natural lighting, elegant pose, studio lighting, sharp eyes, pure white background, fair skin, pale skin, smooth skin, matte skin, porcelain skin, flawless skin, medium close up}"
+    OUTPUT_FILE="$PNG_ARG"
 fi
+WIDTH="${_num[0]:-1024}"
+HEIGHT="${_num[1]:-1024}"
+unset _str _num PROMPT_ARG PNG_ARG
 
 if [[ "$OUTPUT_FILE" == ~* ]]; then OUTPUT_FILE="${HOME}${OUTPUT_FILE:1}"; fi
 
