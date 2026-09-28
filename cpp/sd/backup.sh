@@ -2,7 +2,8 @@
 # =============================================================================
 # img_hires 封装脚本 — HiRes Fix 两阶段出图，VAE Tiling 显存自适应
 # 用法: ./backup.sh ["prompt"] [output.png] [width] [height] [--flags...]
-#       ./backup.sh 1440 1920                    # 全默认, 图落到 $HOME
+#       ./backup.sh                             # 无参: 默认提示词 + 默认 2560x1440, 图落 $HOME
+#       ./backup.sh 1440 1920                    # 竖版 3:4（小红书）
 #       ./backup.sh xhs.png 1440 1920            # 默认提示词 + 指定文件名
 # 环境变量: VAE_TILE_SIZE, VAE_TILE_OVERLAP, CFG_SCALE, SAMPLING_METHOD 等
 # =============================================================================
@@ -12,6 +13,8 @@
 #   CFG=2.0  Steps=16→30  HiRes strength=0.25  upscaler=latent-bicubic
 #   clarity=0.0  edge-sharpen=0.0  Sampler=euler  Scheduler=discrete
 #   效果: 皮肤白净柔和、无锐化痕迹（胜出图 ~/scan_MIN_q5_20260927_171626.png）。
+#   分辨率（2026-09-28 定稿）: 默认 2560x1440（参考图 ~/min_default_green_2560_20260927_181523.png）;
+#     无参 ./backup.sh 即出同款; 竖版 3:4 传 1440 1920。
 #   默认提示词（2026-09-27 更新）: 白底 → 浅草绿纯色背景
 #     （solid soft light green / sage green / clean seamless plain background, no props）。
 #   注: 该档低于下方「甜点范围」下限, 属刻意柔化取向; 想要毛孔纹理可回
@@ -168,8 +171,8 @@ for a in "${_str[@]}"; do
 done
 
 PROMPT="${PROMPT_ARG:-solo,single woman,half body portrait of a young woman, soft natural lighting, elegant pose, studio lighting, sharp eyes, solid soft light green background, sage green, clean seamless plain background, no props, flat solid color backdrop, fair skin, pale skin, smooth skin, matte skin, porcelain skin, flawless skin, medium close up}"
-WIDTH="${_num[0]:-1280}"
-HEIGHT="${_num[1]:-720}"
+WIDTH="${_num[0]:-2560}"
+HEIGHT="${_num[1]:-1440}"
 unset _str _num PROMPT_ARG
 
 if [[ "$OUTPUT_FILE" == ~* ]]; then
