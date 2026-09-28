@@ -10,6 +10,8 @@
 #   CFG=2.0  Steps=16→30  HiRes strength=0.25  upscaler=latent-bicubic
 #   clarity=0.0  edge-sharpen=0.0  Sampler=euler  Scheduler=discrete
 #   效果: 皮肤白净柔和、无锐化痕迹（胜出图 ~/scan_MIN_q5_20260927_171626.png）。
+#   默认提示词（2026-09-27 更新）: 白底 → 浅草绿纯色背景
+#     （solid soft light green / sage green / clean seamless plain background, no props）。
 #   注: 该档低于下方「甜点范围」下限, 属刻意柔化取向; 想要毛孔纹理可回
 #       E1xMIN 中点档（CFG=3.0/20→40/0.4/latent-bislerp/clarity0.15,
 #       2026-09-23 扫描, 图 zimage_p_E1xMIN.png）。
@@ -148,7 +150,7 @@ while [ $i -lt $# ]; do
     i=$((i+1))
 done
 
-PROMPT="${ARGS[0]:-solo,single woman,half body portrait of a young woman, soft natural lighting, elegant pose, studio lighting, sharp eyes, pure white background, fair skin, pale skin, smooth skin, matte skin, porcelain skin, flawless skin, medium close up}"
+PROMPT="${ARGS[0]:-solo,single woman,half body portrait of a young woman, soft natural lighting, elegant pose, studio lighting, sharp eyes, solid soft light green background, sage green, clean seamless plain background, no props, flat solid color backdrop, fair skin, pale skin, smooth skin, matte skin, porcelain skin, flawless skin, medium close up}"
 OUTPUT_FILE="${ARGS[1]:-}"
 WIDTH="${ARGS[2]:-1280}"
 HEIGHT="${ARGS[3]:-720}"
