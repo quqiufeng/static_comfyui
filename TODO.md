@@ -44,7 +44,47 @@
 - 优化前 ~665s → **210s（3m30s，~3.2×）**；hires 采样 531s→142s。
 - 开关：`CACHE_MODE=disabled|easycache`（默认 easycache）；`CACHE_THRESHOLD` 越低跳越多（默认 0.2）。已同步到 `backup.sh` / `backup_qwen.sh` / `backup_scene.sh`。
 - 接线：`ImageGenerationParams.cache_*` → `sd_img_gen_params_t.cache` → `SampleCacheRuntime`；CLI `--cache-mode/--cache-threshold/--cache-start/--cache-end`。
-- 未做：batch CFG（`z_image` 断言 `x->ne[3]==1`）、降 hires steps（画质换速度）。
+- 未做：降 hires steps（画质换速度）。
+- ~~batch CFG~~ **已证伪，勿再做**：z_image / Qwen / SDXL 文本变长（TE 无 min_length），分支合批
+  要求 `L_cond == L_uncond` 恒成立才与串行 1:1 等价（图像 rope 索引含 padded_context_len）；
+  nihui ncnn 两项目均为串行两趟，ComfyUI / sd.cpp 亦无 batch CFG。SDXL 方案被否（过时）。
+
+## VAE tile 显存自适应（已完成，2026-10-01）
+**目标**：VAE decode/encode 按运行时空闲显存选 tile，替代静态启发式（ncnn qwenimage-ncnn-vulkan/src/vae.cpp → sd.cpp 移植）。
+
+- 实现：`sd::backend_fit::fit_vae_tiling_to_memory`（`src/core/backend_fit.cpp`），在
+  `decode_first_stage`（`diffusion_engine.cpp`）权重已加载后调用；候选/目标函数复刻 ncnn
+  （min tile count → min area → min pixels），count 用 `sd_tiling_calc_tiles` 非 circular 分支
+  精确复刻（`target_overlap=0.5` 时 180/60 实测 5 tiles 而非 3，不算 overlap 会选错）。
+- 显存模型：`budget = free − 160MiB(reserve) − 64MiB(overhead)`，`bytes/px` 默认 dec 8704 /
+  enc 2304（ncnn bf16 实测 ×2 覆盖 f32），env `SD_VAE_MEM_PER_PX_DEC/_ENC` 可校准，
+  `SD_VAE_TILING=manual` 完全关闭（保留静态/OOM-retry 兜底，CPU 后端跳过）。
+- 校准法：跑一次看 `vae decode fit:` 日志与 `ggml_runner.cpp:994 compute buffer size` →
+  bpp = buffer_MiB×1048576/pixels；实测 z_image VAE decode ≈6600 B/px（1024 全图 6657 MiB、
+  2560×1440 tile 107×180 7825 MiB，线性一致），默认 8704 留 1.3× 余量，无需改。
+- 实测（RTX 3080 20G，2560×1440 z_image）：auto 4 tiles **decode 4.58s** vs manual(128) 8 tiles
+  7.55s（-40%）；1024×1024 自动全图单 tile 1.15s；均 exit 0 出图正常。
+- 未做：encode 接线（`get_tile_sizes` 对 encode 有 encoding_factor×2 歧义，先跑通 decode）、
+  video/circular 分支（fit 已跳过）、comfycli 端 SDXL 验证（本机无 sd_xl_base 模型）。
+- 构建注意：`cpp/sd/build_sd_dl.sh` 每次 `rm -rf` 全清重建；改 `/opt/sd` 后增量编译用
+  `cmake --build /opt/sd/build-dl --target stable-diffusion -j$(nproc)`（约 1 分钟），无需重跑
+  `build.sh`（adapter/ELF 未变，动态加载新 .so）。
+
+## prefix KV caching（#1）：benchmark 完成，判定不迁移（2026-10-01）
+**方法**：prompt 长度 A/B（img_hires 直跑，1024²、6 步、`--cache-mode disabled`、seed42、cfg2.0
+双分支，各 2 次）：短 prompt（~45 tok 含质量前缀）vs 长 prompt（1307 tok，无截断）。
+`sampling completed`（不含 TE）：19.81s → 23.02s，**Δ=0.535s/步**（2 次重复差 <0.3s）。
+
+**结论**（z_image，1024²，上界 = text 全缓存含 prelude + joint text 行）：
+- 长 prompt 极端档：sampling 的 **~16%**；典型 prompt（ΔT≈55~150 tok）：**0.35~1%**；
+  主力 2560×1440（img tokens 14400）占比更小，EasyCache 跳步后再打折。
+- ncnn 项目该优化的主因是**显存**（README low-vram：prefix KV 可落 host RAM、
+  decode 激活 ∝ image-only q 更小），非速度。
+- 成本：z_image joint 层为全双向 concat 注意力（ComfyUI `lumina/model.py` mask=None，
+  sd.cpp mask=nullptr 同步），text 行依赖 image → 复刻 ncnn 冻结 text KV 即**近似**、
+  破坏与 ComfyUI 1:1；且需拆 JointAttention + 每层持久 KV 张量，改动大。
+- 判定：**典型收益 <1%，不迁移**。若未来要做低显存模式（小卡部署），再评估
+  ncnn 式 host-KV（届时以显存收益为指标）。
 
 ## HiRes Fix 出图质量优化
 **原理**：latent 放大 + 二次采样（denoise<1），即 ComfyUI 的 `LatentUpscale`（bicubic/bislerp）+ `KSampler(denoise)`；`backup.sh` 同原理（低分构图 → latent 放大 refine，基础分辨率越高、放大倍数越小越好）。
