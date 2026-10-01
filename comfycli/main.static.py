@@ -79,6 +79,9 @@ def main():
     output_dir = dict_get(args, "output_dir")
     if output_dir is None:
         output_dir = "./output"
+    # cli_args 初值是 ""（不是 None）：空串会让 sd_ensure_dir("") 返回 -1 → rc=-1
+    if str_length(output_dir) == 0:
+        output_dir = "./output"
     workflow_path = dict_get(args, "workflow")
     if workflow_path is not None and str_length(workflow_path) > 0:
         fp = file_open(workflow_path, "r")
@@ -107,3 +110,7 @@ def main():
             print("Usage: comfycli-bin workflow.json --output-dir ./output")
             print("   or: comfycli-bin --checkpoint model.safetensors --prompt 'cat' --output ./out.png")
             exit_program(1)
+    # execute_prompt 成功时会写入 "_ok" 标记；校验失败/中止/环 → 无标记 → 退出码 1
+    if dict_get(result, "_ok") is None:
+        print("Workflow execution failed")
+        exit_program(1)

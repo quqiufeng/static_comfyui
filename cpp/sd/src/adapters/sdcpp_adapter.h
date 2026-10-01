@@ -44,6 +44,7 @@ struct ModelConfig {
     std::string vae_path;
     std::string diffusion_model_path;  // standalone diffusion model (e.g. Z-Image GGUF)
     std::string llm_path;              // LLM text encoder for DiT models
+    std::string llm_vision_path;       // LLM vision projector (mmproj) for Qwen ref-image
     std::string ip_adapter_path;       // native IP-Adapter weights (sd.cpp format)
     int n_threads = 8;
     bool keep_vae_on_cpu = false;
@@ -184,6 +185,10 @@ public:
     void set_init_image_from_pixels(const uint8_t* rgb, int w, int h, int c,
                                     float strength);
 
+    // Native ref conditioning (Qwen-Image / Z-Image-Omni): append one reference
+    // image per call; args e.g. "preset=qwen" (empty = model preset).
+    void set_ref_image(const std::string& image_path, const std::string& args);
+
     // ControlNet: hot-swap the control net and set the per-generation control image.
     bool load_control_net(const std::string& path);
     void set_control_image(const std::string& image_path, float strength);
@@ -230,6 +235,10 @@ public:
 
     // FreSca frequency guidance enhancement (ComfyUI nodes_fresca.py; model-agnostic)
     void set_fresca(bool enabled, float scale_low, float scale_high, int freq_cutoff);
+
+    // Sample-step cache (EasyCache/DiT step skip): mode = sd_cache_mode_t value,
+    // 0=disabled, 1=easycache, 5=cache-dit, 6=spectrum
+    void set_cache(int mode, float reuse_threshold, float start_percent, float end_percent);
 
     // Sigma range override (ModelSamplingContinuousEDM / ModelSamplingContinuousV)
     void set_sigma_range(bool enabled, float sigma_min, float sigma_max);
@@ -484,6 +493,13 @@ int sd_pipeline_set_video_cfg(sd_pipeline_t pipeline, int enabled, int mode, flo
 /** Configure FreSca frequency guidance enhancement (model-agnostic; works on DiT). */
 int sd_pipeline_set_fresca(sd_pipeline_t pipeline, int enabled, float scale_low, float scale_high, int freq_cutoff);
 
+/** Configure sample-step cache (EasyCache etc). mode: easycache|ucache|dbcache|taylorseer|cache-dit|spectrum|disabled.
+ *  Threshold higher = skip more steps; start/end = cache active step range (0.0-1.0). */
+int sd_pipeline_set_cache(sd_pipeline_t pipeline, const char* mode, float reuse_threshold, float start_percent, float end_percent);
+
+/** Append a native ref-conditioning image (Qwen-Image / Z-Image-Omni). args e.g. "preset=qwen". */
+int sd_pipeline_set_ref_image(sd_pipeline_t pipeline, const char* image_path, const char* args);
+
 /** Override sampling sigma range (ModelSamplingContinuousEDM/V). */
 int sd_pipeline_set_sigma_range(sd_pipeline_t pipeline, int enabled, float sigma_min, float sigma_max);
 
@@ -534,6 +550,9 @@ int sd_pipeline_generate_adetailer(sd_pipeline_t pipeline,
 
 /** Utility: create directory and all parents if missing. Returns 0 on success. */
 int sd_ensure_dir(const char* path);
+
+/** Binary-safe file copy (overwrite existing). Returns 0 on success. */
+int sd_copy_file(const char* src, const char* dst);
 
 /** Resize an image file to width x height and save as PNG. Returns 0 on success. */
 int sd_resize_image(const char* input_path, const char* output_path,

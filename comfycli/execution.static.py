@@ -45,7 +45,10 @@ def resolve_all(inputs, node_outputs, default_output_dir: str):
             src_id = val[0]
             src_idx = val[1]
             src_outputs = dict_get(node_outputs, src_id)
-            resolved_val = src_outputs[src_idx]
+            if src_outputs is not None and list_length(src_outputs) > src_idx:
+                resolved_val = src_outputs[src_idx]
+            else:
+                resolved_val = None
         else:
             resolved_val = val
         dict_set(resolved, key, resolved_val)
@@ -107,6 +110,9 @@ def upstream_missing(inputs, node_outputs) -> str:
             src_outputs = dict_get(node_outputs, src_id)
             if src_outputs is None:
                 return src_id
+            # 防御：声明输出数可能大于实际返回数（此前 src_outputs[src_idx] 直接越界崩）
+            if list_length(src_outputs) <= src_idx:
+                return src_id
             if src_outputs[src_idx] is None:
                 return src_id
         k = k + 1
@@ -162,6 +168,9 @@ def execute_prompt(prompt_json: str, output_dir: str):
             break
     if remaining > 0:
         print("Prompt has a cycle or missing dependency: " + string_of_int(remaining) + " node(s) not executed")
+    else:
+        # 成功标记：main 据此决定退出码（校验失败/中止/环检测均无此标记 → 退出 1）
+        dict_set(node_outputs, "_ok", 1)
     return node_outputs
 
 

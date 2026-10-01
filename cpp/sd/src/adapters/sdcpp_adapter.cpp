@@ -52,6 +52,11 @@ public:
     sd_image_t mask_image{};
     bool has_mask_image = false;
 
+    // Native ref conditioning (Qwen-Image / Z-Image-Omni; owns RGB buffers)
+    std::vector<std::vector<uint8_t>> ref_image_data_list;
+    std::vector<sd_image_t> ref_images;
+    std::string ref_image_args;
+
     int batch_count = 1;
 
     // Per-generation sampling overrides
@@ -72,6 +77,13 @@ public:
     float fresca_scale_low   = 1.0f;
     float fresca_scale_high  = 1.25f;
     int fresca_freq_cutoff   = 20;
+
+    // Sample-step cache (EasyCache/DiT step skip), mirrors sd_cache_mode_t:
+    // 0=disabled, 1=easycache, 5=cache-dit, 6=spectrum
+    int cache_mode = 0;
+    float cache_reuse_threshold = 0.2f;
+    float cache_start_percent = 0.15f;
+    float cache_end_percent = 0.95f;
 
     // Sigma range override (ModelSamplingContinuousEDM/V)
     bool sigma_range_enabled = false;
@@ -157,6 +169,9 @@ bool SDPipeline::load(const ModelConfig& config) {
     }
     if (!config.llm_path.empty()) {
         params.llm_path = config.llm_path.c_str();
+    }
+    if (!config.llm_vision_path.empty()) {
+        params.llm_vision_path = config.llm_vision_path.c_str();
     }
     if (!config.ip_adapter_path.empty()) {
         params.ip_adapter_path = config.ip_adapter_path.c_str();
@@ -289,6 +304,27 @@ void SDPipeline::set_init_image(const std::string& image_path, float strength) {
     impl_->init_strength      = strength;
     std::fprintf(stderr, "[C++ gen] set_init_image: %s (%dx%d) strength=%.2f\n",
                  image_path.c_str(), rgb.cols, rgb.rows, strength);
+}
+
+void SDPipeline::set_ref_image(const std::string& image_path, const std::string& args) {
+    if (!impl_) return;
+    cv::Mat img = cv::imread(image_path, cv::IMREAD_COLOR);
+    if (img.empty()) {
+        std::fprintf(stderr, "[C++ gen] ref-image: failed to read %s\n", image_path.c_str());
+        return;
+    }
+    cv::Mat rgb;
+    cv::cvtColor(img, rgb, cv::COLOR_BGR2RGB);
+    impl_->ref_image_data_list.emplace_back(rgb.data, rgb.data + rgb.total() * rgb.channels());
+    sd_image_t ref{};
+    ref.width   = rgb.cols;
+    ref.height  = rgb.rows;
+    ref.channel = rgb.channels();
+    ref.data    = impl_->ref_image_data_list.back().data();
+    impl_->ref_images.push_back(ref);
+    impl_->ref_image_args = args;
+    std::fprintf(stderr, "[C++ gen] ref-image: %d image(s), args=\"%s\"\n",
+                 static_cast<int>(impl_->ref_images.size()), args.c_str());
 }
 
 void SDPipeline::set_init_image_from_pixels(const uint8_t* rgb, int w, int h,
@@ -452,6 +488,14 @@ void SDPipeline::set_fresca(bool enabled, float scale_low, float scale_high, int
     impl_->fresca_freq_cutoff = freq_cutoff;
 }
 
+void SDPipeline::set_cache(int mode, float reuse_threshold, float start_percent, float end_percent) {
+    if (!impl_) return;
+    impl_->cache_mode = mode;
+    if (std::isfinite(reuse_threshold)) impl_->cache_reuse_threshold = reuse_threshold;
+    if (std::isfinite(start_percent)) impl_->cache_start_percent = start_percent;
+    if (std::isfinite(end_percent)) impl_->cache_end_percent = end_percent;
+}
+
 void SDPipeline::set_sigma_range(bool enabled, float sigma_min, float sigma_max) {
     if (!impl_) return;
     impl_->sigma_range_enabled = enabled;
@@ -527,6 +571,26 @@ void SDPipeline::set_flash_attn(bool enabled) {
     load(impl_->config);  // flash_attn 是加载期参数 → 重载
 }
 
+// ComfyUI sampler 名 → sd.cpp sample_method_to_str[]；表内名字原样传入
+static std::string alias_sample_method(const std::string& name) {
+    if (name == "euler_ancestral") return "euler_a";
+    if (name == "ddim") return "ddim_trailing";
+    if (name == "dpm_2") return "dpm2";
+    if (name == "dpmpp_2m") return "dpm++2m";
+    if (name == "dpmpp_2m_sde") return "dpm++2m_sde";
+    if (name == "dpmpp_2m_sde_gpu") return "dpm++2m_sde";
+    return name;
+}
+
+// ComfyUI scheduler 名 → sd.cpp scheduler_to_str[]
+static std::string alias_scheduler(const std::string& name) {
+    if (name == "normal") return "discrete";
+    if (name == "ddim_uniform") return "discrete";
+    if (name == "uniform") return "discrete";
+    if (name == "linear") return "discrete";
+    return name;
+}
+
 std::vector<Image> SDPipeline::generate(const ImageGenerationParams& params) {
     std::vector<Image> results;
     if (!impl_ || !impl_->ctx) {
@@ -565,12 +629,16 @@ std::vector<Image> SDPipeline::generate(const ImageGenerationParams& params) {
     if (std::isfinite(params.distilled_guidance)) {
         img_params.sample_params.guidance.distilled_guidance = params.distilled_guidance;
     }
-    img_params.sample_params.sample_method    = str_to_sample_method(params.sample_method.c_str());
-    img_params.sample_params.scheduler      = str_to_scheduler(params.scheduler.c_str());
+    std::string sample_method_str = alias_sample_method(params.sample_method);
+    std::string scheduler_str = alias_scheduler(params.scheduler);
+    img_params.sample_params.sample_method    = str_to_sample_method(sample_method_str.c_str());
+    img_params.sample_params.scheduler      = str_to_scheduler(scheduler_str.c_str());
     if (img_params.sample_params.sample_method == SAMPLE_METHOD_COUNT) {
+        std::fprintf(stderr, "[C++ gen] unknown sampler '%s', fallback euler_a\n", params.sample_method.c_str());
         img_params.sample_params.sample_method = EULER_A_SAMPLE_METHOD;
     }
     if (img_params.sample_params.scheduler == SCHEDULER_COUNT) {
+        std::fprintf(stderr, "[C++ gen] unknown scheduler '%s', fallback discrete\n", params.scheduler.c_str());
         img_params.sample_params.scheduler = DISCRETE_SCHEDULER;
     }
     if (std::isfinite(params.eta)) {
@@ -620,13 +688,24 @@ std::vector<Image> SDPipeline::generate(const ImageGenerationParams& params) {
     }
 
     // Sample-step cache (EasyCache 等): 跳过变化小的步，turbo/DiT 上收益明显
-    if (params.cache_mode != 0) {
-        img_params.cache.mode = static_cast<sd_cache_mode_t>(params.cache_mode);
-        if (std::isfinite(params.cache_reuse_threshold)) {
-            img_params.cache.reuse_threshold = params.cache_reuse_threshold;
+    // 优先 impl_ 持久设置（sd_pipeline_set_cache），其次 per-call params（img_hires 路线）
+    int cache_mode = params.cache_mode;
+    float cache_reuse_threshold = params.cache_reuse_threshold;
+    float cache_start_percent = params.cache_start_percent;
+    float cache_end_percent = params.cache_end_percent;
+    if (impl_->cache_mode != 0) {
+        cache_mode = impl_->cache_mode;
+        cache_reuse_threshold = impl_->cache_reuse_threshold;
+        cache_start_percent = impl_->cache_start_percent;
+        cache_end_percent = impl_->cache_end_percent;
+    }
+    if (cache_mode != 0) {
+        img_params.cache.mode = static_cast<sd_cache_mode_t>(cache_mode);
+        if (std::isfinite(cache_reuse_threshold)) {
+            img_params.cache.reuse_threshold = cache_reuse_threshold;
         }
-        img_params.cache.start_percent = params.cache_start_percent;
-        img_params.cache.end_percent   = params.cache_end_percent;
+        img_params.cache.start_percent = cache_start_percent;
+        img_params.cache.end_percent   = cache_end_percent;
     }
 
     // HiRes Fix
@@ -709,6 +788,15 @@ std::vector<Image> SDPipeline::generate(const ImageGenerationParams& params) {
     if (impl_->has_init_image) {
         img_params.init_image = impl_->init_image;
         img_params.strength   = impl_->init_strength;
+    }
+
+    // Native ref conditioning (Qwen-Image / Z-Image-Omni)
+    if (!impl_->ref_images.empty()) {
+        img_params.ref_images      = impl_->ref_images.data();
+        img_params.ref_images_count = static_cast<int>(impl_->ref_images.size());
+        if (!impl_->ref_image_args.empty()) {
+            img_params.ref_image_args = impl_->ref_image_args.c_str();
+        }
     }
 
     // ControlNet control image
@@ -1444,6 +1532,35 @@ int sd_pipeline_set_fresca(sd_pipeline_t pipeline, int enabled, float scale_low,
     return 0;
 }
 
+// Cache mode 字符串 → sd_cache_mode_t（与 img_hires CLI 同一映射）
+static int cache_mode_from_str(const char* mode) {
+    if (!mode) return 0;
+    std::string m(mode);
+    if (m.empty() || m == "disabled" || m == "off" || m == "none") return 0;
+    if (m == "easycache") return SD_CACHE_EASYCACHE;
+    if (m == "ucache") return SD_CACHE_UCACHE;
+    if (m == "dbcache") return SD_CACHE_DBCACHE;
+    if (m == "taylorseer") return SD_CACHE_TAYLORSEER;
+    if (m == "cache-dit") return SD_CACHE_CACHE_DIT;
+    if (m == "spectrum") return SD_CACHE_SPECTRUM;
+    std::fprintf(stderr, "[C++ gen] set_cache: unknown mode '%s' (use easycache|ucache|dbcache|taylorseer|cache-dit|spectrum|disabled), disabled\n", mode);
+    return 0;
+}
+
+int sd_pipeline_set_cache(sd_pipeline_t pipeline, const char* mode, float reuse_threshold, float start_percent, float end_percent) {
+    if (!pipeline) return -1;
+    static_cast<sd::SDPipeline*>(pipeline)->set_cache(cache_mode_from_str(mode),
+                                                      reuse_threshold, start_percent, end_percent);
+    return 0;
+}
+
+int sd_pipeline_set_ref_image(sd_pipeline_t pipeline, const char* image_path, const char* args) {
+    if (!pipeline) return -1;
+    static_cast<sd::SDPipeline*>(pipeline)->set_ref_image(image_path ? image_path : "",
+                                                          args ? args : "");
+    return 0;
+}
+
 int sd_pipeline_set_sigma_range(sd_pipeline_t pipeline, int enabled, float sigma_min, float sigma_max) {
     if (!pipeline) return -1;
     static_cast<sd::SDPipeline*>(pipeline)->set_sigma_range(enabled != 0, sigma_min, sigma_max);
@@ -1510,6 +1627,17 @@ int sd_ensure_dir(const char* path) {
         return 0;
     } catch (const std::exception& e) {
         std::fprintf(stderr, "[C API] sd_ensure_dir failed for %s: %s\n", path, e.what());
+        return -1;
+    }
+}
+
+int sd_copy_file(const char* src, const char* dst) {
+    if (!src || !dst) return -1;
+    try {
+        fs::copy_file(fs::path(src), fs::path(dst), fs::copy_options::overwrite_existing);
+        return 0;
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[C API] sd_copy_file failed %s -> %s: %s\n", src, dst, e.what());
         return -1;
     }
 }

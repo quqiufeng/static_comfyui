@@ -1,4 +1,4 @@
-from sd_backend import sd_create, sd_free, sd_load, sd_load_ex, sd_load_lora, sd_generate_full, sd_ensure_directory, sd_set_ipadapter, sd_set_ipadapter_enabled, sd_set_init_image, sd_load_control_net, sd_set_control_image, sd_set_area_conds, sd_set_noise_scale, sd_set_prediction, sd_set_hires_upscaler, SD_WTYPE_AUTO
+from sd_backend import sd_create, sd_free, sd_load, sd_load_ex, sd_load_lora, sd_generate_full, sd_ensure_directory, sd_set_ipadapter, sd_set_ipadapter_enabled, sd_set_init_image, sd_load_control_net, sd_set_control_image, sd_set_area_conds, sd_set_noise_scale, sd_set_prediction, sd_set_hires_upscaler, sd_set_cache, SD_WTYPE_AUTO
 
 
 NODE_CLASS_MAPPINGS: dict = make_dict()
@@ -174,7 +174,10 @@ def parse_sampler_opts(inputs) -> dict:
     dict_set(opts, "cfg", get_float(inputs, "cfg", 7.0))
     dict_set(opts, "sampler_name", get_str(inputs, "sampler_name", "euler"))
     dict_set(opts, "scheduler", get_str(inputs, "scheduler", "normal"))
-    dict_set(opts, "seed", get_int(inputs, "seed", 42))
+    if dict_get(inputs, "noise_seed") is not None:
+        dict_set(opts, "seed", get_int(inputs, "noise_seed", 42))
+    else:
+        dict_set(opts, "seed", get_int(inputs, "seed", 42))
     dict_set(opts, "vae_tiling", get_int(inputs, "vae_tiling", 0))
     dict_set(opts, "vae_tile_size", get_int(inputs, "vae_tile_size", 0))
     dict_set(opts, "vae_tile_overlap", get_float(inputs, "vae_tile_overlap", 0.5))
@@ -185,6 +188,10 @@ def parse_sampler_opts(inputs) -> dict:
     dict_set(opts, "freeu_b2", get_float(inputs, "freeu_b2", 0.0))
     dict_set(opts, "sag", get_int(inputs, "sag", 0))
     dict_set(opts, "sag_scale", get_float(inputs, "sag_scale", 0.0))
+    dict_set(opts, "cache_mode", get_str(inputs, "cache_mode", "easycache"))
+    dict_set(opts, "cache_threshold", get_float(inputs, "cache_threshold", 0.2))
+    dict_set(opts, "cache_start", get_float(inputs, "cache_start", 0.15))
+    dict_set(opts, "cache_end", get_float(inputs, "cache_end", 0.95))
     dict_set(opts, "clarity", 0.0)
     dict_set(opts, "sharpen", 0.0)
     dict_set(opts, "sharpen_radius", 0)
@@ -211,6 +218,12 @@ def run_sampler(model: SDPipelineHandle, prompt: str, negative_prompt: str,
     if rc != 0:
         print("Failed to create output dir: " + output_dir)
         return -1
+    # 采样步缓存（EasyCache 等），默认对齐 backup.sh 配方；cache_mode="disabled" 关闭
+    sd_set_cache(model.pipeline,
+                 dict_get(opts, "cache_mode"),
+                 dict_get(opts, "cache_threshold"),
+                 dict_get(opts, "cache_start"),
+                 dict_get(opts, "cache_end"))
     return sd_generate_full(model.pipeline, prompt, negative_prompt,
                             width, height, opts, output_path)
 
@@ -262,6 +275,17 @@ def get_str(inputs, key: str, default: str) -> str:
     return to_str(v)
 
 
+def image_path_of(v: LatentImage):
+    # IMAGE 值可能是路径字符串（LoadImage/ImageScale 等），也可能是 LatentImage
+    # （KSampler/VAEDecode 统一载体）；统一解包出图片路径。
+    # 参数注解必需：无注解时 v.image_path 会被翻译成裸调用 (image_path v)（未绑定）。
+    if v is None:
+        return ""
+    if is_string(v):
+        return v
+    return v.image_path
+
+
 def checkpoint_loader_simple(inputs):
     ckpt_name = dict_get(inputs, "ckpt_name")
     if ckpt_name is None:
@@ -292,6 +316,18 @@ def checkpoint_loader_simple(inputs):
 
 register_node("CheckpointLoaderSimple", "Load Checkpoint",
               "checkpoint_loader_simple", ("MODEL", "CLIP", "VAE"), False)
+
+
+def unclip_checkpoint_loader(inputs):
+    # CLIP_VISION 输出未实现 → None（避免错把文本 CLIP 句柄当 vision 传给下游）
+    o = checkpoint_loader_simple(inputs)
+    return (o[0], o[1], o[2], None)
+
+
+def image_only_checkpoint_loader(inputs):
+    # CLIP_VISION 输出未实现 → None
+    o = checkpoint_loader_simple(inputs)
+    return (o[0], None, o[2])
 
 
 def unet_loader(inputs):
@@ -463,8 +499,8 @@ def ksampler(inputs):
         prompt = ar[0]
     else:
         sd_set_area_conds(model.pipeline, "", "", "")
-        prompt = cond_text(pos_c)
-    negative_prompt = cond_text(neg_c)
+        prompt = resolve_prompt_text(inputs, "positive", "prompt")
+    negative_prompt = resolve_prompt_text(inputs, "negative", "negative_prompt")
 
     apply_latent_extras(model, inputs, latent)
 
@@ -473,7 +509,10 @@ def ksampler(inputs):
         print("SD generate failed, rc=" + string_of_int(rc))
         return (None,)
 
-    return (out[1],)
+    batch = 1
+    if latent is not None:
+        batch = latent.batch_size
+    return (LatentImage(width, height, batch, out[1], ""),)
 
 
 register_node("KSampler", "KSampler",
@@ -497,9 +536,9 @@ register_node("VAEDecode", "VAE Decode",
 
 def vae_encode(inputs):
     # img2img：把参考图路径编码为 LATENT（sd.cpp 在采样时做 VAE encode）
-    image_path = dict_get(inputs, "pixels")
-    if image_path is None:
-        image_path = get_str(inputs, "image", "")
+    image_path = image_path_of(dict_get(inputs, "pixels"))
+    if image_path == "":
+        image_path = image_path_of(dict_get(inputs, "image"))
     if image_path == "":
         print("VAEEncode: no image received")
         return (None,)
@@ -515,7 +554,7 @@ register_node("VAEEncodeTiled", "VAE Encode (Tiled)",
 def load_image_mask(inputs):
     # ComfyUI 的 LoadImageMask：从图像提取通道作为 mask。
     # 本后端简化为返回图像路径，C++ 侧按灰度读取。
-    image_path = get_str(inputs, "image", "")
+    image_path = image_path_of(dict_get(inputs, "image"))
     if image_path == "":
         print("LoadImageMask: no image provided")
         return (None,)
@@ -527,9 +566,9 @@ register_node("LoadImageMask", "Load Image (as Mask)",
 
 
 def vae_encode_for_inpaint(inputs):
-    image_path = dict_get(inputs, "pixels")
-    if image_path is None:
-        image_path = get_str(inputs, "image", "")
+    image_path = image_path_of(dict_get(inputs, "pixels"))
+    if image_path == "":
+        image_path = image_path_of(dict_get(inputs, "image"))
     mask_path = dict_get(inputs, "mask")
     if mask_path is None:
         mask_path = ""
@@ -582,18 +621,23 @@ def lora_loader(inputs):
         print("LORALoader: model is missing")
         return (None,)
     lora_name = get_str(inputs, "lora_name", "")
-    lora_scale = get_float(inputs, "lora_scale", 1.0)
+    if dict_get(inputs, "strength_model") is not None:
+        lora_scale = get_float(inputs, "strength_model", 1.0)
+    else:
+        lora_scale = get_float(inputs, "lora_scale", 1.0)
+    # CLIP 透传：clip 侧 LoRA 加载暂未实现（strength_clip 亦忽略），先保证链接可用
+    clip = dict_get(inputs, "clip")
     if lora_name == "":
         print("LORALoader: no lora_name provided, skipping")
-        return (model,)
+        return (model, clip)
     lora_path = resolve_model_path(lora_name)
     pipeline = model.pipeline
     rc = sd_load_lora(pipeline, lora_path, lora_scale)
     if rc != 0:
         print("LORALoader: load failed for " + lora_path + ", rc=" + string_of_int(rc))
-        return (None,)
+        return (None, clip)
     print("LORALoader: loaded " + lora_path + " scale=" + format_float(lora_scale, 2))
-    return (model,)
+    return (model, clip)
 
 
 register_node("LORALoader", "Load LoRA",
@@ -615,9 +659,8 @@ def hires_fix(inputs):
     target_width = get_int(inputs, "width", 1024)
     target_height = get_int(inputs, "height", 1024)
 
+    # seed 0 是确定性种子（ComfyUI 语义）；不要翻译成 -1（-1 在 C 侧 = 随机）
     seed = get_int(inputs, "seed", 0)
-    if seed == 0:
-        seed = -1
 
     # HiRes 放大器：默认 latent-bislerp（对齐 E1xMIN 甜点配方）；
     # 如需 ESRGAN 可显式设 upscaler=model + upscaler_model
@@ -661,7 +704,7 @@ def hires_fix(inputs):
         return (None,)
 
     print("HiResFix: saved " + out[1])
-    return (out[1],)
+    return (LatentImage(target_width, target_height, 1, out[1], ""),)
 
 
 register_node("HiResFix", "HiRes Fix",
@@ -669,10 +712,22 @@ register_node("HiResFix", "HiRes Fix",
 
 
 def save_image(inputs):
-    image_path = dict_get(inputs, "images")
-    if image_path is None:
+    image_path = image_path_of(dict_get(inputs, "images"))
+    if image_path == "":
         print("SaveImage: no image path received")
         return (None,)
+    # 上游产物可能在 /tmp 中间文件或其它 prefix 下：按 ComfyUI 语义落
+    # output_dir/filename_prefix.png（上游已写到目标则不重复拷贝）
+    output_dir = get_str(inputs, "output_dir", "/tmp/comfy_output")
+    prefix = get_str(inputs, "filename_prefix", "comfy")
+    target = output_dir + "/" + prefix + ".png"
+    if image_path != target:
+        sd_ensure_directory(output_dir)
+        rc = sd_copy_file(image_path, target)
+        if rc != 0:
+            print("SaveImage: copy failed, rc=" + string_of_int(rc))
+            return (None,)
+        image_path = target
     print("Image saved to: " + image_path)
     return (image_path,)
 
@@ -781,7 +836,8 @@ def load_image(inputs):
     if image_path == "":
         print("LoadImage: no image path provided")
         return (None,)
-    return (image_path,)
+    # MASK 输出未实现（alpha/黑图）→ None，避免声明 2 输出只回 1 个导致链接越界
+    return (image_path, None)
 
 
 register_node("LoadImage", "Load Image",
@@ -795,6 +851,7 @@ def image_scale(inputs):
     if image_path is None:
         print("ImageScale: no image received")
         return (None,)
+    image_path = image_path_of(image_path)
     width = get_int(inputs, "width", 1024)
     height = get_int(inputs, "height", 1024)
     out = "/tmp/comfycli_scaled_" + string_of_int(width) + "x" + string_of_int(height) + ".png"
@@ -814,6 +871,7 @@ def image_scale_by(inputs):
     if image_path is None:
         print("ImageScaleBy: no image received")
         return (None,)
+    image_path = image_path_of(image_path)
     scale_by = get_float(inputs, "scale_by", 1.0)
     out = "/tmp/comfycli_scaled_by.png"
     rc = sd_scale_image(image_path, out, scale_by)
@@ -832,6 +890,7 @@ def image_invert(inputs):
     if image_path is None:
         print("ImageInvert: no image received")
         return (None,)
+    image_path = image_path_of(image_path)
     out = "/tmp/comfycli_inverted.png"
     rc = sd_invert_image(image_path, out)
     if rc != 0:
@@ -868,6 +927,7 @@ def image_pad_for_outpaint(inputs):
     if image_path is None:
         print("ImagePadForOutpaint: no image received")
         return (None,)
+    image_path = image_path_of(image_path)
     left = get_int(inputs, "left", 0)
     top = get_int(inputs, "top", 0)
     right = get_int(inputs, "right", 0)
@@ -877,7 +937,7 @@ def image_pad_for_outpaint(inputs):
     if rc != 0:
         print("ImagePadForOutpaint: failed, rc=" + string_of_int(rc))
         return (None,)
-    return (out,)
+    return (out, None)
 
 
 register_node("ImagePadForOutpaint", "Pad Image for Outpainting",
@@ -889,6 +949,7 @@ def image_blur(inputs):
     if image is None:
         print("ImageBlur: no image received")
         return (None,)
+    image = image_path_of(image)
     sigma = get_float(inputs, "sigma", 1.0)
     out = "/tmp/comfycli_blur.png"
     rc = sd_blur_image(image, out, sigma)
@@ -908,6 +969,8 @@ def image_batch(inputs):
     if i1 is None or i2 is None:
         print("ImageBatch: need image1 and image2")
         return (None,)
+    i1 = image_path_of(i1)
+    i2 = image_path_of(i2)
     out = "/tmp/comfycli_batch.png"
     rc = sd_batch_images(i1, i2, out)
     if rc != 0:
@@ -926,9 +989,9 @@ def image_composite_masked(inputs):
     if dest is None or src is None:
         print("ImageCompositeMasked: need destination and source")
         return (None,)
-    mask = dict_get(inputs, "mask")
-    if mask is None:
-        mask = ""
+    dest = image_path_of(dest)
+    src = image_path_of(src)
+    mask = image_path_of(dict_get(inputs, "mask"))
     x = get_int(inputs, "x", 0)
     y = get_int(inputs, "y", 0)
     out = "/tmp/comfycli_composite.png"
@@ -948,6 +1011,7 @@ def image_crop(inputs):
     if image is None:
         print("ImageCrop: no image received")
         return (None,)
+    image = image_path_of(image)
     x = get_int(inputs, "x", 0)
     y = get_int(inputs, "y", 0)
     width = get_int(inputs, "width", 512)
@@ -969,7 +1033,7 @@ def image_to_mask(inputs):
     if image is None:
         print("ImageToMask: no image received")
         return (None,)
-    return (image,)
+    return (image_path_of(image),)
 
 
 register_node("ImageToMask", "Convert Image to Mask",
@@ -994,7 +1058,7 @@ def clip_vision_encode(inputs):
     if image is None:
         print("CLIPVisionEncode: no image received")
         return (None,)
-    return (image,)
+    return (image_path_of(image),)
 
 
 register_node("CLIPVisionEncode", "CLIP Vision Encode",
@@ -1002,8 +1066,8 @@ register_node("CLIPVisionEncode", "CLIP Vision Encode",
 
 
 def preview_image(inputs):
-    image_path = dict_get(inputs, "images")
-    if image_path is None:
+    image_path = image_path_of(dict_get(inputs, "images"))
+    if image_path == "":
         print("PreviewImage: no image received")
         return (None,)
     return (image_path,)
@@ -1076,11 +1140,16 @@ def latent_upscale(inputs):
     if latent is None:
         print("LatentUpscale: no samples received")
         return (None,)
-    # In this simplified backend, width/height directly replace latent dimensions.
     width = get_int(inputs, "width", latent.width)
     height = get_int(inputs, "height", latent.height)
     batch_size = latent.batch_size
-    return (LatentImage(width, height, batch_size, latent.image_path, latent.mask_path),)
+    image_path = latent.image_path
+    # 本后端 LATENT 携带已解码图片路径：真缩放图片即等效 latent 上采样
+    if image_path != "" and (width != latent.width or height != latent.height):
+        out = "/tmp/comfycli_lat_upscale.png"
+        if sd_resize_image(image_path, out, width, height) == 0:
+            image_path = out
+    return (LatentImage(width, height, batch_size, image_path, latent.mask_path),)
 
 
 register_node("LatentUpscale", "Latent Upscale",
@@ -1095,7 +1164,14 @@ def latent_crop(inputs):
     width = get_int(inputs, "width", latent.width)
     height = get_int(inputs, "height", latent.height)
     batch_size = latent.batch_size
-    return (LatentImage(width, height, batch_size, latent.image_path, latent.mask_path),)
+    image_path = latent.image_path
+    if image_path != "":
+        x = get_int(inputs, "x", 0)
+        y = get_int(inputs, "y", 0)
+        out = "/tmp/comfycli_lat_crop.png"
+        if sd_crop_image(image_path, out, x, y, width, height) == 0:
+            image_path = out
+    return (LatentImage(width, height, batch_size, image_path, latent.mask_path),)
 
 
 register_node("LatentCrop", "Latent Crop",
@@ -1146,11 +1222,14 @@ def ksampler_advanced(inputs):
         print("KSamplerAdvanced generate failed, rc=" + string_of_int(rc))
         return (None,)
 
-    return (out[1],)
+    batch = 1
+    if latent is not None:
+        batch = latent.batch_size
+    return (LatentImage(width, height, batch, out[1], ""),)
 
 
 register_node("KSamplerAdvanced", "KSampler Advanced",
-              "ksampler_advanced", ("LATENT", "IMAGE"), False)
+              "ksampler_advanced", ("LATENT",), False)
 
 
 def conditioning_zero_out(inputs):
@@ -1160,6 +1239,15 @@ def conditioning_zero_out(inputs):
 
 register_node("ConditioningZeroOut", "Conditioning Zero Out",
               "conditioning_zero_out", ("CONDITIONING",), False)
+
+
+def conditioning_passthrough(inputs):
+    # 近似实现：原样透传 conditioning（这些控制/风格节点的完整语义待实现，先保证不崩）
+    c = dict_get(inputs, "conditioning")
+    if c is None:
+        print("conditioning_passthrough: no conditioning input")
+        return (None,)
+    return (c,)
 
 
 def controlnet_loader(inputs):
@@ -1185,7 +1273,7 @@ def controlnet_apply(inputs):
     cn_path = ""
     if cn is not None:
         cn_path = cn.name
-    image_path = get_str(inputs, "image", "")
+    image_path = image_path_of(dict_get(inputs, "image"))
     strength = get_float(inputs, "strength", 1.0)
     return (Conditioning(c.entries, cn_path, image_path, strength),)
 
@@ -1309,7 +1397,17 @@ def latent_rotate(inputs):
     latent: LatentImage = dict_get(inputs, "samples")
     if latent is None:
         return (None,)
-    rotation = string_to_int(get_str(inputs, "rotation", "0"))
+    # ComfyUI 值形如 "90 degrees"：string_to_int 会被 prelude 转成 0，这里按前缀解析
+    rot_str = get_str(inputs, "rotation", "0")
+    rotation = 0
+    if str_starts_with(rot_str, "180"):
+        rotation = 180
+    elif str_starts_with(rot_str, "270"):
+        rotation = 270
+    elif str_starts_with(rot_str, "90"):
+        rotation = 90
+    else:
+        rotation = string_to_int(rot_str)
     w = latent.width
     h = latent.height
     if rotation == 90 or rotation == 270:
@@ -1330,8 +1428,10 @@ def latent_flip(inputs):
     latent: LatentImage = dict_get(inputs, "samples")
     if latent is None:
         return (None,)
+    # ComfyUI 值为 "x-axis: vertically" / "y-axis: horizontally"（按前缀分支）
     method = 0
-    if get_str(inputs, "flip_method", "x") == "y":
+    flip_m = get_str(inputs, "flip_method", "x")
+    if str_starts_with(flip_m, "y") or flip_m == "y":
         method = 1
     image_path = latent.image_path
     if image_path != "":
@@ -1477,7 +1577,12 @@ def latent_upscale_by(inputs):
     scale_by = get_float(inputs, "scale_by", 1.0)
     width = int(latent.width * scale_by)
     height = int(latent.height * scale_by)
-    return (LatentImage(width, height, latent.batch_size, latent.image_path, latent.mask_path),)
+    image_path = latent.image_path
+    if image_path != "" and (width != latent.width or height != latent.height):
+        out = "/tmp/comfycli_lat_upscale_by.png"
+        if sd_resize_image(image_path, out, width, height) == 0:
+            image_path = out
+    return (LatentImage(width, height, latent.batch_size, image_path, latent.mask_path),)
 
 
 register_node("LatentUpscaleBy", "Latent Upscale By",
@@ -1491,7 +1596,7 @@ def controlnet_apply_advanced(inputs):
     cn_path = ""
     if cn is not None:
         cn_path = cn.name
-    image_path = get_str(inputs, "image", "")
+    image_path = image_path_of(dict_get(inputs, "image"))
     strength = get_float(inputs, "strength", 1.0)
     if pos is None:
         return (None, None)
@@ -1506,9 +1611,7 @@ register_node("ControlNetApplyAdvanced", "Apply ControlNet (Advanced)",
 def inpaint_model_conditioning(inputs):
     pos = dict_get(inputs, "positive")
     neg = dict_get(inputs, "negative")
-    image_path = dict_get(inputs, "pixels")
-    if image_path is None:
-        image_path = ""
+    image_path = image_path_of(dict_get(inputs, "pixels"))
     mask_path = dict_get(inputs, "mask")
     if mask_path is None:
         mask_path = ""
@@ -1952,9 +2055,9 @@ register_node("ModelPatchLoader", "Load Model Patch",
 register_node("DiffusersLoader", "Load Diffusers",
               "checkpoint_loader_simple", ("MODEL", "CLIP", "VAE"), False)
 register_node("unCLIPCheckpointLoader", "Load unCLIP Checkpoint",
-              "checkpoint_loader_simple", ("MODEL", "CLIP", "VAE", "CLIP_VISION"), False)
+              "unclip_checkpoint_loader", ("MODEL", "CLIP", "VAE", "CLIP_VISION"), False)
 register_node("ImageOnlyCheckpointLoader", "Load Image-Only Checkpoint",
-              "checkpoint_loader_simple", ("MODEL", "CLIP_VISION", "VAE"), False)
+              "image_only_checkpoint_loader", ("MODEL", "CLIP_VISION", "VAE"), False)
 register_node("ConditioningSetAreaPercentageVideo", "ConditioningSetAreaPercentageVideo",
               "conditioning_passthrough", ("CONDITIONING",), False)
 register_node("AnimaLLLiteApply", "AnimaLLLiteApply",
@@ -2061,8 +2164,13 @@ def dispatch_model(class_type: str, inputs):
         return vae_loader(inputs)
     elif class_type == "CLIPLoader":
         return clip_loader(inputs)
-    elif class_type == "LoraLoader" or class_type == "LoraLoaderModelOnly" or class_type == "LoraLoaderBypass" or class_type == "LoraLoaderBypassModelOnly":
+    elif class_type == "LoraLoader" or class_type == "LoraLoaderModelOnly":
         return lora_loader(inputs)
+    elif class_type == "LoraLoaderBypass" or class_type == "LoraLoaderBypassModelOnly":
+        # Bypass：ComfyUI 语义为忽略 LoRA、原样透传（此前误走 lora_loader 会真的加载）
+        m_byp = dict_get(inputs, "model")
+        c_byp = dict_get(inputs, "clip")
+        return (m_byp, c_byp)
     elif class_type == "CLIPMergeSimple":
         return clip_merge_simple(inputs)
     elif class_type == "CLIPMergeAdd":
@@ -2103,8 +2211,12 @@ def dispatch_model(class_type: str, inputs):
         return model_merge_subtract(inputs)
     elif str_starts_with(class_type, "ModelMerge"):
         return model_merge_blocks(inputs)
-    elif class_type == "DiffusersLoader" or class_type == "unCLIPCheckpointLoader" or class_type == "ImageOnlyCheckpointLoader":
+    elif class_type == "DiffusersLoader":
         return checkpoint_loader_simple(inputs)
+    elif class_type == "unCLIPCheckpointLoader":
+        return unclip_checkpoint_loader(inputs)
+    elif class_type == "ImageOnlyCheckpointLoader":
+        return image_only_checkpoint_loader(inputs)
     elif class_type == "ImageOnlyCheckpointSave":
         return checkpoint_save(inputs)
     elif class_type == "ModelPatchLoader":

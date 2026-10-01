@@ -37,6 +37,9 @@ static void print_usage(const char* argv0) {
     std::fprintf(stderr, "  -m, --model <path>        Full checkpoint model path (safetensors)\n");
     std::fprintf(stderr, "  --diffusion-model <path>  Standalone diffusion model path (GGUF, e.g. Z-Image)\n");
     std::fprintf(stderr, "  --llm <path>              LLM text encoder path (required for --diffusion-model)\n");
+    std::fprintf(stderr, "  --llm-vision <path>       LLM vision projector (mmproj; required with --ref-image on Qwen)\n");
+    std::fprintf(stderr, "  --ref-image <path>        Reference image (native ref conditioning: Qwen-Image / Z-Image-Omni)\n");
+    std::fprintf(stderr, "  --ref-image-args <str>    Extra ref-image args, e.g. \"preset=qwen\" (default: model preset)\n");
     std::fprintf(stderr, "  --clip-l <path>           CLIP-L path\n");
     std::fprintf(stderr, "  --clip-g <path>           CLIP-G path\n");
     std::fprintf(stderr, "  --vae <path>              VAE path (optional, default uses model built-in VAE)\n");
@@ -63,6 +66,11 @@ static void print_usage(const char* argv0) {
     std::fprintf(stderr, "  --upscale-repeats <int>   Number of post-upscale passes (default: 0=off)\n");
     std::fprintf(stderr, "  --upscale-tile-size <int> Post-upscale tile size (default: 128)\n");
     std::fprintf(stderr, "  --lora <path:weight>      LoRA, can be specified multiple times\n");
+    std::fprintf(stderr, "  --ipadapter               Enable native IP-Adapter (SD1.x / SDXL checkpoints)\n");
+    std::fprintf(stderr, "  --ipadapter-model <path>  IP-Adapter weights (e.g. ip-adapter-plus_sdxl_vit-h.safetensors)\n");
+    std::fprintf(stderr, "  --ipadapter-clip-vision <path>  CLIP Vision model (e.g. clip_vision_sd15.safetensors)\n");
+    std::fprintf(stderr, "  --ipadapter-image <path>  Reference image for IP-Adapter\n");
+    std::fprintf(stderr, "  --ipadapter-strength <f>  IP-Adapter conditioning strength (default: 1.0)\n");
     std::fprintf(stderr, "  --freeu                   Enable FreeU\n");
     std::fprintf(stderr, "  --freeu-b1 <float>        FreeU backbone1 scale (default: 1.3)\n");
     std::fprintf(stderr, "  --freeu-b2 <float>        FreeU backbone2 scale (default: 1.4)\n");
@@ -74,7 +82,7 @@ static void print_usage(const char* argv0) {
     std::fprintf(stderr, "  --fresca-cutoff <int>     FreSca frequency cutoff (default: 20)\n");
     std::fprintf(stderr, "  --diffusion-fa            Enable diffusion flash attention\n");
     std::fprintf(stderr, "  --cache-mode <name>       Sample-step cache: easycache (DiT) | disabled (default)\n");
-    std::fprintf(stderr, "  --cache-threshold <float> EasyCache reuse threshold (default 0.2; lower = more skips)\n");
+    std::fprintf(stderr, "  --cache-threshold <float> EasyCache reuse threshold (default 0.2; higher = more skips)\n");
     std::fprintf(stderr, "  --cache-start <float>     Cache active from this progress (0-1, default 0.15)\n");
     std::fprintf(stderr, "  --cache-end <float>       Cache active until this progress (0-1, default 0.95)\n");
     std::fprintf(stderr, "  --offload-to-cpu          Keep weights in CPU RAM (params_backend \"*=cpu\")\n");
@@ -192,6 +200,15 @@ int main(int argc, char** argv) {
     float cache_start = 0.15f;
     float cache_end = 0.95f;
 
+    std::string llm_vision;
+    std::vector<std::string> ref_image_paths;
+    std::string ref_image_args;
+    bool ipadapter = false;
+    std::string ipadapter_model;
+    std::string ipadapter_clip_vision;
+    std::string ipadapter_image;
+    float ipadapter_strength = 1.0f;
+
     // 后处理默认值对齐 backup.sh：清晰度 + 锐化 + 智能锐化 + 边缘锐化，提升清晰度/细节
     postproc::Params postproc;
     postproc.clarity                = 0.2f;
@@ -211,6 +228,22 @@ int main(int argc, char** argv) {
             diffusion_model = argv[++i];
         } else if (std::strcmp(argv[i], "--llm") == 0 && i + 1 < argc) {
             llm = argv[++i];
+        } else if (std::strcmp(argv[i], "--llm-vision") == 0 && i + 1 < argc) {
+            llm_vision = argv[++i];
+        } else if (std::strcmp(argv[i], "--ref-image") == 0 && i + 1 < argc) {
+            ref_image_paths.push_back(argv[++i]);
+        } else if (std::strcmp(argv[i], "--ref-image-args") == 0 && i + 1 < argc) {
+            ref_image_args = argv[++i];
+        } else if (std::strcmp(argv[i], "--ipadapter") == 0) {
+            ipadapter = true;
+        } else if (std::strcmp(argv[i], "--ipadapter-model") == 0 && i + 1 < argc) {
+            ipadapter_model = argv[++i];
+        } else if (std::strcmp(argv[i], "--ipadapter-clip-vision") == 0 && i + 1 < argc) {
+            ipadapter_clip_vision = argv[++i];
+        } else if (std::strcmp(argv[i], "--ipadapter-image") == 0 && i + 1 < argc) {
+            ipadapter_image = argv[++i];
+        } else if (std::strcmp(argv[i], "--ipadapter-strength") == 0 && i + 1 < argc) {
+            ipadapter_strength = static_cast<float>(std::atof(argv[++i]));
         } else if (std::strcmp(argv[i], "--clip-l") == 0 && i + 1 < argc) {
             clip_l = argv[++i];
             clip_l_overridden = true;
@@ -366,6 +399,7 @@ int main(int argc, char** argv) {
         // SDXL checkpoint contains UNet/VAE/CLIP-L/CLIP-G; external diffusion/LLM are not used
         diffusion_model = "";
         llm = "";
+        llm_vision = "";
         // Use external VAE/CLIP only when explicitly requested
         if (!clip_l_overridden) clip_l = "";
         if (!clip_g_overridden) clip_g = "";
@@ -373,6 +407,11 @@ int main(int argc, char** argv) {
     } else {
         // GGUF+LLM mode: no full checkpoint, VAE/diffusion/LLM required, external CLIP optional
         model = "";
+    }
+
+    if (ipadapter && (ipadapter_model.empty() || ipadapter_clip_vision.empty() || ipadapter_image.empty())) {
+        std::fprintf(stderr, "Error: --ipadapter requires --ipadapter-model, --ipadapter-clip-vision and --ipadapter-image\n");
+        return 1;
     }
 
     if (quality_prefix && prompt.find("masterpiece") == std::string::npos) {
@@ -410,14 +449,23 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "  clip_l: %s\n", clip_l.c_str());
     std::fprintf(stderr, "  clip_g: %s\n", clip_g.c_str());
     std::fprintf(stderr, "  vae:    %s\n", vae.c_str());
+    if (ipadapter) {
+        std::fprintf(stderr, "  ipadapter: %s (clip: %s, image: %s, strength: %.2f)\n",
+                     ipadapter_model.c_str(), ipadapter_clip_vision.c_str(),
+                     ipadapter_image.c_str(), ipadapter_strength);
+    }
     std::fprintf(stderr, "  prompt: %s\n", prompt.c_str());
     std::fprintf(stderr, "  low-res: %dx%d -> target: %dx%d\n", low_w, low_h, hires_width, hires_height);
     std::fprintf(stderr, "  steps: %d (HiRes: %d), cfg=%.1f, seed=%ld\n", steps, hires ? hires_steps : 0, cfg, seed);
+    for (const std::string& p : ref_image_paths) {
+        std::fprintf(stderr, "  ref-image: %s (args: %s)\n", p.c_str(), ref_image_args.c_str());
+    }
 
     sd::ModelConfig cfg_model;
     cfg_model.model_path           = model;
     cfg_model.diffusion_model_path = diffusion_model;
     cfg_model.llm_path             = llm;
+    cfg_model.llm_vision_path      = llm_vision;
     cfg_model.clip_l_path          = clip_l;
     cfg_model.clip_g_path          = clip_g;
     cfg_model.vae_path             = vae;
@@ -441,6 +489,12 @@ int main(int argc, char** argv) {
 
     pipeline.set_hires_upscaler(hires_upscaler, hires_upscaler_model);
     pipeline.set_fresca(fresca, fresca_low, fresca_high, fresca_cutoff);
+    for (const std::string& p : ref_image_paths) {
+        pipeline.set_ref_image(p, ref_image_args);
+    }
+    if (ipadapter) {
+        pipeline.set_ipadapter(ipadapter_model, ipadapter_clip_vision, ipadapter_image, ipadapter_strength);
+    }
 
     sd::ImageGenerationParams gen_params;
     gen_params.prompt          = prompt;

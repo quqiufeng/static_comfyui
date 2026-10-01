@@ -94,7 +94,7 @@
 #      蒸馏 turbo（z_image）后期步变化极小 → 更易命中；base 跳 9/20，hires 跳 28–30/41。
 #      接线：ImageGenerationParams.cache_* → sd_img_gen_params_t.cache → SampleCacheRuntime。
 #      调参：CACHE_MODE=disabled|easycache|cache-dit|spectrum
-#            CACHE_THRESHOLD 越低跳得越多（默认 0.2；0.15 更激进，0.3 更保守，过低画质漂）。
+#            CACHE_THRESHOLD 越高跳得越多（默认 0.2；0.3 更激进，0.15 更保守，过高画质漂）。
 #   2) GGML_CUDA_GRAPHS=ON（build_sd_dl.sh）
 #      原理：把一步采样的 CUDA kernel 序列录成 graph 一次提交，砍 launch 开销。
 #      本例约再省数秒～十数秒；需重编 /opt/sd/build-dl。
@@ -132,29 +132,31 @@ T2I_ADAPTER_FLAG=0; T2I_ADAPTER_MODEL=""; T2I_ADAPTER_IMAGE=""
 PHOTOMAKER_FLAG=0; PHOTOMAKER_MODEL=""; PHOTOMAKER_ID_IMAGES=""
 ARGS=()
 
-next_val() { i=$((i+1)); echo "${@:$((i+1)):1}"; }
+# 注意：不能写 $(next_val "$@") 接值 —— 子 shell 里 i++ 会丢失，值会被循环
+# 再次当成位置参数消费（prompt 被污染）。改为改全局 _NV、父 shell 自增 i。
+next_val() { i=$((i+1)); _NV="${@:$((i+1)):1}"; }
 
 i=0
 while [ $i -lt $# ]; do
     arg="${@:$((i+1)):1}"
     case "$arg" in
         --upscale)          UPSCALE_FLAG=1 ;;
-        --lora)             LORA_CONFIG=$(next_val "$@") ;;
-        --prompt-schedule)  PROMPT_SCHEDULE=$(next_val "$@") ;;
-        --regional-prompts) REGIONAL_PROMPTS=$(next_val "$@") ;;
+        --lora)             next_val "$@"; LORA_CONFIG="$_NV" ;;
+        --prompt-schedule)  next_val "$@"; PROMPT_SCHEDULE="$_NV" ;;
+        --regional-prompts) next_val "$@"; REGIONAL_PROMPTS="$_NV" ;;
         --face-restore)     FACE_RESTORE_FLAG=1 ;;
-        --face-restore-model) FACE_RESTORE_MODEL=$(next_val "$@") ;;
+        --face-restore-model) next_val "$@"; FACE_RESTORE_MODEL="$_NV" ;;
         --face-swap)        FACE_SWAP_FLAG=1 ;;
-        --face-swap-source) FACE_SWAP_SOURCE=$(next_val "$@") ;;
+        --face-swap-source) next_val "$@"; FACE_SWAP_SOURCE="$_NV" ;;
         --ipadapter)        IPADAPTER_FLAG=1 ;;
-        --ipadapter-model)  IPADAPTER_MODEL=$(next_val "$@") ;;
-        --ipadapter-image)  IPADAPTER_IMAGE=$(next_val "$@") ;;
+        --ipadapter-model)  next_val "$@"; IPADAPTER_MODEL="$_NV" ;;
+        --ipadapter-image)  next_val "$@"; IPADAPTER_IMAGE="$_NV" ;;
         --t2i-adapter)      T2I_ADAPTER_FLAG=1 ;;
-        --t2i-adapter-model) T2I_ADAPTER_MODEL=$(next_val "$@") ;;
-        --t2i-adapter-image) T2I_ADAPTER_IMAGE=$(next_val "$@") ;;
+        --t2i-adapter-model) next_val "$@"; T2I_ADAPTER_MODEL="$_NV" ;;
+        --t2i-adapter-image) next_val "$@"; T2I_ADAPTER_IMAGE="$_NV" ;;
         --photomaker)       PHOTOMAKER_FLAG=1 ;;
-        --photomaker-model) PHOTOMAKER_MODEL=$(next_val "$@") ;;
-        --photomaker-id-images) PHOTOMAKER_ID_IMAGES=$(next_val "$@") ;;
+        --photomaker-model) next_val "$@"; PHOTOMAKER_MODEL="$_NV" ;;
+        --photomaker-id-images) next_val "$@"; PHOTOMAKER_ID_IMAGES="$_NV" ;;
         *)                  ARGS+=("$arg") ;;
     esac
     i=$((i+1))
@@ -208,6 +210,8 @@ HIRES_STEPS="${HIRES_STEPS:-40}"
 HIRES_STRENGTH="${HIRES_STRENGTH:-0.25}"
 # HiRes 上采样方式: latent-bicubic（默认，MIN 柔化档）| latent-bislerp（保细节）| model（ESRGAN 高分辨率会崩）
 HIRES_UPSCALER="${HIRES_UPSCALER:-latent-bicubic}"
+# HIRES=0 关闭两阶段（单阶段直出目标分辨率）；img_hires 的 HIRES_STEPS=0 不是关断哨兵
+HIRES="${HIRES:-1}"
 # 后处理（甜点见头部注释）: MIN 默认 clarity 0（需纹理可调 0.15）; edge-sharpen 必须 0（白底轮廓锐化出白边）
 # sharpen / smart-sharpen 默认非 0（USM 0.3 + Sobel 加权 0.5），但 sharpen-threshold 无 CLI 入口
 # → 阈值恒 0 = 全图锐化（平坦皮肤/纯色背景也加强）。想"真·无锐化痕迹"设 SHARPEN=0 SMART_SHARPEN=0。
@@ -222,7 +226,7 @@ NO_QUALITY_PREFIX="${NO_QUALITY_PREFIX:-0}"
 # CPU 线程数（LLM 文本编码等）, 默认跟 img_hires 的 8
 THREADS="${THREADS:-8}"
 # 采样步缓存（EasyCache/DiT 步跳过）: 默认开启; CACHE_MODE=disabled 关闭
-# CACHE_THRESHOLD 越低跳步越多（默认 0.2; 0.15 更激进, 0.3 更保守）
+# CACHE_THRESHOLD 越高跳步越多（默认 0.2; 0.3 更激进, 0.15 更保守）
 CACHE_MODE="${CACHE_MODE:-easycache}"
 CACHE_THRESHOLD="${CACHE_THRESHOLD:-0.2}"
 CACHE_START="${CACHE_START:-0.15}"
@@ -327,11 +331,15 @@ echo "========================================"
 echo "  HD Image Generation"
 echo "========================================"
 echo -e "Target Size: ${GREEN}${WIDTH}x${HEIGHT}${NC}"
-echo -e "Low-res Pass: ${GREEN}${LOW_W}x${LOW_H} -> ${WIDTH}x${HEIGHT}${NC}"
-echo -e "Steps: $STEPS -> $HIRES_STEPS (HiRes)"
+if [ "$HIRES" -eq 1 ]; then
+    echo -e "Low-res Pass: ${GREEN}${LOW_W}x${LOW_H} -> ${WIDTH}x${HEIGHT}${NC}"
+    echo -e "Steps: $STEPS -> $HIRES_STEPS (HiRes)"
+    echo -e "HiRes Strength: $HIRES_STRENGTH"
+    echo -e "HiRes Upscaler: ${CYAN}$HIRES_UPSCALER${NC}"
+else
+    echo -e "HiRes: ${GREEN}off (single-pass ${WIDTH}x${HEIGHT})${NC}"
+fi
 echo -e "CFG Scale: ${CYAN}$CFG_SCALE${NC}"
-echo -e "HiRes Strength: $HIRES_STRENGTH"
-echo -e "HiRes Upscaler: ${CYAN}$HIRES_UPSCALER${NC}"
 echo -e "Sampler: ${CYAN}$SAMPLING_METHOD${NC} + ${CYAN}$SCHEDULER${NC}"
 if [ "$CACHE_MODE" != "disabled" ]; then
     echo -e "Cache: ${CYAN}$CACHE_MODE${NC} threshold=$CACHE_THRESHOLD range=[$CACHE_START,$CACHE_END]"
@@ -383,14 +391,7 @@ SD_CMD=("$SD_CLI"
   --edge-sharpen-radius 2
   --edge-sharpen-threshold 0.3
   -t "$THREADS"
-  -W "$LOW_W" -H "$LOW_H"
   --steps "$STEPS"
-  --hires
-  --hires-width "$WIDTH"
-  --hires-height "$HEIGHT"
-  --hires-strength "$HIRES_STRENGTH"
-  --hires-steps "$HIRES_STEPS"
-  --hires-upscaler "$HIRES_UPSCALER"
   --cache-mode "$CACHE_MODE"
   --cache-threshold "$CACHE_THRESHOLD"
   --cache-start "$CACHE_START"
@@ -399,6 +400,16 @@ SD_CMD=("$SD_CLI"
   "$PROMPT"
   "$OUTPUT_PATH"
 )
+# HIRES=0 → 单阶段直出目标分辨率；默认两阶段：LOW 分辨率构图 + latent 放大
+if [ "$HIRES" -eq 1 ]; then
+    SD_CMD+=(-W "$LOW_W" -H "$LOW_H"
+             --hires
+             --hires-width "$WIDTH" --hires-height "$HEIGHT"
+             --hires-strength "$HIRES_STRENGTH" --hires-steps "$HIRES_STEPS"
+             --hires-upscaler "$HIRES_UPSCALER")
+else
+    SD_CMD+=(-W "$WIDTH" -H "$HEIGHT")
+fi
 
 # 彻底关 img_hires 内置质量前缀（默认关, 维持既有配方）
 if [ "$NO_QUALITY_PREFIX" = "1" ]; then

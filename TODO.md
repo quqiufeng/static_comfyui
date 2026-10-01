@@ -119,3 +119,91 @@
 - `ModelMerge*` 自合并 ratio=0.5 与基线逐字节一致
 - `CLIPMergeSimple` 自合并 ratio=0.5 与基线逐字节一致
 - `CheckpointSave` 导出 6.9GB 权重
+
+## 代码复盘 P0 修复（2026-10-01：双 agent 审计 23+25 条 + 逐条人工复核）
+
+已修（编译通过 + e2e 验证）：
+- prompt 模式丢 prompt：`ksampler` 改 `resolve_prompt_text` 回退（`main.static.py` 写 `prompt` 键，
+  ksampler 此前只读 `positive` → 空提示词出图）
+- 不带 `--output-dir` 必然 rc=-1：`main.static.py` 空串默认 `./output`（cli_args 初值 `""` 判不住 None）
+- 退出码恒 0：`execute_prompt` 成功写 `_ok` 标记，校验失败/中止/环 → `exit 1`
+- 声明输出数>返回数越界崩：`execution.static.py` resolve/upstream_missing 加边界；
+  `LoadImage`/`ImagePadForOutpaint` 补 mask=None；`KSamplerAdvanced` 删多余 IMAGE 输出；
+  `unCLIP`/`ImageOnly` 专用包装（CLIP_VISION→None，不再错传文本 CLIP 句柄）；
+  `LoraLoader` 返回 `(model, clip)` 透传 + 读 `strength_model` 键
+- `conditioning_passthrough` 补实现（7 节点此前 unbound 崩）
+- FFI seed 32 位：`sd_backend.clamp_seed` 折回 31 位（e2e：seed=4294967295 → seed=1，确定性）
+- `KSamplerAdvanced` 读 `noise_seed`（ComfyUI 标准键，此前恒默认 42）
+- HiResFix `seed=0` 不再翻译成随机（ComfyUI 0 = 确定性）
+- `LatentRotate` "90 degrees" 按前缀解析；`LatentFlip` 按 `y-axis` 前缀分支（此前恒 0/恒竖翻）
+- `LoraLoaderBypass` 改真透传（此前误走 lora_loader 会真加载）
+- `next_val` 子 shell bug（backup.sh / backup_scene.sh）：`--lora x:0.8 "prompt"` 曾把 `x:0.8` 当 prompt
+- `HIRES=0` 关断两阶段：单阶段直出目标分辨率（`HIRES_STEPS=0` 不是关断哨兵）
+- EasyCache 阈值文档方向反转：代码 `cumulative < threshold → skip` 即**阈值越高跳越多**
+ （backup.sh ×2、img_hires usage 已改；调参方向按"高=更快易花"重新理解）
+
+代码复盘 P0 修复后续 — A 轮（2026-10-01，comfycli 接 EasyCache setter）：
+- adapter：`Impl` 加 cache 四字段 + `SDPipeline::set_cache` + generate 中 impl_ 优先
+ （per-call params 回退，img_hires 路线不受影响）+ `sd_pipeline_set_cache(mode 字符串→sd_cache_mode_t,
+ 含 ucache/dbcache/taylorseer 全枚举，未知名告警回落 disabled)`
+- StaticPy：`sd_backend` extern + `sd_set_cache`；`nodes.parse_sampler_opts` 加
+ cache_mode/cache_threshold/cache_start/cache_end（默认 easycache/0.2/0.15/0.95 对齐 backup.sh）；
+ `run_sampler` 单漏斗（4 采样点全过它）调 `sd_set_cache`
+- 构建：只编 `sdcpp_adapter_shared`（img_hires 二进制未动，保 strings 规格，B 轮回源用）
+- e2e：默认→`EasyCache enabled threshold 0.200` + rc=0 + png；`cache_threshold=0.5`→
+ `skipped 3/15 steps (1.25x)`（阈值钮丝全链路）；`cache_mode=bogus`→adapter 告警回落+rc=0
+- 遗留 #7 关闭
+
+代码复盘修复 — B 轮（2026-10-01，img_hires 源码回源 + sampler 映射告警）：
+- `img_hires.cpp` 回源 4 组 flag（与二进制 strings 规格逐字对账 13/13）：
+  `--llm-vision`（mmproj）、`--ref-image`（可重复）/`--ref-image-args`、`--ipadapter` 5 件套
+ （缺参报错文案同源）、config 打印 `ipadapter:` / `ref-image:` 行
+- adapter：`ModelConfig.llm_vision_path` → `sd_ctx_params_t.llm_vision_path`；
+  `SDPipeline::set_ref_image`（cv::imread→sd_image_t 持久缓冲，日志同二进制文案）→
+  generate 写 `img_params.ref_images/ref_images_count/ref_image_args`；C API `sd_pipeline_set_ref_image`
+- sampler/scheduler 别名（ComfyUI→sd.cpp）：`euler_ancestral→euler_a`、`ddim→ddim_trailing`、
+  `dpm_2→dpm2`、`dpmpp_2m(_sde/_gpu)→dpm++2m(_sde)`；`normal/ddim_uniform/uniform/linear→discrete`
+ （comfycli 默认 scheduler "normal" 终于命中）；未知名 `[C++ gen] unknown sampler/... fallback` 告警
+ （不再静默回落）
+- 统一重编（增量不 wipe）；usage 中 P0 的 "higher = more skips" 生效
+- e2e：euler_ancestral+normal 零告警 rc=0；foo_sampler 告警回落 rc=0；`--ipadapter` 缺参 rc=1；
+  基础出图 8.79s 无回归；**Qwen-Image-2.1 真测 --llm-vision + --ref-image**
+ （mmproj 加载 + `enable llm vision` + `ref-image: 1 image(s)` + 22.5s 出图 rc=0）
+- 遗留 #2 关闭。新遗留：
+  (a) ~~mmproj 需 `libggml-cpu.so` 在搜索路径，deploy.sh GPU 模式需补打包~~
+      **决定不做（2026-10-01）：CPU 后端太慢，远程不支持 --llm-vision/--ref-image 路线，
+      deploy.sh 保持只打包 cuda 插件**；本地 `cpp/sd/build/` 的 cpu 软链保留供开发机测试
+  (b) `--ipadapter` 运行时未测（无 SD1.x/SDXL 模型），仅验证参数校验错误路径
+
+代码复盘修复 — C 轮（2026-10-01，KSampler LatentImage 化 + latent 链架构）：
+- **StaticPy 关键坑（记档）**：无注解参数的 dataclass 属性访问会被翻成裸调用
+ （`v.image_path` → `(image_path v)` 未绑定崩溃）→ helper 参数必须写 `v: LatentImage`；
+ 但 `-> str` 返回注解会被类型检查器拒（`return v` 是 LatentImage 分支）→ 返回不写注解。
+ `is_string` 已内置（comfycli_ffi.scm:72），无需新 builtin
+- KSampler/KSamplerAdvanced/HiResFix 改返回 `LatentImage(w, h, batch, out[1], "")`
+ （batch 取自输入 latent；ADetailer 属 IMAGE 保持字符串）→ latent 链类型统一
+- 全部 IMAGE 消费点经 `image_path_of` 解包：SaveImage/PreviewImage/VAEEncode×2/
+  LoadImageMask/ControlNetApply×2/InpaintModelConditioning/9 个 Image 操作/
+  ImageToMask/CLIPVisionEncode
+- SaveImage 真落盘：新 C API `sd_copy_file`（fs::copy_file，二进制安全；
+  prelude 仅有文本 I/O 不可拷 PNG）→ `output_dir/filename_prefix.png` 终于生效
+ （此前恒被 KSampler 的 comfy.png 顶替，SaveImage 的 prefix 从未用上）
+- LatentUpscale/LatentUpscaleBy → `sd_resize_image` 真缩放；LatentCrop → `sd_crop_image`
+ 真裁剪（此前全部只改元数据 = no-op）
+- e2e（全 rc=0）：T1 p0test.png 512²（prefix 生效）；T2 采样→LatentUpscale→VAEDecode→SaveImage
+ 出 cchain.png 768²；T3 pcrop 256²（真裁）+ pscale 300×200（LoadImage→ImageScale 混合链，双 SaveImage）；
+ 回归 wf_alias（euler_ancestral+normal 零告警 + EasyCache enabled）
+- 遗留 #1 关闭
+
+未修（遗留，按优先级）：
+1. KSampler 返回路径字符串当 LATENT → latent 链（采样→LatentUpscale）崩溃；需 LatentImage 化统一类型（架构级）
+2. **`build/img_hires` 二进制含源码/git 都没有的 `--ipadapter/--ref-image/--llm-vision`**（未提交的工作区产物，源码已丢）
+   → 重编 examples 前必须先回源（strings 已取回完整 usage 规格），本轮未重编、无破坏
+3. backup.sh 14 个未接线 flag（--face-restore*/--photomaker*/...）：开对应 env 即 exit 1
+4. pipeline 状态跨节点不清：init image/mask/controlnet 泄漏到后续 KSampler（apply_latent_extras 只 set 不 reset）
+5. 14 处 `/tmp` 固定中间文件名互覆盖；LoadImage 不解析 input 目录（folder_paths 零引用）
+6. ModelMergeBlocks 等 14 个不在 NODE_GROUP → 静默中止；collect_block_ratios 会吃 output_dir
+7. **速度最大项**：comfycli/workflow 路线无 EasyCache setter（cache_mode 恒 0，慢 ~2.2×）
+8. cache-start 对 hires 恒"全开"（前几步结构步无保护）；cfg=1 静默丢负向词+FreSca；cfg=0 被改 7.0
+9. sampler/scheduler 名无映射+静默回落（ComfyUI 名 → sd.cpp 名表见 stable-diffusion.cpp:80-102/123-141）
+10. SDXL clip_skip 默认偏差（conditioner.hpp:458 默认 skip1→2 vs ComfyUI 最后层，无模型待验）；backup_qwen.sh 脚本不一致

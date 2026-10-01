@@ -33,6 +33,7 @@ extern fn sd_pipeline_set_prediction(pipeline: ptr, pred: int) -> int from "sdcp
 extern fn sd_pipeline_set_video_cfg(pipeline: ptr, enabled: int, mode: int, min_cfg: float) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_sigma_range(pipeline: ptr, enabled: int, sigma_min: float, sigma_max: float) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_fresca(pipeline: ptr, enabled: int, scale_low: float, scale_high: float, freq_cutoff: int) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_set_cache(pipeline: ptr, mode: str, reuse_threshold: float, start_percent: float, end_percent: float) -> int from "sdcpp_adapter"
 extern fn sd_rotate_image(input_path: str, output_path: str, degrees: int) -> int from "sdcpp_adapter"
 extern fn sd_flip_image(input_path: str, output_path: str, method: int) -> int from "sdcpp_adapter"
 extern fn sd_blend_images(path1: str, path2: str, output_path: str, factor: float) -> int from "sdcpp_adapter"
@@ -45,6 +46,7 @@ extern fn sd_crop_image(input_path: str, output_path: str, x: int, y: int, width
 extern fn sd_pipeline_generate_adetailer(pipeline: ptr, prompt: str, negative_prompt: str, width: int, height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires: int, hires_width: int, hires_height: int, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, ad_model_path: str, ad_prompt: str, ad_negative_prompt: str, output_path: str) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_generate_full(pipeline: ptr, prompt: str, negative_prompt: str, width: int, height: int, hires_width: int, hires_height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, vae_tiling: int, vae_tile_size: int, vae_tile_overlap: float, hires_steps: int, hires_strength: float, freeu: int, freeu_b1: float, freeu_b2: float, sag: int, sag_scale: float, clarity: float, sharpen_amount: float, sharpen_radius: int, smart_sharpen_strength: float, smart_sharpen_radius: int, edge_sharpen_amount: float, edge_sharpen_radius: int, edge_sharpen_threshold: float, ad_model_path: str, ad_prompt: str, ad_negative_prompt: str, output_path: str) -> int from "sdcpp_adapter"
 extern fn sd_ensure_dir(path: str) -> int from "sdcpp_adapter"
+extern fn sd_copy_file(src: str, dst: str) -> int from "sdcpp_adapter"
 
 # SD weight type constants (matching stable-diffusion.h sd_type_t)
 SD_WTYPE_F32: int = 0
@@ -203,6 +205,10 @@ def sd_set_fresca(pipeline: ptr, scale_low: float, scale_high: float, freq_cutof
     return sd_pipeline_set_fresca(pipeline, 1, scale_low, scale_high, freq_cutoff)
 
 
+def sd_set_cache(pipeline: ptr, mode: str, reuse_threshold: float, start_percent: float, end_percent: float) -> int:
+    return sd_pipeline_set_cache(pipeline, mode, reuse_threshold, start_percent, end_percent)
+
+
 def sd_set_sigma_range(pipeline: ptr, sigma_min: float, sigma_max: float) -> int:
     return sd_pipeline_set_sigma_range(pipeline, 1, sigma_min, sigma_max)
 
@@ -247,8 +253,17 @@ def sd_generate_hires(pipeline: ptr, prompt: str, negative_prompt: str,
                                        output_path)
 
 
+def clamp_seed(seed: int) -> int:
+    # FFI 边界 int 为 32 位：≥2^32 让 Chez 直接抛异常、2^31..2^32-1 变负数
+    # （C 侧 seed<0 会走 rand()，同 seed 不可复现），超范围统一折回 31 位正数。
+    if seed > 2147483647 or seed < -2147483648:
+        return seed % 2147483647
+    return seed
+
+
 def sd_generate_full(pipeline: ptr, prompt: str, negative_prompt: str,
                      width: int, height: int, opts, output_path: str) -> int:
+    dict_set(opts, "seed", clamp_seed(dict_get(opts, "seed")))
     return sd_pipeline_generate_full(
         pipeline, prompt, negative_prompt,
         width, height,
