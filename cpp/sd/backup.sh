@@ -94,7 +94,9 @@
 #      蒸馏 turbo（z_image）后期步变化极小 → 更易命中；base 跳 9/20，hires 跳 28–30/41。
 #      接线：ImageGenerationParams.cache_* → sd_img_gen_params_t.cache → SampleCacheRuntime。
 #      调参：CACHE_MODE=disabled|easycache|cache-dit|spectrum
-#            CACHE_THRESHOLD 越高跳得越多（默认 0.2；0.3 更激进，0.15 更保守，过高画质漂）。
+#            CACHE_THRESHOLD 越高跳得越多；档位实测（2026-10-01，同配方 2560×1440，seed 随机）：
+#              0.2 → 跳 10/20+27/41（采样 2.6x，4m32s）；1.0 → 跳 12/20+29/41
+#              （采样 3.05x，3m46s）→ 已设为默认；过高画质漂，定稿要稳可回 0.2。
 #   2) GGML_CUDA_GRAPHS=ON（build_sd_dl.sh）
 #      原理：把一步采样的 CUDA kernel 序列录成 graph 一次提交，砍 launch 开销。
 #      本例约再省数秒～十数秒；需重编 /opt/sd/build-dl。
@@ -226,9 +228,9 @@ NO_QUALITY_PREFIX="${NO_QUALITY_PREFIX:-0}"
 # CPU 线程数（LLM 文本编码等）, 默认跟 img_hires 的 8
 THREADS="${THREADS:-8}"
 # 采样步缓存（EasyCache/DiT 步跳过）: 默认开启; CACHE_MODE=disabled 关闭
-# CACHE_THRESHOLD 越高跳步越多（默认 0.2; 0.3 更激进, 0.15 更保守）
+# CACHE_THRESHOLD 越高跳步越多（默认 1.0 ≈ 采样 3x、3m46s 出图；0.2 保守画质稳档）
 CACHE_MODE="${CACHE_MODE:-easycache}"
-CACHE_THRESHOLD="${CACHE_THRESHOLD:-0.2}"
+CACHE_THRESHOLD="${CACHE_THRESHOLD:-1.0}"
 CACHE_START="${CACHE_START:-0.15}"
 CACHE_END="${CACHE_END:-0.95}"
 # FreSca 频域 guidance 增强（ComfyUI nodes_fresca.py 同款, DiT/UNet 模型无关）: 默认开启, FRESCA=0 关闭
