@@ -108,6 +108,214 @@ index 9173240..46a25bc 100644
  enum sd_cancel_mode_t {
      // Stop the current generation as soon as possible.
      SD_CANCEL_ALL,
+diff --git a/src/core/backend_fit.cpp b/src/core/backend_fit.cpp
+index 2ffc1cb..f8b3efa 100644
+--- a/src/core/backend_fit.cpp
++++ b/src/core/backend_fit.cpp
+@@ -4,6 +4,8 @@
+ #include <cctype>
+ #include <cstddef>
+ #include <cstdint>
++#include <cstdlib>
++#include <cstring>
+ #include <fstream>
+ #include <utility>
+ #include <vector>
+@@ -507,4 +509,175 @@ namespace sd::backend_fit {
+         return true;
+     }
+ 
++    namespace {
++        // 移植 qwenimage-ncnn-vulkan/src/vae.cpp 的 get_optimal_vae_tile_size（本项目 patch）。
++        // ncnn 在 bf16 Vulkan 下实测 decoder 4352 B/px、encoder 1152 B/px；sd.cpp 计算精度更高，
++        // 默认按 2× 起步，可用 SD_VAE_MEM_PER_PX_DEC / SD_VAE_MEM_PER_PX_ENC 按实测校准。
++        constexpr uint64_t kVaeMemReserve           = 160ull * 1024 * 1024;
++        constexpr uint64_t kVaeMemWorkspaceOverhead = 64ull * 1024 * 1024;
++        constexpr uint64_t kVaeMemPerPxDecode       = 8704ull;
++        constexpr uint64_t kVaeMemPerPxEncode       = 2304ull;
++
++        uint64_t env_u64(const char* name, uint64_t fallback) {
++            const char* value = getenv(name);
++            if (value == nullptr || *value == '\0') {
++                return fallback;
++            }
++            char* end    = nullptr;
++            uint64_t got = strtoull(value, &end, 10);
++            if (end == value) {
++                return fallback;
++            }
++            return got;
++        }
++
++        struct VaeTileAxisCandidate {
++            int64_t size;
++            int64_t count;
++        };
++
++        std::vector<VaeTileAxisCandidate> vae_tile_axis_candidates(int64_t length) {
++            std::vector<VaeTileAxisCandidate> candidates;
++            if (length <= 0) {
++                return candidates;
++            }
++            for (int64_t count = 1; count <= length; count++) {
++                const int64_t size = (length + count - 1) / count;
++                if (!candidates.empty() && candidates.back().size == size) {
++                    continue;
++                }
++                candidates.push_back({size, (length + size - 1) / size});
++            }
++            return candidates;
++        }
++
++        // 复刻 runtime/tiling.cpp sd_tiling_calc_tiles 的非 circular 分支（本项目 patch）：
++        // target_overlap=0.5 时实际 tile 数约为非重叠的 2 倍（180/60 实测 5 而非 3），
++        // 不计入则 min-count 目标会高估大 tile 的收益。
++        int64_t vae_axis_tile_count(int64_t small_dim, int64_t tile_size, float overlap) {
++            if (small_dim <= 0 || tile_size <= 0 || small_dim <= tile_size) {
++                return 1;
++            }
++            const int32_t small = (int32_t)small_dim;
++            const int32_t tile  = (int32_t)tile_size;
++            int32_t tile_ov     = (int32_t)(tile * overlap);
++            int32_t non_ov      = tile - tile_ov;
++            if (tile_ov < 0 || non_ov <= 0) {
++                tile_ov = 0;
++                non_ov  = tile;
++            }
++            int32_t       num       = (small - tile_ov) / non_ov;
++            const int32_t overshoot = ((num + 1) * non_ov + tile_ov) % small;
++            if ((overshoot != non_ov) && (overshoot <= num * (tile / 2 - tile_ov))) {
++                num++;
++            }
++            if (num <= 2) {
++                num = 2;
++            }
++            if (num < 1) {
++                num = 1;
++            }
++            return num;
++        }
++    }  // namespace
++
++    void fit_vae_tiling_to_memory(sd_tiling_params_t& tiling_params,
++                                  ggml_backend_t backend,
++                                  int64_t latent_x,
++                                  int64_t latent_y,
++                                  int scale,
++                                  bool encoder) {
++        const char* mode = getenv("SD_VAE_TILING");
++        if (mode != nullptr && strcmp(mode, "manual") == 0) {
++            return;
++        }
++        if (backend == nullptr || latent_x <= 0 || latent_y <= 0 || scale <= 0) {
++            return;
++        }
++        ggml_backend_dev_t dev = ggml_backend_get_device(backend);
++        if (dev == nullptr) {
++            return;
++        }
++        const enum ggml_backend_dev_type dev_type = ggml_backend_dev_type(dev);
++        if (dev_type != GGML_BACKEND_DEVICE_TYPE_GPU && dev_type != GGML_BACKEND_DEVICE_TYPE_IGPU) {
++            return;
++        }
++        size_t free_bytes = 0, total_bytes = 0;
++        ggml_backend_dev_memory(dev, &free_bytes, &total_bytes);
++        if (free_bytes == 0 || free_bytes <= kVaeMemReserve + kVaeMemWorkspaceOverhead) {
++            return;
++        }
++        const uint64_t budget   = (uint64_t)free_bytes - kVaeMemReserve;
++        const uint64_t bytes_px = encoder ? env_u64("SD_VAE_MEM_PER_PX_ENC", kVaeMemPerPxEncode)
++                                          : env_u64("SD_VAE_MEM_PER_PX_DEC", kVaeMemPerPxDecode);
++
++        const auto xs                          = vae_tile_axis_candidates(latent_x);
++        const auto ys                          = vae_tile_axis_candidates(latent_y);
++        const VaeTileAxisCandidate* best_x     = nullptr;
++        const VaeTileAxisCandidate* best_y     = nullptr;
++        int64_t best_cx                        = 0;
++        int64_t best_cy                        = 0;
++        int64_t best_count                     = 0;
++        int64_t best_area                      = 0;
++        uint64_t best_pixels                   = 0;
++        const float overlap =
++            (tiling_params.target_overlap >= 0.f && tiling_params.target_overlap < 1.f)
++                ? tiling_params.target_overlap
++                : 0.f;
++        for (const auto& x : xs) {
++            for (const auto& y : ys) {
++                const uint64_t pixels = (uint64_t)x.size * (uint64_t)y.size * (uint64_t)scale * (uint64_t)scale;
++                if (pixels > (budget - kVaeMemWorkspaceOverhead) / bytes_px) {
++                    continue;
++                }
++                const int64_t cx    = vae_axis_tile_count(latent_x, x.size, overlap);
++                const int64_t cy    = vae_axis_tile_count(latent_y, y.size, overlap);
++                const int64_t count = cx * cy;
++                const int64_t area  = x.size * y.size;
++                if (best_x == nullptr || count < best_count ||
++                    (count == best_count && area < best_area) ||
++                    (count == best_count && area == best_area && pixels < best_pixels)) {
++                    best_x      = &x;
++                    best_y      = &y;
++                    best_cx     = cx;
++                    best_cy     = cy;
++                    best_count  = count;
++                    best_area   = area;
++                    best_pixels = pixels;
++                }
++            }
++        }
++        if (best_x == nullptr || best_y == nullptr) {
++            LOG_WARN("vae %s fit: no tile fits free memory (%llu MiB); keeping current tiling",
++                     encoder ? "encode" : "decode",
++                     (unsigned long long)(free_bytes / MiB));
++            return;
++        }
++
++        const bool full = best_cx == 1 && best_cy == 1;
++        // get_tile_sizes 中 rel_size(factor) 优先于 tile_size(requested)，显式清零使其生效；
++        // tile_size 单位为 latent 像素，最终由 get_tile_sizes 钳制到 latent 尺寸。
++        tiling_params.rel_size_x = 0.f;
++        tiling_params.rel_size_y = 0.f;
++        if (full) {
++            if (tiling_params.enabled) {
++                tiling_params.tile_size_x = (int)latent_x;
++                tiling_params.tile_size_y = (int)latent_y;
++            }
++        } else {
++            tiling_params.enabled      = true;
++            tiling_params.tile_size_x  = (int)best_x->size;
++            tiling_params.tile_size_y  = (int)best_y->size;
++        }
++        LOG_INFO("vae %s fit: free=%llu MiB, budget=%llu MiB, tile=%dx%d latent, grid=%dx%d (%s)",
++                 encoder ? "encode" : "decode",
++                 (unsigned long long)(free_bytes / MiB),
++                 (unsigned long long)(budget / MiB),
++                 tiling_params.enabled ? tiling_params.tile_size_x : (int)latent_x,
++                 tiling_params.enabled ? tiling_params.tile_size_y : (int)latent_y,
++                 (int)best_cx,
++                 (int)best_cy,
++                 full ? "full" : "tiles");
++    }
++
+ }  // namespace sd::backend_fit
+diff --git a/src/core/backend_fit.h b/src/core/backend_fit.h
+index 0c682a4..286e197 100644
+--- a/src/core/backend_fit.h
++++ b/src/core/backend_fit.h
+@@ -19,6 +19,14 @@ namespace sd::backend_fit {
+                                          bool prefer_temporal_tiling,
+                                          ggml_status status);
+ 
++    // VAE 按显存预算自适应选 tile（移植 qwenimage-ncnn-vulkan vae.cpp get_optimal_vae_tile_size，本项目 patch）
++    void fit_vae_tiling_to_memory(sd_tiling_params_t& tiling_params,
++                                  ggml_backend_t backend,
++                                  int64_t latent_x,
++                                  int64_t latent_y,
++                                  int scale,
++                                  bool encoder);
++
+ }  // namespace sd::backend_fit
+ 
+ #endif  // __SD_BACKEND_FIT_H__
 diff --git a/src/core/ggml_fourier.h b/src/core/ggml_fourier.h
 new file mode 100644
 index 0000000..0a5fdff
@@ -653,7 +861,7 @@ index 1c8ddf4..80e4c39 100644
                         *diffusion_params.x,
                         *diffusion_params.timesteps,
 diff --git a/src/pipeline/diffusion_engine.cpp b/src/pipeline/diffusion_engine.cpp
-index e020a2d..96d939b 100644
+index e020a2d..e2d54f6 100644
 --- a/src/pipeline/diffusion_engine.cpp
 +++ b/src/pipeline/diffusion_engine.cpp
 @@ -26,6 +26,7 @@
@@ -965,6 +1173,34 @@ index e020a2d..96d939b 100644
          denoised = guided.pred * c_out + x * c_skip;
          sd::guidance::GuiderOutput output;
          output.pred = denoised;
+@@ -2763,13 +2976,24 @@ sd::Tensor<float> StableDiffusionGGML::decode_first_stage(const sd::Tensor<float
+         return sd::ops::clamp((x + 1.f) * 0.5f, 0.0f, 1.0f);
+     }
+     auto latents                      = first_stage_model->diffusion_to_vae_latents(x);
+-    auto decoded                      = first_stage_model->decode(n_threads, latents, vae_tiling_params, decode_video, circular_x, circular_y);
++    // VAE decode 按显存预算自适应选 tile（本项目 patch，移植 qwenimage-ncnn vae.cpp:404）
++    sd_tiling_params_t tiling_params = vae_tiling_params;
++    if (!decode_video && !circular_x && !circular_y && !latents.empty() && latents.dim() >= 2) {
++        sd::backend_fit::fit_vae_tiling_to_memory(tiling_params,
++                                                  backend_manager.runtime_backend(SDBackendModule::VAE),
++                                                  latents.shape()[0],
++                                                  latents.shape()[1],
++                                                  first_stage_model->get_scale_factor(),
++                                                  false);
++    }
++    auto decoded                      = first_stage_model->decode(n_threads, latents, tiling_params, decode_video, circular_x, circular_y);
+     const bool prefer_temporal_tiling = decode_video && first_stage_model->can_temporal_tile_decode();
+     while (decoded.empty() &&
+-           sd::backend_fit::prepare_vae_decode_retry_tiling(vae_tiling_params, prefer_temporal_tiling,
++           sd::backend_fit::prepare_vae_decode_retry_tiling(tiling_params, prefer_temporal_tiling,
+                                                             first_stage_model->last_compute_status())) {
+-        decoded = first_stage_model->decode(n_threads, latents, vae_tiling_params, decode_video, circular_x, circular_y);
++        decoded = first_stage_model->decode(n_threads, latents, tiling_params, decode_video, circular_x, circular_y);
+     }
++    vae_tiling_params = tiling_params;
+     return decoded;
+ }
+ 
 diff --git a/src/pipeline/diffusion_engine.h b/src/pipeline/diffusion_engine.h
 index f2f8a8c..84e816c 100644
 --- a/src/pipeline/diffusion_engine.h
