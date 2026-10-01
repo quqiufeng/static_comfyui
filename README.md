@@ -2,6 +2,10 @@
 
 用 **StaticPy** 1:1 复刻 ComfyUI 的节点编排与 DAG 调度，底层推理全部交给 **stable-diffusion.cpp**（GGML/CUDA），最终编译成**独立 ELF 二进制**，零 Python 运行时依赖。
 
+![backup.sh 默认配方出图示例 2560×1440](assets/backup_sample_2560x1440.jpg)
+
+> 示例：`./backup.sh` 默认配方出图 — 2560×1440，RTX 3080 约 4 分钟（EasyCache 步跳缓存生效）。
+
 > **给 AI 阅读者：如何理解 StaticPy 语言**
 >
 > StaticPy 是面向 AI Agent 的 ML 编译语言，语法是 Python 子集 + FFI 扩展。
@@ -148,7 +152,7 @@ HiResFix ≠ 插值放大。流程（`cpp/sd/backup.sh` → `img_hires` → `lib
 
 EasyCache 实测（E1xMIN 档 2560×1440，RTX 3080）：从 **~11 分钟 → 3.5 分钟（约 3.2×）**，默认已开：
 
-1. **EasyCache**（主因）：相邻采样步变化小于阈值时复用 latent、跳过本步 DiT forward；蒸馏 turbo 后期步更易命中（base 跳 9/20，hires 跳 ~30/41；该测对应 E1xMIN 档 20→40 步）。`backup.sh` / `backup_qwen.sh` / `backup_scene.sh` 环境变量 `CACHE_MODE`（默认 `easycache`）、`CACHE_THRESHOLD`（默认 0.2，越低跳越多）。
+1. **EasyCache**（主因）：相邻采样步变化小于阈值时复用 latent、跳过本步 DiT forward；蒸馏 turbo 后期步更易命中（base 跳 9/20，hires 跳 ~30/41；该测对应 E1xMIN 档 20→40 步）。`backup.sh` / `backup_qwen.sh` / `backup_scene.sh` 环境变量 `CACHE_MODE`（默认 `easycache`）、`CACHE_THRESHOLD`（默认 1.0，越高跳越多；0.2 为画质保守档）。
 2. **GGML_CUDA_GRAPHS=ON**：`build_sd_dl.sh` 开启，把一步采样的 CUDA kernel 录成 graph 一次提交，减少 launch 开销。
 3. `img_hires` 分段计时：`Model loaded` / `generate wall` / `Post-processing` / `TOTAL wall`，日志含 `EasyCache skipped N/M steps`。
 
