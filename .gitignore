@@ -233,6 +233,7 @@ output/
 # C++ build artifacts in cpp/
 cpp/sdxl_pipeline
 cpp/florence2/img2prompt
+cpp/birefnet/bgremove
 
 
 # ComfyUI source (read-only reference, not part of this project)

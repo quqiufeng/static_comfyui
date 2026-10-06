@@ -2125,6 +2125,39 @@ register_node("Florence2Captioner", "Florence-2 Captioner",
               "florence2_captioner", ("STRING",), False)
 
 
+def image_remove_background(inputs):
+    # 抠图（BiRefNet, libbirefnet.so）。输出 IMAGE（按 mode 生成）+ MASK（灰度遮罩）。
+    img = image_path_of(dict_get(inputs, "image"))
+    if img == "":
+        print("ImageRemoveBackground: no image input")
+        return (None, None)
+    mode_s = get_str(inputs, "mode", "transparent")
+    color = get_str(inputs, "background_color", "#ffffff")
+    mode = 0
+    if mode_s == "white":
+        mode = 1
+    elif mode_s == "black":
+        mode = 2
+    elif mode_s == "green":
+        mode = 3
+    elif mode_s == "color":
+        mode = 4
+    elif mode_s == "mask":
+        mode = 5
+    out = "/tmp/comfycli_bgremoved.png"
+    mask = "/tmp/comfycli_bgremoved_mask.png"
+    rc = birefnet_remove(img, out, mask, mode, color)
+    if rc != 0:
+        print("ImageRemoveBackground: failed (libbirefnet.so not loaded?)")
+        return (None, None)
+    print("ImageRemoveBackground: " + out)
+    return (out, mask)
+
+
+register_node("ImageRemoveBackground", "Remove Background (BiRefNet)",
+              "image_remove_background", ("IMAGE", "MASK"), False)
+
+
 NODE_GROUP: dict = make_dict()
 
 def register_group(types: list, group: int):
@@ -2138,7 +2171,7 @@ def register_group(types: list, group: int):
 register_group(py_list("DualCLIPLoader", "CLIPTextEncode", "CLIPSetLastLayer", "ConditioningCombine", "ConditioningConcat", "ConditioningAverage"), 1)
 register_group(py_list("CheckpointLoaderSimple", "KSampler", "KSamplerAdvanced", "LORALoader", "DiffusionModelLoader", "HiResFix", "ADetailer", "IPAdapterApply", "CLIPVisionLoader", "IPAdapterModelLoader", "CheckpointLoader", "UNETLoader", "VAELoader", "CLIPLoader", "LoraLoader", "LoraLoaderModelOnly", "LoraLoaderBypass", "LoraLoaderBypassModelOnly", "CLIPMergeSimple", "CLIPMergeAdd", "CLIPMergeSubtract", "ModelSamplingFlux", "ModelSamplingSD3", "ModelSamplingAuraFlow", "ModelComputeDtype", "ModelAttentionBackend", "RescaleCFG", "FreSca", "ModelSamplingContinuousEDM", "ModelSamplingContinuousV", "ModelNoiseScale", "ModelSamplingDiscrete", "ModelSamplingStableCascade", "CheckpointSave", "VAESave", "CLIPSave", "ModelSave", "ModelMergeSimple", "ModelMergeAdd", "ModelMergeSubtract", "DiffusersLoader", "unCLIPCheckpointLoader", "ImageOnlyCheckpointLoader", "ImageOnlyCheckpointSave", "ModelPatchLoader", "VideoLinearCFGGuidance", "VideoTriangleCFGGuidance"), 2)
 register_group(py_list("EmptyLatentImage", "LatentUpscale", "LatentCrop", "SaveLatent", "LoadLatent", "LatentUpscaleBy", "LatentRotate", "LatentFlip", "LatentComposite", "LatentBlend", "RepeatLatentBatch", "LatentFromBatch", "SetLatentNoiseMask"), 3)
-register_group(py_list("VAEDecode", "VAEEncode", "VAEEncodeTiled", "LoadImageMask", "VAEEncodeForInpaint", "LoadImage", "ImageScale", "ImageScaleBy", "ImageInvert", "EmptyImage", "ImagePadForOutpaint", "ImageBlur", "ImageBatch", "ImageCompositeMasked", "ImageCrop", "ImageToMask", "MaskToImage", "CLIPVisionEncode", "LoadImageOutput", "PreviewImage", "Reroute", "SaveImage", "WebcamCapture", "VAEDecodeTiled", "Florence2Captioner"), 4)
+register_group(py_list("VAEDecode", "VAEEncode", "VAEEncodeTiled", "LoadImageMask", "VAEEncodeForInpaint", "LoadImage", "ImageScale", "ImageScaleBy", "ImageInvert", "EmptyImage", "ImagePadForOutpaint", "ImageBlur", "ImageBatch", "ImageCompositeMasked", "ImageCrop", "ImageToMask", "MaskToImage", "CLIPVisionEncode", "LoadImageOutput", "PreviewImage", "Reroute", "SaveImage", "WebcamCapture", "VAEDecodeTiled", "Florence2Captioner", "ImageRemoveBackground"), 4)
 register_group(py_list("StyleModelLoader", "StyleModelApply", "unCLIPConditioning", "GLIGENLoader", "GLIGENTextBoxApply", "SVD_img2vid_Conditioning", "ConditioningSetAreaPercentageVideo", "AnimaLLLiteApply", "QwenImageDiffsynthControlnet", "ZImageFunControlnet", "WanUni3CControlnetApply", "SUPIRApply", "USOStyleReference", "ConditioningZeroOut", "ControlNetLoader", "DiffControlNetLoader", "ControlNetApply", "ControlNetApplyAdvanced", "InpaintModelConditioning", "PreviewAny", "ConditioningSetArea", "ConditioningSetAreaPercentage", "ConditioningSetAreaStrength", "ConditioningSetMask", "ConditioningMultiply", "ConditioningSetTimestepRange"), 5)
 
 def dispatch_clip_cond(class_type: str, inputs):
@@ -2323,6 +2356,8 @@ def dispatch_image(class_type: str, inputs):
         return vae_decode(inputs)
     elif class_type == "Florence2Captioner":
         return florence2_captioner(inputs)
+    elif class_type == "ImageRemoveBackground":
+        return image_remove_background(inputs)
 
 def dispatch_misc(class_type: str, inputs):
     if class_type == "StyleModelLoader":

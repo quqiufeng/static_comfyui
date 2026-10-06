@@ -48,6 +48,10 @@ WITH_FLORENCE2_MODELS="${WITH_FLORENCE2_MODELS:-0}"
 WITH_FLORENCE2_CUDA="${WITH_FLORENCE2_CUDA:-1}"
 WITH_FLORENCE2_CUDA_FULL="${WITH_FLORENCE2_CUDA_FULL:-0}"
 FLORENCE2_MODEL_DIR="${FLORENCE2_MODEL_DIR:-/data/models/florence2}"
+# BiRefNet 抠图节点（libbirefnet.so，复用同一份 ONNX Runtime）。
+WITH_BIREFNET="${WITH_BIREFNET:-1}"
+WITH_BIREFNET_MODELS="${WITH_BIREFNET_MODELS:-0}"
+BIREFNET_MODEL_DIR="${BIREFNET_MODEL_DIR:-/data/models/birefnet}"
 
 GLIBC_TARGET="${GLIBC_TARGET:-}"
 if [ -n "$GLIBC_TARGET" ]; then
@@ -94,6 +98,10 @@ if [ "$WITH_FLORENCE2" = "1" ] && [ -f "$PROJECT_DIR/cpp/florence2/libflorence2.
   [ "$WITH_FLORENCE2_MODELS" = "1" ] && echo " Florence-2 权重: 打包 (~1.1GB)"
 else
   echo " Florence-2 节点: 不打包"
+fi
+if [ "$WITH_BIREFNET" = "1" ] && [ -f "$PROJECT_DIR/cpp/birefnet/libbirefnet.so" ]; then
+  echo " BiRefNet 抠图节点: 打包"
+  [ "$WITH_BIREFNET_MODELS" = "1" ] && echo " BiRefNet 权重: 打包 (~973MB)"
 fi
 echo "============================================"
 
@@ -242,6 +250,22 @@ if [ "$WITH_FLORENCE2" = "1" ] && [ -f "$PROJECT_DIR/cpp/florence2/libflorence2.
   fi
 fi
 
+# ── 可选：BiRefNet 抠图（libbirefnet.so，复用同一份 ONNX Runtime）──
+if [ "$WITH_BIREFNET" = "1" ] && [ -f "$PROJECT_DIR/cpp/birefnet/libbirefnet.so" ]; then
+  echo ""
+  echo ">>> 打包 BiRefNet 抠图节点"
+  cp "$PROJECT_DIR/cpp/birefnet/libbirefnet.so" "$DIST_DIR/"
+  echo "    ✓ libbirefnet.so"
+  if [ "$WITH_BIREFNET_MODELS" = "1" ] && [ -d "$BIREFNET_MODEL_DIR" ]; then
+    mkdir -p "$DIST_DIR/birefnet"
+    cp -r "$BIREFNET_MODEL_DIR/onnx" "$DIST_DIR/birefnet/" 2>/dev/null || true
+    [ -f "$BIREFNET_MODEL_DIR/preprocessor_config.json" ] && cp "$BIREFNET_MODEL_DIR/preprocessor_config.json" "$DIST_DIR/birefnet/"
+    echo "    ✓ BiRefNet 权重 -> birefnet/"
+  else
+    echo "    · 权重未打包；远程需放 $BIREFNET_MODEL_DIR（或用 BIREFNET_MODEL 指向）"
+  fi
+fi
+
 # ── 动态后端模式：复制 sd.cpp / ggml 共享库与后端插件 ──
 if [ "$SD_BACKEND_DL" = "1" ]; then
   echo ""
@@ -299,6 +323,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$SCRIPT_DIR:$LD_LIBRARY_PATH"
 export GGML_BACKEND_PATH="$SCRIPT_DIR/libggml-cuda.so"
 [ -d "$SCRIPT_DIR/florence2" ] && export FLORENCE2_MODEL_DIR="$SCRIPT_DIR/florence2"
+[ -f "$SCRIPT_DIR/birefnet/onnx/model.onnx" ] && export BIREFNET_MODEL="$SCRIPT_DIR/birefnet/onnx/model.onnx"
 cd "$SCRIPT_DIR"
 exec ./comfycli-bin "$@"
 RUNEOF

@@ -54,6 +54,18 @@
           (foreign-procedure "florence2_caption" (string string int) string))
     (set! florence2_caption (lambda (image task beams) "")))
 
+;; libbirefnet.so — 抠图（BiRefNet, ONNX Runtime）。可选依赖：未加载时
+;; birefnet_remove 退化为返回 -1，ImageRemoveBackground 节点安全降级。
+(define birefnet_remove #f)
+(define birefnet-loaded?
+  (guard (e (#t #f))
+    (load-shared-object "libbirefnet.so")
+    #t))
+(if birefnet-loaded?
+    (set! birefnet_remove
+          (foreign-procedure "birefnet_remove" (string string string int string) int))
+    (set! birefnet_remove (lambda (a b c d e) -1)))
+
 ;; 上游 prelude 未提供 dict_keys（comfycli execution 需要）。
 ;; StaticPy 的 list 即 Scheme vector，故直接返回 hashtable-keys 的 vector。
 (define (dict_keys d)
