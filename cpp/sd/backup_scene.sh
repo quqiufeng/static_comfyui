@@ -164,6 +164,17 @@ if [ "${SKIP_QUALITY_PREFIX:-1}" != "1" ] && [[ "$PROMPT" != *"masterpiece"* ]];
     PROMPT="$QUALITY_PREFIX, $PROMPT"
 fi
 
+# LoRA 自动触发词：指定 --lora 时，按映射文件把对应触发词前置到 prompt
+LORA_TRIGGERS_FILE="${LORA_TRIGGERS_FILE:-/data/lora/lora_triggers.conf}"
+if [ -n "$LORA_CONFIG" ] && [ -f "$LORA_TRIGGERS_FILE" ]; then
+    _base="$(basename "${LORA_CONFIG%%:*}")"
+    _trig="$(awk -F'=' -v b="$_base" '{k=$1; sub(/^[ \t]+/,"",k); sub(/[ \t]+$/,"",k); if(k==b){v=$2; sub(/^[ \t]+/,"",v); sub(/[ \t]+$/,"",v); print v}}' "$LORA_TRIGGERS_FILE")"
+    if [ -n "$_trig" ] && [[ "$PROMPT" != *"$_trig"* ]]; then
+        PROMPT="$_trig, $PROMPT"
+        echo -e "${CYAN}✓ LoRA 触发词注入: ${_trig}${NC}"
+    fi
+fi
+
 # 负面词: 通用质量/构图负面（去掉人像专属皮肤油腻词, 场景无益）
 NEGATIVE_PROMPT="${NEGATIVE_PROMPT:-blurry, low quality, worst quality, jpeg artifacts, noise, grain, soft focus, out of focus, hazy, unclear, bad anatomy, deformed, border artifacts, edge distortion, tiling artifacts, edge artifacts, frame distortion, warped edges, stretched proportions, off-center, cropped, out of frame, watermark, text, logo, signature, embedding:EasyNegative, embedding:bad-hands-5}"
 

@@ -141,8 +141,17 @@ VAE_MODEL="${VAE_MODEL:-$MODEL_DIR/qwen_image_2.1_vae_bf16.safetensors}"
 export LD_LIBRARY_PATH="$SCRIPT_DIR/build:$SD_BACKEND_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export GGML_BACKEND_PATH="${GGML_BACKEND_PATH:-$SD_BACKEND_DIR/libggml-cuda.so}"
 
+LORA_CONFIG=""
 ARGS=()
-for arg in "$@"; do ARGS+=("$arg"); done
+_i=0
+while [ $_i -lt $# ]; do
+    _arg="${@:$((_i+1)):1}"
+    case "$_arg" in
+        --lora) _i=$((_i+1)); LORA_CONFIG="${@:$((_i+1)):1}" ;;
+        *) ARGS+=("$_arg") ;;
+    esac
+    _i=$((_i+1))
+done
 
 # --list-presets: 打印预设名列表后退出（不跑模型）
 if [ "${ARGS[0]:-}" = "--list-presets" ]; then
@@ -315,6 +324,17 @@ if [ "$REALISM" = "1" ] && [[ "$PROMPT" != *"photorealistic"* ]]; then
     PROMPT="$PROMPT, $REALISM_SUFFIX"
 fi
 
+# LoRA 自动触发词：指定 --lora 时，按映射文件把对应触发词前置到 prompt
+LORA_TRIGGERS_FILE="${LORA_TRIGGERS_FILE:-/data/lora/lora_triggers.conf}"
+if [ -n "$LORA_CONFIG" ] && [ -f "$LORA_TRIGGERS_FILE" ]; then
+    _base="$(basename "${LORA_CONFIG%%:*}")"
+    _trig="$(awk -F'=' -v b="$_base" '{k=$1; sub(/^[ \t]+/,"",k); sub(/[ \t]+$/,"",k); if(k==b){v=$2; sub(/^[ \t]+/,"",v); sub(/[ \t]+$/,"",v); print v}}' "$LORA_TRIGGERS_FILE")"
+    if [ -n "$_trig" ] && [[ "$PROMPT" != *"$_trig"* ]]; then
+        PROMPT="$_trig, $PROMPT"
+        echo -e "${CYAN}✓ LoRA 触发词注入: ${_trig}${NC}"
+    fi
+fi
+
 NEGATIVE_PROMPT="${NEGATIVE_PROMPT:-blurry, low quality, worst quality, jpeg artifacts, noise, bad anatomy, deformed, watermark, text, logo, signature, oily skin, shiny skin, greasy skin, glossy skin, plastic skin, skin blemishes, anime, cartoon, illustration, painting, drawing, 3d render, cgi, anime face, cel shading}"
 
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
@@ -422,6 +442,9 @@ if [ "$NO_QUALITY_PREFIX" -eq 1 ]; then
 fi
 if [ "$FRESCA" -eq 1 ]; then
   SD_CMD+=(--fresca --fresca-low "$FRESCA_LOW" --fresca-high "$FRESCA_HIGH" --fresca-cutoff "$FRESCA_CUTOFF")
+fi
+if [ -n "$LORA_CONFIG" ]; then
+  SD_CMD+=(--lora "$LORA_CONFIG")
 fi
 
 SD_CMD+=("$PROMPT" "$OUTPUT_PATH")
