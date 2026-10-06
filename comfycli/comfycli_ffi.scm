@@ -66,6 +66,21 @@
           (foreign-procedure "birefnet_remove" (string string string int string) int))
     (set! birefnet_remove (lambda (a b c d e) -1)))
 
+;; libocr.so — PP-OCRv4 文字识别（ONNX Runtime）。可选依赖：未加载时返回空串。
+(define ocr_image #f)
+(define ocr_image_json #f)
+(define ocr-loaded?
+  (guard (e (#t #f))
+    (load-shared-object "libocr.so")
+    #t))
+(if ocr-loaded?
+    (begin
+      (set! ocr_image (foreign-procedure "ocr_image" (string) string))
+      (set! ocr_image_json (foreign-procedure "ocr_image_json" (string) string)))
+    (begin
+      (set! ocr_image (lambda (p) ""))
+      (set! ocr_image_json (lambda (p) "[]"))))
+
 ;; 上游 prelude 未提供 dict_keys（comfycli execution 需要）。
 ;; StaticPy 的 list 即 Scheme vector，故直接返回 hashtable-keys 的 vector。
 (define (dict_keys d)

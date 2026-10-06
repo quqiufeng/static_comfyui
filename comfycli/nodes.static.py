@@ -2162,6 +2162,28 @@ register_node("ImageRemoveBackground", "Remove Background (BiRefNet)",
               "image_remove_background", ("IMAGE", "MASK"), False)
 
 
+def image_ocr(inputs):
+    # 文字识别（PP-OCRv4, libocr.so）。输出 STRING（按行）；boxes=1 时输出 JSON 框。
+    img = image_path_of(dict_get(inputs, "image"))
+    if img == "":
+        print("ImageOCR: no image input")
+        return ("",)
+    boxes = get_int(inputs, "boxes", 0)
+    if boxes == 1:
+        text = ocr_image_json(img)
+    else:
+        text = ocr_image(img)
+    if text == "" or text == "[]":
+        print("ImageOCR: failed or no text (libocr.so not loaded?)")
+    else:
+        print("ImageOCR: " + text)
+    return (text,)
+
+
+register_node("ImageOCR", "Image OCR (PP-OCRv4)",
+              "image_ocr", ("STRING",), False)
+
+
 NODE_GROUP: dict = make_dict()
 
 def register_group(types: list, group: int):
@@ -2175,7 +2197,7 @@ def register_group(types: list, group: int):
 register_group(py_list("DualCLIPLoader", "CLIPTextEncode", "CLIPSetLastLayer", "ConditioningCombine", "ConditioningConcat", "ConditioningAverage"), 1)
 register_group(py_list("CheckpointLoaderSimple", "KSampler", "KSamplerAdvanced", "LORALoader", "DiffusionModelLoader", "HiResFix", "ADetailer", "IPAdapterApply", "CLIPVisionLoader", "IPAdapterModelLoader", "CheckpointLoader", "UNETLoader", "VAELoader", "CLIPLoader", "LoraLoader", "LoraLoaderModelOnly", "LoraLoaderBypass", "LoraLoaderBypassModelOnly", "CLIPMergeSimple", "CLIPMergeAdd", "CLIPMergeSubtract", "ModelSamplingFlux", "ModelSamplingSD3", "ModelSamplingAuraFlow", "ModelComputeDtype", "ModelAttentionBackend", "RescaleCFG", "FreSca", "ModelSamplingContinuousEDM", "ModelSamplingContinuousV", "ModelNoiseScale", "ModelSamplingDiscrete", "ModelSamplingStableCascade", "CheckpointSave", "VAESave", "CLIPSave", "ModelSave", "ModelMergeSimple", "ModelMergeAdd", "ModelMergeSubtract", "DiffusersLoader", "unCLIPCheckpointLoader", "ImageOnlyCheckpointLoader", "ImageOnlyCheckpointSave", "ModelPatchLoader", "VideoLinearCFGGuidance", "VideoTriangleCFGGuidance"), 2)
 register_group(py_list("EmptyLatentImage", "LatentUpscale", "LatentCrop", "SaveLatent", "LoadLatent", "LatentUpscaleBy", "LatentRotate", "LatentFlip", "LatentComposite", "LatentBlend", "RepeatLatentBatch", "LatentFromBatch", "SetLatentNoiseMask"), 3)
-register_group(py_list("VAEDecode", "VAEEncode", "VAEEncodeTiled", "LoadImageMask", "VAEEncodeForInpaint", "LoadImage", "ImageScale", "ImageScaleBy", "ImageInvert", "EmptyImage", "ImagePadForOutpaint", "ImageBlur", "ImageBatch", "ImageCompositeMasked", "ImageCrop", "ImageToMask", "MaskToImage", "CLIPVisionEncode", "LoadImageOutput", "PreviewImage", "Reroute", "SaveImage", "WebcamCapture", "VAEDecodeTiled", "Florence2Captioner", "ImageRemoveBackground"), 4)
+register_group(py_list("VAEDecode", "VAEEncode", "VAEEncodeTiled", "LoadImageMask", "VAEEncodeForInpaint", "LoadImage", "ImageScale", "ImageScaleBy", "ImageInvert", "EmptyImage", "ImagePadForOutpaint", "ImageBlur", "ImageBatch", "ImageCompositeMasked", "ImageCrop", "ImageToMask", "MaskToImage", "CLIPVisionEncode", "LoadImageOutput", "PreviewImage", "Reroute", "SaveImage", "WebcamCapture", "VAEDecodeTiled", "Florence2Captioner", "ImageRemoveBackground", "ImageOCR"), 4)
 register_group(py_list("StyleModelLoader", "StyleModelApply", "unCLIPConditioning", "GLIGENLoader", "GLIGENTextBoxApply", "SVD_img2vid_Conditioning", "ConditioningSetAreaPercentageVideo", "AnimaLLLiteApply", "QwenImageDiffsynthControlnet", "ZImageFunControlnet", "WanUni3CControlnetApply", "SUPIRApply", "USOStyleReference", "ConditioningZeroOut", "ControlNetLoader", "DiffControlNetLoader", "ControlNetApply", "ControlNetApplyAdvanced", "InpaintModelConditioning", "PreviewAny", "ConditioningSetArea", "ConditioningSetAreaPercentage", "ConditioningSetAreaStrength", "ConditioningSetMask", "ConditioningMultiply", "ConditioningSetTimestepRange"), 5)
 
 def dispatch_clip_cond(class_type: str, inputs):
@@ -2362,6 +2384,8 @@ def dispatch_image(class_type: str, inputs):
         return florence2_captioner(inputs)
     elif class_type == "ImageRemoveBackground":
         return image_remove_background(inputs)
+    elif class_type == "ImageOCR":
+        return image_ocr(inputs)
 
 def dispatch_misc(class_type: str, inputs):
     if class_type == "StyleModelLoader":

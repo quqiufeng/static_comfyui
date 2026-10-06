@@ -52,6 +52,10 @@ FLORENCE2_MODEL_DIR="${FLORENCE2_MODEL_DIR:-/data/models/florence2}"
 WITH_BIREFNET="${WITH_BIREFNET:-1}"
 WITH_BIREFNET_MODELS="${WITH_BIREFNET_MODELS:-0}"
 BIREFNET_MODEL_DIR="${BIREFNET_MODEL_DIR:-/data/models/birefnet}"
+# OCR 节点（libocr.so，PP-OCRv4；模型仅 ~15MB）。
+WITH_OCR="${WITH_OCR:-1}"
+WITH_OCR_MODELS="${WITH_OCR_MODELS:-1}"
+OCR_MODEL_DIR="${OCR_MODEL_DIR:-/data/models/ocr}"
 
 GLIBC_TARGET="${GLIBC_TARGET:-}"
 if [ -n "$GLIBC_TARGET" ]; then
@@ -102,6 +106,10 @@ fi
 if [ "$WITH_BIREFNET" = "1" ] && [ -f "$PROJECT_DIR/cpp/birefnet/libbirefnet.so" ]; then
   echo " BiRefNet 抠图节点: 打包"
   [ "$WITH_BIREFNET_MODELS" = "1" ] && echo " BiRefNet 权重: 打包 (~973MB)"
+fi
+if [ "$WITH_OCR" = "1" ] && [ -f "$PROJECT_DIR/cpp/ocr/libocr.so" ]; then
+  echo " OCR 节点: 打包 (PP-OCRv4)"
+  [ "$WITH_OCR_MODELS" = "1" ] && echo " OCR 模型: 打包 (~15MB)"
 fi
 echo "============================================"
 
@@ -266,6 +274,20 @@ if [ "$WITH_BIREFNET" = "1" ] && [ -f "$PROJECT_DIR/cpp/birefnet/libbirefnet.so"
   fi
 fi
 
+# ── 可选：OCR（libocr.so，PP-OCRv4，复用同一份 ONNX Runtime）──
+if [ "$WITH_OCR" = "1" ] && [ -f "$PROJECT_DIR/cpp/ocr/libocr.so" ]; then
+  echo ""
+  echo ">>> 打包 OCR 节点"
+  cp "$PROJECT_DIR/cpp/ocr/libocr.so" "$DIST_DIR/"
+  echo "    ✓ libocr.so"
+  if [ "$WITH_OCR_MODELS" = "1" ] && [ -d "$OCR_MODEL_DIR" ]; then
+    mkdir -p "$DIST_DIR/ocr"
+    cp "$OCR_MODEL_DIR"/ch_PP-OCRv4_det_infer.onnx "$OCR_MODEL_DIR"/ch_PP-OCRv4_rec_infer.onnx \
+       "$OCR_MODEL_DIR"/ppocr_keys_v1.txt "$DIST_DIR/ocr/" 2>/dev/null || true
+    echo "    ✓ PP-OCRv4 模型 -> ocr/"
+  fi
+fi
+
 # ── 动态后端模式：复制 sd.cpp / ggml 共享库与后端插件 ──
 if [ "$SD_BACKEND_DL" = "1" ]; then
   echo ""
@@ -324,6 +346,7 @@ export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$SCRIPT_DIR:$LD_LIBRARY_PATH"
 export GGML_BACKEND_PATH="$SCRIPT_DIR/libggml-cuda.so"
 [ -d "$SCRIPT_DIR/florence2" ] && export FLORENCE2_MODEL_DIR="$SCRIPT_DIR/florence2"
 [ -f "$SCRIPT_DIR/birefnet/onnx/model.onnx" ] && export BIREFNET_MODEL="$SCRIPT_DIR/birefnet/onnx/model.onnx"
+[ -d "$SCRIPT_DIR/ocr" ] && export OCR_MODEL_DIR="$SCRIPT_DIR/ocr"
 cd "$SCRIPT_DIR"
 exec ./comfycli-bin "$@"
 RUNEOF
