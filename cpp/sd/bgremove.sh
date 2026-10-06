@@ -3,14 +3,15 @@
 # bgremove.sh — 去除图片背景（BiRefNet，ONNX Runtime + CUDA）
 #
 # 用法: ./bgremove.sh <输入图> [output.png] [mode]
-#       ./bgremove.sh photo.jpg                    # 透明背景, 存到 $HOME
+#       ./bgremove.sh photo.jpg                    # 透明背景(默认), 存到 $HOME
 #       ./bgremove.sh photo.jpg out.png            # 指定输出
+#       ./bgremove.sh photo.jpg out.png checker    # 棋盘格底(预览用, 烘焙不透明)
 #       ./bgremove.sh photo.jpg out.png white      # 白底
 #       ./bgremove.sh photo.jpg out.png green      # 绿幕
 #       ./bgremove.sh photo.jpg out.png color      # 纯色底 (COLOR=#rrggbb)
 #       ./bgremove.sh photo.jpg out.png mask       # 只输出灰度遮罩
 #
-# mode: transparent(默认) | white | black | green | color | mask
+# mode: transparent(默认) | checker | white | black | green | color | mask
 #
 # 环境变量:
 #   COLOR    mode=color 时的底色 (#rrggbb, 默认 #ffffff)

@@ -2134,7 +2134,9 @@ def image_remove_background(inputs):
     mode_s = get_str(inputs, "mode", "transparent")
     color = get_str(inputs, "background_color", "#ffffff")
     mode = 0
-    if mode_s == "white":
+    if mode_s == "transparent":
+        mode = 0
+    elif mode_s == "white":
         mode = 1
     elif mode_s == "black":
         mode = 2
@@ -2144,6 +2146,8 @@ def image_remove_background(inputs):
         mode = 4
     elif mode_s == "mask":
         mode = 5
+    elif mode_s == "checker":
+        mode = 6
     out = "/tmp/comfycli_bgremoved.png"
     mask = "/tmp/comfycli_bgremoved_mask.png"
     rc = birefnet_remove(img, out, mask, mode, color)

@@ -14,6 +14,7 @@ enum Mode {
     MODE_GREEN = 3,        // RGB composite on green screen (0,255,0)
     MODE_COLOR = 4,        // RGB composite on custom (r,g,b)
     MODE_MASK = 5,         // grayscale alpha matte
+    MODE_CHECKER = 6,      // RGB composite on a baked checkerboard (visual "transparent")
 };
 
 class BgRemover {

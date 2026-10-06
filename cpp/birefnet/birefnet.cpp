@@ -151,6 +151,25 @@ void BgRemover::Process(const std::string& in_path, const std::string& out_path,
         return;
     }
 
+    if (mode == MODE_CHECKER) {
+        // Baked checkerboard (matches the usual "transparent" backdrop look).
+        const int sq = 64;
+        const unsigned char c1 = 200, c2 = 150;
+        std::vector<unsigned char> out(static_cast<size_t>(W) * H * 3);
+        for (int y = 0; y < H; ++y) {
+            for (int x = 0; x < W; ++x) {
+                size_t i = static_cast<size_t>(y) * W + x;
+                float a = matte[i];
+                unsigned char bg = (((x / sq) + (y / sq)) % 2 == 0) ? c1 : c2;
+                out[i * 3 + 0] = clamp8(img.rgb[i * 3 + 0] * a + bg * (1.0f - a));
+                out[i * 3 + 1] = clamp8(img.rgb[i * 3 + 1] * a + bg * (1.0f - a));
+                out[i * 3 + 2] = clamp8(img.rgb[i * 3 + 2] * a + bg * (1.0f - a));
+            }
+        }
+        stbi_write_png(out_path.c_str(), W, H, 3, out.data(), W * 3);
+        return;
+    }
+
     if (mode == MODE_WHITE) { r = 255; g = 255; b = 255; }
     else if (mode == MODE_BLACK) { r = 0; g = 0; b = 0; }
     else if (mode == MODE_GREEN) { r = 0; g = 255; b = 0; }

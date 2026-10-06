@@ -23,6 +23,7 @@ int ParseMode(const std::string& s) {
     if (s == "green") return bref::MODE_GREEN;
     if (s == "color") return bref::MODE_COLOR;
     if (s == "mask") return bref::MODE_MASK;
+    if (s == "checker" || s == "checkerboard") return bref::MODE_CHECKER;
     return -1;
 }
 }  // namespace
