@@ -193,10 +193,50 @@ cp "$PROJECT_DIR/comfycli-bin" "$DIST_DIR/"
 cp "$PROJECT_DIR/comfycli-bin.so" "$DIST_DIR/"
 
 # 复制 C++ 推理后端
+ADAPTER_SO=""
 if [ -f "$PROJECT_DIR/cpp/sd/build/libsdcpp_adapter.so" ]; then
-  cp "$PROJECT_DIR/cpp/sd/build/libsdcpp_adapter.so" "$DIST_DIR/"
+  ADAPTER_SO="$PROJECT_DIR/cpp/sd/build/libsdcpp_adapter.so"
 elif [ -f "$PROJECT_DIR/libsdcpp_adapter.so" ]; then
-  cp "$PROJECT_DIR/libsdcpp_adapter.so" "$DIST_DIR/"
+  ADAPTER_SO="$PROJECT_DIR/libsdcpp_adapter.so"
+fi
+if [ -n "$ADAPTER_SO" ]; then
+  cp "$ADAPTER_SO" "$DIST_DIR/"
+  # comfycli-bin 通过 dlopen 加载 libsdcpp_adapter.so，其依赖（opencv→gdal/gdcm 链）
+  # 不在 comfycli-bin 的 ldd 里，需递归收集并按 SONAME 命名放进 lib/。
+  echo ""
+  echo ">>> 收集 sd adapter 依赖闭包 (opencv/gdal/gdcm...)"
+  python3 - "$ADAPTER_SO" "$DIST_DIR/lib" <<'PY'
+import subprocess, os, re, sys, shutil
+adapter, dst = sys.argv[1], sys.argv[2]
+base = {'libc.so.6','libm.so.6','libpthread.so.0','librt.so.1','libdl.so.2','ld-linux-x86-64.so.2',
+        'libstdc++.so.6','libgcc_s.so.1','libresolv.so.2','libutil.so.1','libnsl.so.1','libanl.so.1',
+        'libmvec.so.1','libcuda.so.1'}
+def ldd(p):
+    out = subprocess.run(['ldd', p], capture_output=True, text=True).stdout
+    d = {}
+    for line in out.splitlines():
+        m = re.match(r'\s*(\S+)\s+=>\s+(\S+)', line)
+        if m and m.group(2).startswith('/'):
+            d[m.group(1)] = os.path.realpath(m.group(2))
+    return d
+seen, todo = {}, [adapter]
+while todo:
+    p = todo.pop()
+    for name, path in ldd(p).items():
+        if name in seen or name in base or '/' in name:
+            continue
+        seen[name] = path
+        todo.append(path)
+n = 0
+for name, path in seen.items():
+    b = os.path.basename(path)
+    if b.startswith(('libstable-diffusion', 'libggml')):  # 已由 SD_LIBS 段按版本名复制
+        continue
+    if os.path.exists(path):
+        shutil.copy2(path, os.path.join(dst, name))
+        n += 1
+print(f"    ✓ adapter 闭包 {n} 个 .so -> lib/")
+PY
 else
   echo "警告: libsdcpp_adapter.so 未找到"
 fi
