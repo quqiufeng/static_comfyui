@@ -1,0 +1,7 @@
+# LoRA 触发词映射：backup.sh 指定 --lora 时，按此自动把触发词前置到 prompt
+# 格式（每行）: <lora 文件名> = <触发词>
+# 部署位置: /data/lora/lora_triggers.conf （可用 LORA_TRIGGERS_FILE 覆盖路径）
+#
+# 例：
+# mystyle_sdcpp.safetensors = mystyle
+# inkstyle_sdcpp.safetensors = inkstyle, sumi-e, black ink

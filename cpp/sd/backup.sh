@@ -250,6 +250,21 @@ if [ "${SKIP_QUALITY_PREFIX:-1}" != "1" ] && [[ "$PROMPT" != *"masterpiece"* ]];
     PROMPT="$QUALITY_PREFIX, $PROMPT"
 fi
 
+# LoRA 自动触发词：指定 --lora 时，按映射文件把对应触发词前置到 prompt。
+# 映射文件格式（每行）: <lora 文件名> = <触发词>
+LORA_TRIGGERS_FILE="${LORA_TRIGGERS_FILE:-/data/lora/lora_triggers.conf}"
+if [ -n "$LORA_CONFIG" ] && [ -f "$LORA_TRIGGERS_FILE" ]; then
+    TRIGGER_WORDS=""
+    _path="${LORA_CONFIG%%:*}"                 # 去掉 :weight
+    _base="$(basename "$_path")"
+    _trig="$(awk -F'=' -v b="$_base" '{k=$1; sub(/^[ \t]+/,"",k); sub(/[ \t]+$/,"",k); if(k==b){v=$2; sub(/^[ \t]+/,"",v); sub(/[ \t]+$/,"",v); print v}}' "$LORA_TRIGGERS_FILE")"
+    if [ -n "$_trig" ] && [[ "$PROMPT" != *"$_trig"* ]]; then
+        TRIGGER_WORDS="$_trig"
+        PROMPT="$TRIGGER_WORDS, $PROMPT"
+        echo -e "${CYAN}✓ LoRA 触发词注入: ${TRIGGER_WORDS}${NC}"
+    fi
+fi
+
 # E1xMIN 复现负面词: 基础负面 + 皮肤油腻词（防磨皮/油光）
 NEGATIVE_PROMPT="${NEGATIVE_PROMPT:-blurry, low quality, worst quality, jpeg artifacts, noise, grain, soft focus, out of focus, hazy, unclear, bad anatomy, deformed, border artifacts, edge distortion, tiling artifacts, edge artifacts, frame distortion, warped edges, stretched proportions, asymmetrical face, off-center, cropped, out of frame, partial face, cut off, incomplete head, cropped head, watermark, text, logo, signature, cropped shoulders, oily skin, shiny skin, greasy skin, glossy skin, plastic skin, skin blemishes, embedding:EasyNegative, embedding:bad-hands-5}"
 

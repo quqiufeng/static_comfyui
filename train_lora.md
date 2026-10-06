@@ -147,11 +147,21 @@ $PY/python $M/convert_lora.py --input OUT/mystyle.safetensors \
   --output OUT/mystyle_sdcpp.safetensors --target other
 ```
 
-出图：
+出图（**触发词自动注入**，无需手写）：
 ```bash
-./cpp/sd/backup.sh "mystyle style, a single woman portrait, elegant, soft light" \
-  ~/out.png 2560 1440 --lora /data/lora/mystyle_base/mystyle_sdcpp.safetensors:0.7
+# backup.sh 会按 /data/lora/lora_triggers.conf 自动把触发词前置到默认提示词
+./cpp/sd/backup.sh 2560 1440 \
+  --lora /data/lora/mystyle_base/mystyle_sdcpp.safetensors:0.7
+# 输出: ✓ LoRA 触发词注入: mystyle
+#       Prompt: mystyle, solo,single woman,half body portrait...
 # sd.cpp: (420 / 420) LoRA tensors have been applied
+```
+
+触发词映射（`/data/lora/lora_triggers.conf`，可用 `LORA_TRIGGERS_FILE` 覆盖；模板见
+`train_lora/lora_triggers.conf.example`）：
+```
+<lora 文件名> = <触发词>
+mystyle_sdcpp.safetensors = mystyle
 ```
 
 ---
