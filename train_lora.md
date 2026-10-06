@@ -323,5 +323,94 @@ LoRA 重命名为 `<触发词>_sdcpp.safetensors`），然后：
 ./cpp/sd/backup.sh 2560 1440 --lora /data/lora/celebA/mystyle_sdcpp.safetensors:0.7
 ```
 
-> 说明：`musubi_train.sh` 输出固定名 `mystyle.safetensors` / `mystyle_sdcpp.safetensors`；
-> 若同时保留多个 LoRA，建议训练后 `mv` 成 `<触发词>_sdcpp.safetensors` 以便映射。
+> 说明：`musubi_train.sh` 的 LoRA 名由 `OUT_NAME`（默认 `mystyle`）决定；建议设成触发词，
+> 如 `OUT_NAME=celebA`，输出 `celebA_sdcpp.safetensors`，映射一目了然。
+
+---
+
+## 14. 单明星身份 LoRA 专项方案
+
+> 目标：让生成的脸**稳定像某个具体明星**。DiT 无人脸 adapter（IPAdapter-Face/InstantID/PuLID 都是 UNet 时代的），
+> 所以正路就是**用这个人的照片训一个身份 LoRA**。与风格 LoRA 分开训、出图叠加。
+
+### 14.1 核心原则
+- **只能用同一个人的照片**（是谁 → 像谁）；混入其他人会"脸糊成一团"，相似度下降。
+- **身份归触发词**（如 `celebA`），caption 只描述可变因素（服饰/背景/表情/光照）→ 出图只给触发词即锁定这张脸。
+
+### 14.2 收集数据（人工）
+| 项 | 要求 |
+|----|------|
+| 数量 | 20~50 张（质量优先，宁精勿滥） |
+| 内容 | **同一个人**；角度（正/半侧/侧）、表情、光照、远近、换装换背景多样 |
+| 排除 | 他人、重滤镜/重磨皮、遮脸（口罩/手/大墨镜）、糊图、低清、多脸同框（会自动取最大脸，但尽量单人） |
+| 分辨率 | 越高越好（≥1024 更好，脚本会裁到 512 对齐脸） |
+
+### 14.3 制作对齐脸数据集（cpp/face）
+```bash
+# 一键：检测 → 5点对齐裁剪(512) → Florence 打标（身份中性的内容描述）
+bash train_lora/make_face_dataset.sh /path/to/star_photos celebA
+# → /data/datasets/celebA_face/{images/*.png(512对齐脸), *.txt, dataset.toml}
+```
+> caption 形如 `celebA, A woman with long black hair wearing a red dress.`——描述服装/背景，身份留给触发词，
+> 正是身份 LoRA 需要的"解耦"。
+
+### 14.4 预缓存 + 训练（身份建议 rank32~64、步数偏多）
+```bash
+D=/data/datasets/celebA_face
+PY=/data/venv-musubi/bin; M=/opt/musubi-tuner/src/musubi_tuner
+$PY/python $M/zimage_cache_latents.py --dataset_config $D/dataset.toml \
+  --vae /data/models/z-image-turbo/vae/diffusion_pytorch_model.safetensors --device cuda
+$PY/python $M/zimage_cache_text_encoder_outputs.py --dataset_config $D/dataset.toml \
+  --text_encoder /data/models/z-image-te-qwen3.safetensors --batch_size 8 --device cuda
+
+DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002.safetensors \
+  FP8=0 BLOCKS=12 DIM=32 EPOCHS=12 OUT_NAME=celebA DATA=$D OUT=/data/lora/celebA \
+  bash train_lora/musubi_train.sh
+# → /data/lora/celebA/celebA_sdcpp.safetensors
+```
+| 超参 | 身份 LoRA 建议 |
+|------|----------------|
+| rank/alpha | 32（不够像 → 64） |
+| epochs | 10~16（每 epoch 存 checkpoint，横向对比选最优） |
+| 分辨率 | 512（对齐脸原生） |
+| lr | 1e-4 |
+| fp8 | 关 |
+
+### 14.5 触发词映射
+`/data/lora/lora_triggers.conf` 加一行：
+```
+celebA_sdcpp.safetensors = celebA
+```
+
+### 14.6 出图
+```bash
+# 单独：只出这张脸
+./cpp/sd/backup.sh 2560 1440 --lora /data/lora/celebA/celebA_sdcpp.safetensors:0.7
+
+# 叠加风格 LoRA（脸 × 风格）
+./cpp/sd/backup.sh 2560 1440 \
+  --lora /data/lora/celebA/celebA_sdcpp.safetensors:0.7 \
+  --lora /data/lora/mystyle_base/mystyle_sdcpp.safetensors:0.6
+```
+
+### 14.7 相似度不够时的调法
+1. **rank 32→64**、epochs 12→16；多存 checkpoint 挑最像但不崩的。
+2. 数据里**脸部特写占比提高**（或 `--max-side` 更小、脸更满）。
+3. **出图权重** 0.7~0.9 上调。
+4. **剔除重滤镜样本**（磨皮会让身份特征丢失）。
+5. 加**人脸区域精修**（ADetailer 式局部重绘，待做）让 2560 下的脸更锐、更像。
+6. 数据不足（<15）时先补图，别硬训。
+
+### 14.8 合规
+真实人物肖像权与用途由使用者自负。
+
+---
+
+## 15. 相关文件速查
+| 路径 | 说明 |
+|------|------|
+| `cpp/face/facecli` | 检测/对齐裁剪/解析 CLI |
+| `train_lora/make_face_dataset.sh` | 人物图片目录 → 对齐脸数据集 |
+| `train_lora/musubi_train.sh` | LoRA 训练（`OUT_NAME` 命名，自动转 sd.cpp 命名） |
+| `/data/lora/lora_triggers.conf` | LoRA→触发词映射（backup.sh 自动注入） |
+| `/data/lora/<name>/<OUT_NAME>_sdcpp.safetensors` | 训练产出（sd.cpp 可直接加载） |

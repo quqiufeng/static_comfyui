@@ -23,6 +23,7 @@ VAE="/data/models/z-image-turbo/vae/diffusion_pytorch_model.safetensors"
 TE="/data/models/z-image-te-qwen3.safetensors"
 DATA="${DATA:-/data/datasets/mystyle1536}"
 OUT="${OUT:-/data/lora/mystyle_base}"
+OUT_NAME="${OUT_NAME:-mystyle}"
 DIM="${DIM:-16}"
 LR="${LR:-1e-4}"
 EPOCHS="${EPOCHS:-8}"
@@ -52,13 +53,13 @@ echo "DIT=$DIT"; echo "ADAPTER=${ADAPTER:-<none>} DATA=$DATA OUT=$OUT DIM=$DIM E
   --max_data_loader_n_workers 2 --persistent_data_loader_workers \
   --network_module networks.lora_zimage --network_dim "$DIM" --network_alpha "$DIM" \
   --seed "${SEED:-42}" \
-  --output_dir "$OUT" --output_name mystyle \
+  --output_dir "$OUT" --output_name "$OUT_NAME" \
   "${EXTRA[@]}" "${EPOCH_ARGS[@]}"
 
 # 转成 sd.cpp 可加载的 diffusers/PEFT 命名
-RAW="$OUT/mystyle.safetensors"
+RAW="$OUT/$OUT_NAME.safetensors"
 if [ -f "$RAW" ]; then
     "$PY/python" "$MUSUBI/convert_lora.py" --input "$RAW" \
-        --output "$OUT/mystyle_sdcpp.safetensors" --target other
-    echo "sd.cpp LoRA: $OUT/mystyle_sdcpp.safetensors"
+        --output "$OUT/${OUT_NAME}_sdcpp.safetensors" --target other
+    echo "sd.cpp LoRA: $OUT/${OUT_NAME}_sdcpp.safetensors"
 fi
