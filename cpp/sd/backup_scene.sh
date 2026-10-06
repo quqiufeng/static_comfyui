@@ -62,7 +62,7 @@ CACHE_THRESHOLD="${CACHE_THRESHOLD:-0.2}"
 CACHE_START="${CACHE_START:-0.15}"
 CACHE_END="${CACHE_END:-0.95}"
 
-UPSCALE_FLAG=0; LORA_CONFIG=""; PROMPT_SCHEDULE=""; REGIONAL_PROMPTS=""
+UPSCALE_FLAG=0; LORA_CONFIGS=(); PROMPT_SCHEDULE=""; REGIONAL_PROMPTS=""
 FACE_RESTORE_FLAG=0; FACE_RESTORE_MODEL=""
 FACE_SWAP_FLAG=0; FACE_SWAP_SOURCE=""
 IPADAPTER_FLAG=0; IPADAPTER_MODEL=""; IPADAPTER_IMAGE=""
@@ -79,7 +79,7 @@ while [ $i -lt $# ]; do
     arg="${@:$((i+1)):1}"
     case "$arg" in
         --upscale)          UPSCALE_FLAG=1 ;;
-        --lora)             next_val "$@"; LORA_CONFIG="$_NV" ;;
+        --lora)             next_val "$@"; LORA_CONFIGS+=("$_NV") ;;
         --prompt-schedule)  next_val "$@"; PROMPT_SCHEDULE="$_NV" ;;
         --regional-prompts) next_val "$@"; REGIONAL_PROMPTS="$_NV" ;;
         --face-restore)     FACE_RESTORE_FLAG=1 ;;
@@ -166,13 +166,15 @@ fi
 
 # LoRA 自动触发词：指定 --lora 时，按映射文件把对应触发词前置到 prompt
 LORA_TRIGGERS_FILE="${LORA_TRIGGERS_FILE:-/data/lora/lora_triggers.conf}"
-if [ -n "$LORA_CONFIG" ] && [ -f "$LORA_TRIGGERS_FILE" ]; then
-    _base="$(basename "${LORA_CONFIG%%:*}")"
-    _trig="$(awk -F'=' -v b="$_base" '{k=$1; sub(/^[ \t]+/,"",k); sub(/[ \t]+$/,"",k); if(k==b){v=$2; sub(/^[ \t]+/,"",v); sub(/[ \t]+$/,"",v); print v}}' "$LORA_TRIGGERS_FILE")"
-    if [ -n "$_trig" ] && [[ "$PROMPT" != *"$_trig"* ]]; then
-        PROMPT="$_trig, $PROMPT"
-        echo -e "${CYAN}✓ LoRA 触发词注入: ${_trig}${NC}"
-    fi
+if [ "${#LORA_CONFIGS[@]}" -gt 0 ] && [ -f "$LORA_TRIGGERS_FILE" ]; then
+    for _l in "${LORA_CONFIGS[@]}"; do
+        _base="$(basename "${_l%%:*}")"
+        _trig="$(awk -F'=' -v b="$_base" '{k=$1; sub(/^[ \t]+/,"",k); sub(/[ \t]+$/,"",k); if(k==b){v=$2; sub(/^[ \t]+/,"",v); sub(/[ \t]+$/,"",v); print v}}' "$LORA_TRIGGERS_FILE")"
+        if [ -n "$_trig" ] && [[ "$PROMPT" != *"$_trig"* ]]; then
+            PROMPT="$_trig, $PROMPT"
+            echo -e "${CYAN}✓ LoRA 触发词注入: ${_trig}${NC}"
+        fi
+    done
 fi
 
 # 负面词: 通用质量/构图负面（去掉人像专属皮肤油腻词, 场景无益）
@@ -342,9 +344,9 @@ if [ "$NO_QUALITY_PREFIX" -eq 1 ]; then
     SD_CMD+=(--no-quality-prefix)
 fi
 
-if [ -n "$LORA_CONFIG" ]; then
-    SD_CMD+=(--lora "$LORA_CONFIG")
-fi
+for _l in "${LORA_CONFIGS[@]}"; do
+    SD_CMD+=(--lora "$_l")
+done
 
 if [ -n "$PROMPT_SCHEDULE" ]; then
     SD_CMD+=(--prompt-schedule "$PROMPT_SCHEDULE")
