@@ -42,6 +42,18 @@
       (set! torch_std_safetensors_free (lambda (d) #f))
       (set! torch_std_copy_file (lambda (s d) (error "libcomfycli_torch.so not loaded")))))
 
+;; libflorence2.so — 图像→提示词（Florence-2, ONNX Runtime）。可选依赖：
+;; 未加载时 florence2_caption 退化为返回空串，Florence2Captioner 节点安全降级。
+(define florence2_caption #f)
+(define florence2-loaded?
+  (guard (e (#t #f))
+    (load-shared-object "libflorence2.so")
+    #t))
+(if florence2-loaded?
+    (set! florence2_caption
+          (foreign-procedure "florence2_caption" (string string int) string))
+    (set! florence2_caption (lambda (image task beams) "")))
+
 ;; 上游 prelude 未提供 dict_keys（comfycli execution 需要）。
 ;; StaticPy 的 list 即 Scheme vector，故直接返回 hashtable-keys 的 vector。
 (define (dict_keys d)

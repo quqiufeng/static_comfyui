@@ -35,6 +35,19 @@ SD_BUILD_DIR="${SD_BUILD_DIR:-/opt/sd/build-dl}"
 WITH_CUDA_BACKEND="${WITH_CUDA_BACKEND:-1}"
 WITH_CUDA="${WITH_CUDA:-0}"
 CUDA_DIR="${CUDA_DIR:-/data/cuda/targets/x86_64-linux/lib}"
+# Florence-2 图像→提示词节点（libflorence2.so + ONNX Runtime + OpenCV 依赖闭包）。
+# 默认打包（远程用 CPU 跑 Florence，避免 344MB 的 CUDA provider）；
+# WITH_FLORENCE2_MODELS=1 时附带 ~1.1GB 的 ONNX 权重目录。
+WITH_FLORENCE2="${WITH_FLORENCE2:-1}"
+WITH_FLORENCE2_MODELS="${WITH_FLORENCE2_MODELS:-0}"
+# WITH_FLORENCE2_CUDA：打包 ONNX Runtime CUDA provider（Florence 走 GPU，+329MB）。
+#   默认 1 —— 常规远程环境都自带 CUDA runtime 与 cuDNN 9，直接用 GPU；
+#   完全全新的环境用 WITH_FLORENCE2_CUDA=0 退回 CPU（或 =1 时缺依赖会自动回落 CPU）。
+#   WITH_FLORENCE2_CUDA_FULL=1 连 CUDA runtime（cudart/cublas/cublasLt/curand/cufft）
+#   一起打包（+~0.9GB；cuDNN 仍不打包，太大）。
+WITH_FLORENCE2_CUDA="${WITH_FLORENCE2_CUDA:-1}"
+WITH_FLORENCE2_CUDA_FULL="${WITH_FLORENCE2_CUDA_FULL:-0}"
+FLORENCE2_MODEL_DIR="${FLORENCE2_MODEL_DIR:-/data/models/florence2}"
 
 GLIBC_TARGET="${GLIBC_TARGET:-}"
 if [ -n "$GLIBC_TARGET" ]; then
@@ -71,6 +84,16 @@ if [ "$WITH_CUDA" = "1" ]; then
   echo " CUDA Runtime: 打包"
 else
   echo " CUDA Runtime: 不打包（远程需自带 CUDA Runtime）"
+fi
+if [ "$WITH_FLORENCE2" = "1" ] && [ -f "$PROJECT_DIR/cpp/florence2/libflorence2.so" ]; then
+  if [ "$WITH_FLORENCE2_CUDA" = "1" ]; then
+    echo " Florence-2 节点: 打包 (GPU，含 CUDA provider)"
+  else
+    echo " Florence-2 节点: 打包 (CPU 推理)"
+  fi
+  [ "$WITH_FLORENCE2_MODELS" = "1" ] && echo " Florence-2 权重: 打包 (~1.1GB)"
+else
+  echo " Florence-2 节点: 不打包"
 fi
 echo "============================================"
 
@@ -154,6 +177,71 @@ else
   echo "警告: libsdcpp_adapter.so 未找到"
 fi
 
+# ── 可选：Florence-2 图像→提示词（libflorence2.so + ONNX Runtime + OpenCV）──
+if [ "$WITH_FLORENCE2" = "1" ] && [ -f "$PROJECT_DIR/cpp/florence2/libflorence2.so" ]; then
+  echo ""
+  echo ">>> 打包 Florence-2 节点"
+  cp "$PROJECT_DIR/cpp/florence2/libflorence2.so" "$DIST_DIR/"
+  echo "    ✓ libflorence2.so"
+
+  # 依赖闭包：libflorence2.so + 其 RUNPATH 解析出的 libonnxruntime/opencv + 依赖。
+  # 排除 GLIBC 核心（lib/ 兼容层已提供）、libcuda（远程驱动提供）、libstdc++/gomp（已复制）。
+  FLOR2="$PROJECT_DIR/cpp/florence2/libflorence2.so"
+  LDD_UNION="$(mktemp)"
+  ldd "$FLOR2" 2>/dev/null | grep -oP '=> \K[^ ]+' | grep '^/' | sort -u >> "$LDD_UNION" || true
+  # ONNX Runtime 的 provider 共享库由 libonnxruntime dlopen，不在 ldd 里，显式补上
+  ORT_REAL=$(ldd "$FLOR2" 2>/dev/null | awk '/libonnxruntime\.so\.1 /{print $3}')
+  if [ -n "$ORT_REAL" ]; then
+    ORT_DIR="$(dirname "$ORT_REAL")"
+    for extra in "$ORT_DIR"/libonnxruntime_providers_shared.so; do
+      [ -f "$extra" ] && echo "$extra" >> "$LDD_UNION"
+    done
+  fi
+  F2_COPIED=0
+  while read -r f; do
+    case "$f" in
+      */libc.so.6|*/libm.so.6|*/libpthread.so.0|*/libdl.so.2|*/librt.so.1|*/ld-linux-x86-64.so.2|*/libresolv.so.2|*/libgcc_s.so.1|*/libcuda.so.1|*/libstdc++.so.6|*/libgomp.so.1) continue ;;
+    esac
+    cp -L "$f" "$DIST_DIR/lib/" && F2_COPIED=$((F2_COPIED + 1))
+  done < "$LDD_UNION"
+  rm -f "$LDD_UNION"
+  echo "    ✓ 依赖闭包 $F2_COPIED 个 .so -> lib/"
+
+  if [ "$WITH_FLORENCE2_CUDA" = "1" ] && [ -n "$ORT_REAL" ]; then
+    ORT_DIR="$(dirname "$ORT_REAL")"
+    if [ -f "$ORT_DIR/libonnxruntime_providers_cuda.so" ]; then
+      cp -L "$ORT_DIR/libonnxruntime_providers_cuda.so" "$DIST_DIR/lib/"
+      echo "    ✓ libonnxruntime_providers_cuda.so (Florence 走 GPU)"
+      if [ "$WITH_FLORENCE2_CUDA_FULL" = "1" ]; then
+        ldd "$ORT_DIR/libonnxruntime_providers_cuda.so" 2>/dev/null | grep -oP '=> \K[^ ]+' | grep '^/' | sort -u | while read -r f; do
+          case "$f" in
+            */libc.so.6|*/libm.so.6|*/libpthread.so.0|*/libdl.so.2|*/librt.so.1|*/ld-linux-x86-64.so.2|*/libresolv.so.2|*/libgcc_s.so.1|*/libcuda.so.1|*/libstdc++.so.6|*/libgomp.so.1|*/libcudnn*) continue ;;
+          esac
+          cp -L "$f" "$DIST_DIR/lib/" 2>/dev/null || true
+        done
+        echo "    ✓ CUDA runtime 依赖已打包 (FULL)"
+      else
+        echo "    · CUDA runtime/cuDNN 未打包；远程需自带（缺失则自动回落 CPU）"
+      fi
+    else
+      echo "    ⚠ 未找到 libonnxruntime_providers_cuda.so，Florence 将走 CPU"
+    fi
+  fi
+
+  if [ "$WITH_FLORENCE2_MODELS" = "1" ]; then
+    if [ -d "$FLORENCE2_MODEL_DIR" ]; then
+      mkdir -p "$DIST_DIR/florence2"
+      cp -r "$FLORENCE2_MODEL_DIR/onnx" "$DIST_DIR/florence2/" 2>/dev/null || true
+      [ -f "$FLORENCE2_MODEL_DIR/vocab.bin" ] && cp "$FLORENCE2_MODEL_DIR/vocab.bin" "$DIST_DIR/florence2/"
+      echo "    ✓ Florence-2 权重 -> florence2/"
+    else
+      echo "    ⚠ 找不到模型目录 $FLORENCE2_MODEL_DIR，跳过权重"
+    fi
+  else
+    echo "    · 权重未打包；远程需把模型放到 $FLORENCE2_MODEL_DIR（或用 FLORENCE2_MODEL_DIR 指向）"
+  fi
+fi
+
 # ── 动态后端模式：复制 sd.cpp / ggml 共享库与后端插件 ──
 if [ "$SD_BACKEND_DL" = "1" ]; then
   echo ""
@@ -210,6 +298,7 @@ cat > "$DIST_DIR/run.sh" << 'RUNEOF'
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$SCRIPT_DIR:$LD_LIBRARY_PATH"
 export GGML_BACKEND_PATH="$SCRIPT_DIR/libggml-cuda.so"
+[ -d "$SCRIPT_DIR/florence2" ] && export FLORENCE2_MODEL_DIR="$SCRIPT_DIR/florence2"
 cd "$SCRIPT_DIR"
 exec ./comfycli-bin "$@"
 RUNEOF

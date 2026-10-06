@@ -2105,6 +2105,26 @@ def print_node_list():
         i = i + 1
 
 
+def florence2_captioner(inputs):
+    # 图像 → 提示词（Florence-2, ONNX Runtime）。libflorence2.so 缺失时返回空串。
+    img = image_path_of(dict_get(inputs, "image"))
+    task = get_str(inputs, "task", "<MORE_DETAILED_CAPTION>")
+    beams = get_int(inputs, "beams", 3)
+    if img == "":
+        print("Florence2Captioner: no image input")
+        return ("",)
+    text = florence2_caption(img, task, beams)
+    if text == "":
+        print("Florence2Captioner: libflorence2.so not loaded or caption failed")
+    else:
+        print("Florence2Captioner: " + text)
+    return (text,)
+
+
+register_node("Florence2Captioner", "Florence-2 Captioner",
+              "florence2_captioner", ("STRING",), False)
+
+
 NODE_GROUP: dict = make_dict()
 
 def register_group(types: list, group: int):
@@ -2118,7 +2138,7 @@ def register_group(types: list, group: int):
 register_group(py_list("DualCLIPLoader", "CLIPTextEncode", "CLIPSetLastLayer", "ConditioningCombine", "ConditioningConcat", "ConditioningAverage"), 1)
 register_group(py_list("CheckpointLoaderSimple", "KSampler", "KSamplerAdvanced", "LORALoader", "DiffusionModelLoader", "HiResFix", "ADetailer", "IPAdapterApply", "CLIPVisionLoader", "IPAdapterModelLoader", "CheckpointLoader", "UNETLoader", "VAELoader", "CLIPLoader", "LoraLoader", "LoraLoaderModelOnly", "LoraLoaderBypass", "LoraLoaderBypassModelOnly", "CLIPMergeSimple", "CLIPMergeAdd", "CLIPMergeSubtract", "ModelSamplingFlux", "ModelSamplingSD3", "ModelSamplingAuraFlow", "ModelComputeDtype", "ModelAttentionBackend", "RescaleCFG", "FreSca", "ModelSamplingContinuousEDM", "ModelSamplingContinuousV", "ModelNoiseScale", "ModelSamplingDiscrete", "ModelSamplingStableCascade", "CheckpointSave", "VAESave", "CLIPSave", "ModelSave", "ModelMergeSimple", "ModelMergeAdd", "ModelMergeSubtract", "DiffusersLoader", "unCLIPCheckpointLoader", "ImageOnlyCheckpointLoader", "ImageOnlyCheckpointSave", "ModelPatchLoader", "VideoLinearCFGGuidance", "VideoTriangleCFGGuidance"), 2)
 register_group(py_list("EmptyLatentImage", "LatentUpscale", "LatentCrop", "SaveLatent", "LoadLatent", "LatentUpscaleBy", "LatentRotate", "LatentFlip", "LatentComposite", "LatentBlend", "RepeatLatentBatch", "LatentFromBatch", "SetLatentNoiseMask"), 3)
-register_group(py_list("VAEDecode", "VAEEncode", "VAEEncodeTiled", "LoadImageMask", "VAEEncodeForInpaint", "LoadImage", "ImageScale", "ImageScaleBy", "ImageInvert", "EmptyImage", "ImagePadForOutpaint", "ImageBlur", "ImageBatch", "ImageCompositeMasked", "ImageCrop", "ImageToMask", "MaskToImage", "CLIPVisionEncode", "LoadImageOutput", "PreviewImage", "Reroute", "SaveImage", "WebcamCapture", "VAEDecodeTiled"), 4)
+register_group(py_list("VAEDecode", "VAEEncode", "VAEEncodeTiled", "LoadImageMask", "VAEEncodeForInpaint", "LoadImage", "ImageScale", "ImageScaleBy", "ImageInvert", "EmptyImage", "ImagePadForOutpaint", "ImageBlur", "ImageBatch", "ImageCompositeMasked", "ImageCrop", "ImageToMask", "MaskToImage", "CLIPVisionEncode", "LoadImageOutput", "PreviewImage", "Reroute", "SaveImage", "WebcamCapture", "VAEDecodeTiled", "Florence2Captioner"), 4)
 register_group(py_list("StyleModelLoader", "StyleModelApply", "unCLIPConditioning", "GLIGENLoader", "GLIGENTextBoxApply", "SVD_img2vid_Conditioning", "ConditioningSetAreaPercentageVideo", "AnimaLLLiteApply", "QwenImageDiffsynthControlnet", "ZImageFunControlnet", "WanUni3CControlnetApply", "SUPIRApply", "USOStyleReference", "ConditioningZeroOut", "ControlNetLoader", "DiffControlNetLoader", "ControlNetApply", "ControlNetApplyAdvanced", "InpaintModelConditioning", "PreviewAny", "ConditioningSetArea", "ConditioningSetAreaPercentage", "ConditioningSetAreaStrength", "ConditioningSetMask", "ConditioningMultiply", "ConditioningSetTimestepRange"), 5)
 
 def dispatch_clip_cond(class_type: str, inputs):
@@ -2301,6 +2321,8 @@ def dispatch_image(class_type: str, inputs):
         return webcam_capture(inputs)
     elif class_type == "VAEDecodeTiled":
         return vae_decode(inputs)
+    elif class_type == "Florence2Captioner":
+        return florence2_captioner(inputs)
 
 def dispatch_misc(class_type: str, inputs):
     if class_type == "StyleModelLoader":
