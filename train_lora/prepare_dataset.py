@@ -91,6 +91,11 @@ def main():
         for m in meta:
             f.write(json.dumps(m, ensure_ascii=False) + "\n")
 
+    # 同时写 musubi/kohya 约定的 per-image .txt（<name>.txt），数据集可直接训练
+    for m in meta:
+        stem = os.path.splitext(m["file_name"])[0]
+        (imgs_dir / (stem + ".txt")).write_text(m["text"], encoding="utf-8")
+
     prompt = args.instance_prompt or f"{args.trigger} style"
     (out / "instance_prompt.txt").write_text(prompt)
 

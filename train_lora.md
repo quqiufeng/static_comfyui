@@ -218,6 +218,110 @@ FP8=0 BLOCKS=12 DIM=16 EPOCHS=8 DATA=/data/datasets/<name>1536 OUT=/data/lora/<n
 bash train_lora/musubi_train.sh
 
 # 5) 出图（§7）
-./cpp/sd/backup.sh "<trigger> style, a single woman portrait, ..." ~/out.png 2560 1440 \
-  --lora /data/lora/<name>/mystyle_sdcpp.safetensors:0.7
+./cpp/sd/backup.sh 2560 1440 --lora /data/lora/<name>/mystyle_sdcpp.safetensors:0.7
 ```
+
+---
+
+## 11. 指定人脸 + 风格：双 LoRA 方案（需求与实现思路）
+
+### 11.1 需求
+想要**高清大图 + 指定某个人的脸 + 指定风格**。
+
+### 11.2 约束
+- 出图基座 z_image 是 **DiT**；IPAdapter-Face / InstantID / PuLID / PhotoMaker 等"人脸注入"方案基本是 **UNet 时代**的，DiT 上没有。
+- 因此 DiT 上"指定人脸"的可行路线 = **人物 LoRA**（社区已验证，z_image 生态有大量人物 LoRA）。
+
+### 11.3 方案：训两个 LoRA，出图叠加
+**风格 LoRA + 人脸 LoRA 用两套图分开训**，出图时同时挂载，互不干扰、可自由组合（"这张脸 × 任意风格"）。
+
+| | 风格 LoRA（已有 `mystyle`） | 人脸 LoRA（新增） |
+|---|---|---|
+| 数据 | 同风格、**不同人/不同内容** | **同一个人**，不同服装/背景/角度/表情 |
+| 数量 | 30~60 | 20~50（多正面/半侧、清晰少遮挡） |
+| caption | 描述内容，触发词绑风格 | `celebA, <服装/背景/表情/光照>`，**身份只归触发词**，不写五官 |
+| rank/alpha | 16 | **32~64**（脸更吃容量） |
+| epochs/步数 | 8（~400-500） | 12~20（~800-1500） |
+| 正则 | 可选 | 强烈建议（普通人/同类别图，不带触发词） |
+
+解耦要点：**风格集人脸多样**（否则风格带上某张脸）；**人脸集画风多样**（否则脸带上某画风）。
+
+### 11.4 出图叠加 + 触发词注入
+```bash
+./cpp/sd/backup.sh 2560 1440 \
+  --lora /data/lora/celeba_base/mystyle_sdcpp.safetensors:0.7 \
+  --lora /data/lora/mystyle_base/mystyle_sdcpp.safetensors:0.6
+```
+- 两个 LoRA 权重**别都拉满**（0.5~0.7 起调），过高会在同区块互相打架出伪影。
+- 触发词映射扩展为多行注入（`celebA` + 风格词），`backup.sh` 逐个 `--lora` 查找并前置。
+
+### 11.5 待实现清单
+1. **`backup.sh` 支持多个 `--lora`**：`--lora A:w --lora B:w`（逗号分隔或重复），多触发词按序前置到 prompt。
+2. **`prepare_dataset.py` 人物模式**：`--mode face` → caption 模板 `celebA, <可变描述>`（身份中性）；可选 `--face-crop`（裁到脸）与 `--reg-dir`（掺正则图）。
+3. **可选：人脸区域精修**：HiRes 后对脸局部再重绘一次（sd.cpp ADetailer / face-restore），让 2560 下的脸更锐；身份仍来自 LoRA。
+4. **多 LoRA 触发词映射**：`/data/lora/lora_triggers.conf` 支持两条（人脸 + 风格）。
+
+### 11.6 风险 / 备选
+- 两 LoRA 冲突（同区块抵消/伪影）→ 降权重；仍不行则用"人脸图 + 风格图混合"训**联合 LoRA**（可复用性差）。
+- 身份相似度不足 → 提高 rank、增加脸部特写占比、加正则、多步早停对比。
+- 合规：真实人物肖像权/用途由使用者自负。
+
+---
+
+## 12. 一句话总结
+
+- **高清大图** = `backup.sh` HiRes 管线（Base + bf16 + 1536 + 不过拟合的 LoRA）。
+- **指定人脸** = 该人的**人物 LoRA**（DiT 无人脸 adapter，LoRA 即正路）。
+- **风格 + 人脸** = 两套图训两个 LoRA，出图叠加（多 `--lora`）。
+
+---
+
+## 13. 人脸图片集合制作（cpp/face 扣脸）→ 人物/审美 LoRA
+
+> 下次只要**找到某个人的图片集合**，跑下面流程即可出"对齐人脸"训练集，再训练人脸 LoRA。
+
+### 13.1 工具（`cpp/face/`）
+```
+build.sh 编译 → facecli / libface.so
+facecli detect <img>                       # 人脸框+分数 (JSON)
+facecli crop   <img> <out.png> [size=512]  # 检测+5点对齐裁剪（缩到 size）
+facecli parse  <img> <out.png> [color|face|skin|hair]   # 人脸解析（在裁剪图上跑最准）
+```
+模型：SCRFD `det_10g.onnx`（本地）+ `faceparser.onnx`（BiSeNet，`/data/models/face/`）。
+
+### 13.2 一键制作数据集
+```bash
+# 传入"某个人的图片目录"（jpg/png 皆可），自动扣脸 + 打标 + 写 dataset.toml
+bash train_lora/make_face_dataset.sh <人物图片目录> <触发词>
+# 例：
+bash train_lora/make_face_dataset.sh /data/celebA_photos celebA
+# → /data/datasets/celebA_face/{images/*.png(512对齐脸), *.txt, dataset.toml}
+```
+- **同一个人**的图 → 训出**身份 LoRA**（脸越来越像这个人）。
+- **不同人**的美图集合 → 训出**"审美/风格脸" LoRA**（生成的脸偏这个风格，不绑定具体人）。
+- 无脸的图自动跳过；建议 20~50 张、角度/表情/光照多样、换装换背景。
+
+### 13.3 预缓存 + 训练（人物建议 rank32）
+```bash
+D=/data/datasets/celebA_face
+PY=/data/venv-musubi/bin; M=/opt/musubi-tuner/src/musubi_tuner
+$PY/python $M/zimage_cache_latents.py --dataset_config $D/dataset.toml \
+  --vae /data/models/z-image-turbo/vae/diffusion_pytorch_model.safetensors --device cuda
+$PY/python $M/zimage_cache_text_encoder_outputs.py --dataset_config $D/dataset.toml \
+  --text_encoder /data/models/z-image-te-qwen3.safetensors --batch_size 8 --device cuda
+
+DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002.safetensors \
+  FP8=0 BLOCKS=12 DIM=32 EPOCHS=10 DATA=$D OUT=/data/lora/celebA \
+  bash train_lora/musubi_train.sh
+# → /data/lora/celebA/mystyle_sdcpp.safetensors
+```
+
+### 13.4 出图（触发词自动注入）
+在 `/data/lora/lora_triggers.conf` 加一行 `mystyle_sdcpp.safetensors = celebA`（或把训练输出的
+LoRA 重命名为 `<触发词>_sdcpp.safetensors`），然后：
+```bash
+./cpp/sd/backup.sh 2560 1440 --lora /data/lora/celebA/mystyle_sdcpp.safetensors:0.7
+```
+
+> 说明：`musubi_train.sh` 输出固定名 `mystyle.safetensors` / `mystyle_sdcpp.safetensors`；
+> 若同时保留多个 LoRA，建议训练后 `mv` 成 `<触发词>_sdcpp.safetensors` 以便映射。
