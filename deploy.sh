@@ -56,6 +56,10 @@ BIREFNET_MODEL_DIR="${BIREFNET_MODEL_DIR:-/data/models/birefnet}"
 WITH_OCR="${WITH_OCR:-1}"
 WITH_OCR_MODELS="${WITH_OCR_MODELS:-1}"
 OCR_MODEL_DIR="${OCR_MODEL_DIR:-/data/models/ocr}"
+# ControlNet 条件图预处理器（preprocesscli，复用 ONNX Runtime + OpenCV）。
+WITH_PREPROCESS="${WITH_PREPROCESS:-1}"
+WITH_PREPROCESS_MODELS="${WITH_PREPROCESS_MODELS:-0}"
+PREPROCESS_MODEL_DIR="${PREPROCESS_MODEL_DIR:-/data/models/image}"
 
 GLIBC_TARGET="${GLIBC_TARGET:-}"
 if [ -n "$GLIBC_TARGET" ]; then
@@ -110,6 +114,10 @@ fi
 if [ "$WITH_OCR" = "1" ] && [ -f "$PROJECT_DIR/cpp/ocr/libocr.so" ]; then
   echo " OCR 节点: 打包 (PP-OCRv4)"
   [ "$WITH_OCR_MODELS" = "1" ] && echo " OCR 模型: 打包 (~15MB)"
+fi
+if [ "$WITH_PREPROCESS" = "1" ] && [ -f "$PROJECT_DIR/cpp/preprocess/preprocesscli" ]; then
+  echo " 条件图预处理: 打包 (preprocesscli)"
+  [ "$WITH_PREPROCESS_MODELS" = "1" ] && echo " 预处理模型: 打包 (~510MB)"
 fi
 echo "============================================"
 
@@ -285,6 +293,25 @@ if [ "$WITH_OCR" = "1" ] && [ -f "$PROJECT_DIR/cpp/ocr/libocr.so" ]; then
     cp "$OCR_MODEL_DIR"/ch_PP-OCRv4_det_infer.onnx "$OCR_MODEL_DIR"/ch_PP-OCRv4_rec_infer.onnx \
        "$OCR_MODEL_DIR"/ppocr_keys_v1.txt "$DIST_DIR/ocr/" 2>/dev/null || true
     echo "    ✓ PP-OCRv4 模型 -> ocr/"
+  fi
+fi
+
+# ── 可选：ControlNet 条件图预处理器（preprocesscli，复用 ONNX Runtime + OpenCV）──
+if [ "$WITH_PREPROCESS" = "1" ] && [ -f "$PROJECT_DIR/cpp/preprocess/preprocesscli" ]; then
+  echo ""
+  echo ">>> 打包 ControlNet 条件图预处理器"
+  cp "$PROJECT_DIR/cpp/preprocess/preprocesscli" "$DIST_DIR/"
+  chmod +x "$DIST_DIR/preprocesscli"
+  echo "    ✓ preprocesscli"
+  if [ "$WITH_PREPROCESS_MODELS" = "1" ]; then
+    for d in annotators dwpose depth_anything_v2_small; do
+      if [ -d "$PREPROCESS_MODEL_DIR/$d" ]; then
+        mkdir -p "$DIST_DIR/preprocess/$d"
+        cp -r "$PREPROCESS_MODEL_DIR/$d/." "$DIST_DIR/preprocess/$d/"
+        echo "    ✓ preprocess/$d"
+      fi
+    done
+    echo "    提示: 远程用 --depth-model/--pose-det/--pose-est/--hed-model/--mlsd-model 指向 \$DIST/preprocess/..."
   fi
 fi
 

@@ -243,9 +243,11 @@ FRESCA_LOW="${FRESCA_LOW:-1.0}"
 FRESCA_HIGH="${FRESCA_HIGH:-1.25}"
 FRESCA_CUTOFF="${FRESCA_CUTOFF:-20}"
 
-# Z-Image Fun-ControlNet 结构控制（canny/depth/pose...）。CONTROL_NET 与 CONTROL_IMAGE 同时给才生效。
+# Z-Image Fun-ControlNet 结构控制（canny/depth/pose...）。给了 CONTROL_IMAGE 才生效。
+# CONTROL_NET 默认 full 15 层（pose 更强；canny/depth 用 CONTROL_STRENGTH≈0.4）；
+# 追求速度可指定 lite：CONTROL_NET=$MODEL_DIR/z_image_turbo_fun_controlnet_union_2.1_lite_2601_8steps_sdcpp.safetensors
 # 控制强度 CONTROL_STRENGTH 默认 0.75（官方推荐 0.65~1.0；8-step turbo 用 --steps 8 --cfg 1.0）。
-CONTROL_NET="${CONTROL_NET:-}"
+CONTROL_NET="${CONTROL_NET:-$MODEL_DIR/z_image_turbo_fun_controlnet_union_2.1_8steps_sdcpp.safetensors}"
 CONTROL_IMAGE="${CONTROL_IMAGE:-}"
 CONTROL_STRENGTH="${CONTROL_STRENGTH:-0.75}"
 
@@ -444,7 +446,13 @@ fi
 if [ "$FRESCA" -eq 1 ]; then
     SD_CMD+=(--fresca --fresca-low "$FRESCA_LOW" --fresca-high "$FRESCA_HIGH" --fresca-cutoff "$FRESCA_CUTOFF")
 fi
-if [ -n "$CONTROL_NET" ] && [ -n "$CONTROL_IMAGE" ]; then
+if [ -n "$CONTROL_IMAGE" ]; then
+    if [ ! -f "$CONTROL_NET" ]; then
+        die "ControlNet 权重不存在: $CONTROL_NET（可下载 full/lite，或用 CONTROL_NET=... 指定）"
+    fi
+    if [ ! -f "$CONTROL_IMAGE" ]; then
+        die "ControlNet 控制图不存在: $CONTROL_IMAGE"
+    fi
     echo "ControlNet: net=$(basename "$CONTROL_NET") image=$(basename "$CONTROL_IMAGE") strength=$CONTROL_STRENGTH"
     SD_CMD+=(--control-net "$CONTROL_NET" --control-image "$CONTROL_IMAGE" --control-strength "$CONTROL_STRENGTH")
 fi
