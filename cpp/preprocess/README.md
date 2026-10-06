@@ -22,10 +22,12 @@ preprocesscli <mode> <input> <output> [options]
 | `canny` | OpenCV | 边缘检测（`--canny-low/--canny-high`）|
 | `lineart` | OpenCV | 近似线稿（黑线白底）|
 | `gray` | OpenCV | 灰度 |
-| `hed` | OpenCV | 近似软边缘（Sobel 幅值）|
-| `mlsd` | OpenCV | 近似直线段（LSD）|
+| `hed` | HED ONNX（无则回退 OpenCV 近似）| 精确软边缘（lllyasviel ControlNetHED）|
+| `mlsd` | M-LSD ONNX（无则回退 OpenCV LSD）| 精确直线段（lllyasviel M-LSD large）|
 | `depth` | Depth-Anything-V2-Small ONNX | 深度图（白=近）|
 | `pose` | DWPose (YOLOX + DW) ONNX | OpenPose 18 骨架图 |
+
+`hed_approx` / `mlsd_approx` 可强制使用 OpenCV 近似版。
 
 通用选项：`--target <int>`（长边缩放，0=原图）、`--invert`。
 
@@ -52,6 +54,8 @@ CONTROL_IMAGE=/tmp/canny.png CONTROL_STRENGTH=0.75 NO_QUALITY_PREFIX=1 HIRES=0 S
 | depth | `/data/models/image/depth_anything_v2_small/model.onnx` (+ `.onnx_data`) | `onnx-community/depth-anything-v2-small-ONNX` |
 | pose (det) | `/data/models/image/dwpose/yolox_l.onnx` | `yzd-v/DWPose` |
 | pose (est) | `/data/models/image/dwpose/dw-ll_ucoco_384.onnx` | `yzd-v/DWPose` |
+| hed | `/data/models/image/annotators/hed.onnx` (+ `.data`) | `lllyasviel/Annotators` ControlNetHED（自转 ONNX）|
+| mlsd | `/data/models/image/annotators/mlsd.onnx` (+ `.data`) | `lllyasviel/Annotators` MLSd large（自转 ONNX）|
 
 可用 `--depth-model/--pose-det/--pose-est/--mlsd-model` 覆盖；`--cpu` 关闭 CUDA provider。
 

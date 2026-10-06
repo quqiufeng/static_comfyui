@@ -28,10 +28,9 @@ namespace preprocess {
         std::string pose_est_model = "/data/models/image/dwpose/dw-ll_ucoco_384.onnx";
         float pose_det_thresh      = 0.3f;
 
-        // MLSD
-        std::string mlsd_model = "/data/models/image/mlsd_large_512_fp32.onnx";
-        float mlsd_score_thresh = 0.1f;
-        float mlsd_dist_thresh  = 0.1f;
+        // Exact annotators (lllyasviel/Annotators, exported to ONNX)
+        std::string hed_model  = "/data/models/image/annotators/hed.onnx";
+        std::string mlsd_model = "/data/models/image/annotators/mlsd.onnx";
 
         bool use_cuda = true;
     };

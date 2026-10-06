@@ -164,6 +164,16 @@ lite-2601-8steps 实测：`n_control_layers=3`、`additional_in_dim=17`（`contr
 canny（`asset/canny.jpg`）→ 512×512、8 步、cfg 1.0：strength 0.5/0.75/1.0 均得到结构正确、
 干净的猫；`backup.sh --control-net ... --control-image ...` 出图正常。
 
+### lite vs full 15 层（实测）
+
+| 变体 | 权重 | control layers | 表现 |
+|------|------|----------------|------|
+| lite-2601-8steps | 2GB | 3（注入点 0/10/20）| canny 0.75 干净；**pose 弱**（骨架→服装形）|
+| full-2.1-8steps | 6.7GB | 15（注入点 0/2/4…/28）| **pose 0.75 出正确人体**；canny 偏强，用 ~0.4 |
+
+→ 需要 pose/强结构控制用 **full**；追求速度/体积用 lite（canny/depth 足够）。
+权重：`/data/models/image/z_image_turbo_fun_controlnet_union_{2.1_lite_2601,2.1}_8steps_sdcpp.safetensors`。
+
 ---
 
 ## 5. 工作量 / 风险

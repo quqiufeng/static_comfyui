@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
+#include <utility>
 #include <vector>
 
 #include <opencv2/opencv.hpp>
@@ -51,6 +53,25 @@ namespace preprocess {
             }
             const float* data = outputs[0].GetTensorData<float>();
             return std::vector<float>(data, data + info.GetElementCount());
+        }
+
+        std::vector<std::vector<float>> RunAll(const std::vector<float>& input,
+                                               const std::vector<int64_t>& shape,
+                                               std::vector<std::vector<int64_t>>* out_shapes) {
+            Ort::Value t = Ort::Value::CreateTensor<float>(mi, const_cast<float*>(input.data()),
+                                                           input.size(), shape.data(), shape.size());
+            const char* in_names[] = {input_name.c_str()};
+            std::vector<const char*> out_names;
+            for (auto& n : output_names) out_names.push_back(n.c_str());
+            auto outputs = session->Run(Ort::RunOptions{nullptr}, in_names, &t, 1, out_names.data(), out_names.size());
+            std::vector<std::vector<float>> result;
+            for (auto& o : outputs) {
+                auto info  = o.GetTensorTypeAndShapeInfo();
+                const float* data = o.GetTensorData<float>();
+                result.emplace_back(data, data + info.GetElementCount());
+                if (out_shapes != nullptr) out_shapes->push_back(info.GetShape());
+            }
+            return result;
         }
     };
 
@@ -123,6 +144,119 @@ namespace preprocess {
         if (!cv::imwrite(output_path, out)) {
             return "failed to write output: " + output_path;
         }
+        return "";
+    }
+
+    // Exact HED edge annotator (lllyasviel/Annotators ControlNetHED, exported to ONNX).
+    static std::string HedOnnxMap(const cv::Mat& bgr, const Options& opt, cv::Mat& out_map) {
+        OnnxEngine engine(opt.hed_model, opt.use_cuda);
+        const int W = bgr.cols, H = bgr.rows;
+        std::vector<float> in(3 * H * W);
+        for (int y = 0; y < H; ++y) {
+            for (int x = 0; x < W; ++x) {
+                const cv::Vec3b p = bgr.at<cv::Vec3b>(y, x);
+                in[0 * H * W + y * W + x] = p[2];
+                in[1 * H * W + y * W + x] = p[1];
+                in[2 * H * W + y * W + x] = p[0];
+            }
+        }
+        std::vector<std::vector<int64_t>> shapes;
+        auto outs = engine.RunAll(in, {1, 3, H, W}, &shapes);
+        if (outs.empty()) {
+            return "HED produced no outputs";
+        }
+        cv::Mat accum = cv::Mat::zeros(H, W, CV_32F);
+        for (size_t k = 0; k < outs.size(); ++k) {
+            int oh = (int)shapes[k][2], ow = (int)shapes[k][3];
+            cv::Mat m(oh, ow, CV_32F, outs[k].data());
+            cv::Mat mr;
+            cv::resize(m, mr, cv::Size(W, H), 0, 0, cv::INTER_LINEAR);
+            accum += mr;
+        }
+        accum /= static_cast<float>(outs.size());
+        cv::Mat sig;
+        cv::exp(-accum, sig);
+        sig += 1.0;
+        cv::divide(cv::Mat::ones(H, W, CV_32F), sig, sig);  // sigmoid
+        cv::Mat out8;
+        sig.convertTo(out8, CV_8U, 255.0);
+        cv::cvtColor(out8, out_map, cv::COLOR_GRAY2BGR);
+        return "";
+    }
+
+    // Exact MLSD line-segment annotator (lllyasviel/Annotators M-LSD large, exported to ONNX).
+    static std::string MlsdOnnxMap(const cv::Mat& bgr, const Options& opt, cv::Mat& out_map) {
+        OnnxEngine engine(opt.mlsd_model, opt.use_cuda);
+        const int W = bgr.cols, H = bgr.rows;
+        // Match controlnet_aux resize_image: scale by 512/min(H,W) then round to multiples of 64
+        // (the FPN concat requires aligned levels).
+        float k  = 512.0f / std::min(W, H);
+        int nw   = std::max(64, (int)std::lround(W * k / 64.0) * 64);
+        int nh   = std::max(64, (int)std::lround(H * k / 64.0) * 64);
+        cv::Mat rgb, resized;
+        cv::cvtColor(bgr, rgb, cv::COLOR_BGR2RGB);
+        cv::resize(rgb, resized, cv::Size(nw, nh), 0, 0, cv::INTER_AREA);
+        resized.convertTo(resized, CV_32F);
+        std::vector<float> in(4 * nw * nh, 1.0f / 127.5f - 1.0f);
+        for (int y = 0; y < nh; ++y) {
+            for (int x = 0; x < nw; ++x) {
+                const cv::Vec3f p = resized.at<cv::Vec3f>(y, x);
+                for (int c = 0; c < 3; ++c) {
+                    in[c * nw * nh + y * nw + x] = p[c] / 127.5f - 1.0f;
+                }
+            }
+        }
+        std::vector<int64_t> oshape;
+        std::vector<float> out = engine.Run(in, {1, 4, nh, nw}, &oshape);
+        const int C = (int)oshape[1], hh = (int)oshape[2], ww = (int)oshape[3];
+        if (C < 5) {
+            return "unexpected MLSD output";
+        }
+        // heat = sigmoid(center) * (3x3 local max)
+        std::vector<float> heat(hh * ww);
+        for (int i = 0; i < hh * ww; ++i) {
+            heat[i] = 1.0f / (1.0f + std::exp(-out[i]));  // channel 0 = center
+        }
+        std::vector<std::pair<float, int>> scored;
+        scored.reserve(hh * ww);
+        for (int y = 0; y < hh; ++y) {
+            for (int x = 0; x < ww; ++x) {
+                int i  = y * ww + x;
+                bool mx = true;
+                for (int dy = -1; dy <= 1 && mx; ++dy) {
+                    for (int dx = -1; dx <= 1; ++dx) {
+                        int yy = y + dy, xx = x + dx;
+                        if (yy < 0 || yy >= hh || xx < 0 || xx >= ww) continue;
+                        if (heat[yy * ww + xx] > heat[i]) { mx = false; break; }
+                    }
+                }
+                if (mx) scored.emplace_back(heat[i], i);
+            }
+        }
+        int topk = std::min<int>(200, (int)scored.size());
+        std::partial_sort(scored.begin(), scored.begin() + topk, scored.end(),
+                          [](const auto& a, const auto& b) { return a.first > b.first; });
+
+        // Draw on the resized (nw, nh) canvas then scale to the requested output size,
+        // matching controlnet_aux (thickness 1, no anti-aliasing).
+        cv::Mat canvas = cv::Mat::zeros(nh, nw, CV_8UC3);
+        const float dist_thr = 20.0f, score_thr = 0.1f;
+        for (int k = 0; k < topk; ++k) {
+            float score = scored[k].first;
+            if (score <= score_thr) break;
+            int idx = scored[k].second;
+            int y = idx / ww, x = idx % ww;
+            // displacement channels 1..4
+            float dx1 = out[1 * hh * ww + idx], dy1 = out[2 * hh * ww + idx];
+            float dx2 = out[3 * hh * ww + idx], dy2 = out[4 * hh * ww + idx];
+            float dist = std::sqrt((dx1 - dx2) * (dx1 - dx2) + (dy1 - dy2) * (dy1 - dy2));
+            if (dist <= dist_thr) continue;
+            float x1 = (x + dx1) * 2.0f, y1 = (y + dy1) * 2.0f;
+            float x2 = (x + dx2) * 2.0f, y2 = (y + dy2) * 2.0f;
+            cv::line(canvas, cv::Point((int)x1, (int)y1), cv::Point((int)x2, (int)y2),
+                     cv::Scalar(255, 255, 255), 1, cv::LINE_8);
+        }
+        cv::resize(canvas, out_map, cv::Size(W, H), 0, 0, cv::INTER_LINEAR);
         return "";
     }
 
@@ -335,10 +469,24 @@ namespace preprocess {
         if (mode == "gray") {
             return SaveMap(ToGray3(bgr), output_path, options);
         }
-        if (mode == "hed_approx" || mode == "hed") {
+        if (mode == "hed" || mode == "hed_approx") {
+            bool have_model = !options.hed_model.empty() && std::ifstream(options.hed_model).good();
+            if (mode == "hed" && have_model) {
+                cv::Mat map;
+                std::string err = HedOnnxMap(bgr, options, map);
+                if (!err.empty()) return err;
+                return SaveMap(map, output_path, options);
+            }
             return SaveMap(HedApproxMap(bgr, options), output_path, options);
         }
-        if (mode == "mlsd") {
+        if (mode == "mlsd" || mode == "mlsd_approx") {
+            bool have_model = !options.mlsd_model.empty() && std::ifstream(options.mlsd_model).good();
+            if (mode == "mlsd" && have_model) {
+                cv::Mat map;
+                std::string err = MlsdOnnxMap(bgr, options, map);
+                if (!err.empty()) return err;
+                return SaveMap(map, output_path, options);
+            }
             return SaveMap(MlsdMap(bgr, options), output_path, options);
         }
         if (mode == "depth") {
