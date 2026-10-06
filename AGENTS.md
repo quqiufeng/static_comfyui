@@ -62,7 +62,7 @@ ssh user@remote_host "bash /opt/comfycli/run.sh workflow.json --output-dir ./out
 注意：`build.sh` 只编译不部署，`deploy.sh` 负责打包 + 传输，职责分离。
 后端已切换为动态加载模式：`libsdcpp_adapter.so` 只含适配层，运行时在可执行文件目录或当前目录查找 `libggml-cuda.so` / `libggml-cpu-*.so`。
 `WITH_CUDA=1` 会把 `libcudart.so.12` / `libcublas.so.12` / `libcublasLt.so.12` 一起打包；默认只打包 CUDA 后端插件，不打包 CUDA Runtime。
-IPAdapter 已改用 sd.cpp 原生实现，不再依赖 ONNX Runtime；部署包约 57MB。
+IPAdapter 已改用 sd.cpp 原生实现（**仅 SD1.5/SDXL**；z_image(DiT) 不支持，改用 LoRA / `--ref-image` / ControlNet，见 `TODO.md`），不再依赖 ONNX Runtime；部署包约 57MB。
 
 ## 了解最近开发日志
 

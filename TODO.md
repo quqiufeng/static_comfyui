@@ -1,5 +1,16 @@
 # TODO
 
+## 参考图 / IPAdapter 说明
+
+`--ipadapter`（sd.cpp 原生）只支持 **SD1.5 / SDXL**；**z_image(DiT) 不支持 IPAdapter**。
+z_image 侧“参考图 / 同人 / 同风格”改用：
+
+- **LoRA**：`train_lora/`（musubi 训练身份/风格 LoRA）+ `backup.sh --lora`（多 LoRA 叠加、触发词自动注入）——即 IPAdapter 的等价物；
+- **原生参考图**：`img_hires --ref-image`（z_image Omni/编辑，无需训练）；
+- **结构控制**：`preprocesscli` + `backup.sh --control-image`（canny/depth/pose/hed/mlsd/lineart/gray，见 `cpp/sd/z_image_controlnet.md`）。
+
+→ 不要再为 z_image 找 `--ipadapter`；SD1.5/SDXL 仍可用原生 `--ipadapter`。
+
 ## 待验证（代码已实现，缺模型文件）
 
 以下节点代码已实现，但本机 `/data/models` 无对应模型，**尚未运行验证**。
