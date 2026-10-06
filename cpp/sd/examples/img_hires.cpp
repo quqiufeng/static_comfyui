@@ -71,6 +71,9 @@ static void print_usage(const char* argv0) {
     std::fprintf(stderr, "  --ipadapter-clip-vision <path>  CLIP Vision model (e.g. clip_vision_sd15.safetensors)\n");
     std::fprintf(stderr, "  --ipadapter-image <path>  Reference image for IP-Adapter\n");
     std::fprintf(stderr, "  --ipadapter-strength <f>  IP-Adapter conditioning strength (default: 1.0)\n");
+    std::fprintf(stderr, "  --control-net <path>      ControlNet model (Z-Image Fun-ControlNet)\n");
+    std::fprintf(stderr, "  --control-image <path>    ControlNet control image (canny/depth/pose...)\n");
+    std::fprintf(stderr, "  --control-strength <f>    ControlNet strength (default: 1.0)\n");
     std::fprintf(stderr, "  --freeu                   Enable FreeU\n");
     std::fprintf(stderr, "  --freeu-b1 <float>        FreeU backbone1 scale (default: 1.3)\n");
     std::fprintf(stderr, "  --freeu-b2 <float>        FreeU backbone2 scale (default: 1.4)\n");
@@ -209,6 +212,10 @@ int main(int argc, char** argv) {
     std::string ipadapter_image;
     float ipadapter_strength = 1.0f;
 
+    std::string control_net;
+    std::string control_image;
+    float control_strength = 1.0f;
+
     // 后处理默认值对齐 backup.sh：清晰度 + 锐化 + 智能锐化 + 边缘锐化，提升清晰度/细节
     postproc::Params postproc;
     postproc.clarity                = 0.2f;
@@ -244,6 +251,12 @@ int main(int argc, char** argv) {
             ipadapter_image = argv[++i];
         } else if (std::strcmp(argv[i], "--ipadapter-strength") == 0 && i + 1 < argc) {
             ipadapter_strength = static_cast<float>(std::atof(argv[++i]));
+        } else if (std::strcmp(argv[i], "--control-net") == 0 && i + 1 < argc) {
+            control_net = argv[++i];
+        } else if (std::strcmp(argv[i], "--control-image") == 0 && i + 1 < argc) {
+            control_image = argv[++i];
+        } else if (std::strcmp(argv[i], "--control-strength") == 0 && i + 1 < argc) {
+            control_strength = static_cast<float>(std::atof(argv[++i]));
         } else if (std::strcmp(argv[i], "--clip-l") == 0 && i + 1 < argc) {
             clip_l = argv[++i];
             clip_l_overridden = true;
@@ -494,6 +507,15 @@ int main(int argc, char** argv) {
     }
     if (ipadapter) {
         pipeline.set_ipadapter(ipadapter_model, ipadapter_clip_vision, ipadapter_image, ipadapter_strength);
+    }
+    if (!control_net.empty()) {
+        if (!pipeline.load_control_net(control_net)) {
+            std::fprintf(stderr, "Failed to load control net: %s\n", control_net.c_str());
+            return 1;
+        }
+        if (!control_image.empty()) {
+            pipeline.set_control_image(control_image, control_strength);
+        }
     }
 
     sd::ImageGenerationParams gen_params;

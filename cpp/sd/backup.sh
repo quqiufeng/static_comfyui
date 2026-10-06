@@ -156,6 +156,9 @@ while [ $i -lt $# ]; do
         --t2i-adapter)      T2I_ADAPTER_FLAG=1 ;;
         --t2i-adapter-model) next_val "$@"; T2I_ADAPTER_MODEL="$_NV" ;;
         --t2i-adapter-image) next_val "$@"; T2I_ADAPTER_IMAGE="$_NV" ;;
+        --control-net)      next_val "$@"; CONTROL_NET="$_NV" ;;
+        --control-image)    next_val "$@"; CONTROL_IMAGE="$_NV" ;;
+        --control-strength) next_val "$@"; CONTROL_STRENGTH="$_NV" ;;
         --photomaker)       PHOTOMAKER_FLAG=1 ;;
         --photomaker-model) next_val "$@"; PHOTOMAKER_MODEL="$_NV" ;;
         --photomaker-id-images) next_val "$@"; PHOTOMAKER_ID_IMAGES="$_NV" ;;
@@ -239,6 +242,12 @@ FRESCA="${FRESCA:-1}"
 FRESCA_LOW="${FRESCA_LOW:-1.0}"
 FRESCA_HIGH="${FRESCA_HIGH:-1.25}"
 FRESCA_CUTOFF="${FRESCA_CUTOFF:-20}"
+
+# Z-Image Fun-ControlNet 结构控制（canny/depth/pose...）。CONTROL_NET 与 CONTROL_IMAGE 同时给才生效。
+# 控制强度 CONTROL_STRENGTH 默认 0.75（官方推荐 0.65~1.0；8-step turbo 用 --steps 8 --cfg 1.0）。
+CONTROL_NET="${CONTROL_NET:-}"
+CONTROL_IMAGE="${CONTROL_IMAGE:-}"
+CONTROL_STRENGTH="${CONTROL_STRENGTH:-0.75}"
 
 echo -e "${BLUE}[INFO] $([ "$WIDTH" -ge 1920 ] && echo "Ultra HD" || echo "HD") Mode: steps=$STEPS, cfg=$CFG_SCALE, sampler=$SAMPLING_METHOD${NC}"
 
@@ -434,6 +443,10 @@ fi
 
 if [ "$FRESCA" -eq 1 ]; then
     SD_CMD+=(--fresca --fresca-low "$FRESCA_LOW" --fresca-high "$FRESCA_HIGH" --fresca-cutoff "$FRESCA_CUTOFF")
+fi
+if [ -n "$CONTROL_NET" ] && [ -n "$CONTROL_IMAGE" ]; then
+    echo "ControlNet: net=$(basename "$CONTROL_NET") image=$(basename "$CONTROL_IMAGE") strength=$CONTROL_STRENGTH"
+    SD_CMD+=(--control-net "$CONTROL_NET" --control-image "$CONTROL_IMAGE" --control-strength "$CONTROL_STRENGTH")
 fi
 
 if [ "$HIRES_UPSCALER" = "model" ]; then

@@ -695,7 +695,7 @@ index 0000000..011c0ef
 +
 +#endif  // __GLIGEN_HPP__
 diff --git a/src/model/diffusion/model.hpp b/src/model/diffusion/model.hpp
-index fb4e362..9050665 100644
+index fb4e362..5982d93 100644
 --- a/src/model/diffusion/model.hpp
 +++ b/src/model/diffusion/model.hpp
 @@ -51,6 +51,9 @@ struct UNetDiffusionExtra {
@@ -708,6 +708,43 @@ index fb4e362..9050665 100644
  };
  
  struct SkipLayerDiffusionExtra {
+@@ -139,6 +142,12 @@ struct LLaDAImageDiffusionExtra {
+     const sd::Tensor<float>* semantic = nullptr;
+ };
+ 
++struct ZImageDiffusionExtra {
++    // Encoded Fun-ControlNet context: [W, H, control_in_dim + additional_in_dim, N].
++    const sd::Tensor<float>* control_context = nullptr;
++    float control_strength                   = 1.f;
++};
++
+ using DiffusionExtraParams = std::variant<std::monostate,
+                                           UNetDiffusionExtra,
+                                           SkipLayerDiffusionExtra,
+@@ -152,7 +161,8 @@ using DiffusionExtraParams = std::variant<std::monostate,
+                                           MiniT2IDiffusionExtra,
+                                           SenseNovaU1DiffusionExtra,
+                                           HunyuanVideoDiffusionExtra,
+-                                          LLaDAImageDiffusionExtra>;
++                                          LLaDAImageDiffusionExtra,
++                                          ZImageDiffusionExtra>;
+ 
+ struct DiffusionParams {
+     const sd::Tensor<float>* x                        = nullptr;
+@@ -192,6 +202,13 @@ public:
+     virtual sd::Tensor<float> compute(int n_threads,
+                                       const DiffusionParams& diffusion_params) = 0;
+ 
++    // Number of channels the diffusion model expects for a ControlNet context tensor
++    // (e.g. Z-Image Fun-ControlNet: control latent + optional mask/inpaint latent).
++    // 0 means the model does not consume an encoded control context.
++    virtual int control_context_channels() const {
++        return 0;
++    }
++
+     void get_param_tensors(std::map<std::string, ggml_tensor*>& tensors) {
+         get_param_tensors(tensors, prefix);
+     }
 diff --git a/src/model/diffusion/unet.hpp b/src/model/diffusion/unet.hpp
 index 1c8ddf4..80e4c39 100644
 --- a/src/model/diffusion/unet.hpp
@@ -860,8 +897,507 @@ index 1c8ddf4..80e4c39 100644
          return compute(n_threads,
                         *diffusion_params.x,
                         *diffusion_params.timesteps,
+diff --git a/src/model/diffusion/z_image.hpp b/src/model/diffusion/z_image.hpp
+index a1012ca..7b5f056 100644
+--- a/src/model/diffusion/z_image.hpp
++++ b/src/model/diffusion/z_image.hpp
+@@ -3,6 +3,8 @@
+ 
+ #include <algorithm>
+ #include <cinttypes>
++#include <cmath>
++#include <cstdlib>
+ 
+ #include "core/ggml_extend.h"
+ #include "core/ggml_extend_backend.h"
+@@ -23,7 +25,7 @@
+ #endif
+ 
+ namespace ZImage {
+-    constexpr int Z_IMAGE_GRAPH_SIZE = 20480;
++    constexpr int Z_IMAGE_GRAPH_SIZE = 32768;
+     constexpr int ADALN_EMBED_DIM    = 256;
+     constexpr int SEQ_MULTI_OF       = 32;
+ 
+@@ -387,6 +389,238 @@ namespace ZImage {
+         }
+     };
+ 
++    // ---------------------------------------------------------------------
++    // Z-Image ControlNet (Fun-ControlNet Union), ported from ComfyUI
++    //   comfy/ldm/lumina/controlnet.py + comfy_extras/nodes_model_patch.py
++    // ---------------------------------------------------------------------
++    struct ZImageControlConfig {
++        int patch_size            = 2;
++        int64_t hidden_size       = 3840;
++        int64_t num_heads         = 30;
++        int64_t num_kv_heads      = 30;
++        int64_t head_dim          = 128;
++        int64_t multiple_of       = 256;
++        float ffn_dim_multiplier  = 8.0f / 3.0f;
++        float norm_eps            = 1e-5f;
++        bool qk_norm              = true;
++        int64_t control_in_dim    = 16;
++        int64_t additional_in_dim = 0;
++        int n_control_layers      = 6;
++        int n_refiner_layers      = 2;
++        bool refiner_control      = false;
++        bool broken               = false;
++
++        static bool present(const String2TensorStorage& m, const std::string& prefix) {
++            return m.find(prefix + "control_all_x_embedder.2-1.weight") != m.end();
++        }
++
++        static ZImageControlConfig detect_from_weights(const String2TensorStorage& tensor_storage_map,
++                                                       const std::string& prefix,
++                                                       const ZImageConfig& base) {
++            ZImageControlConfig config;
++            config.hidden_size      = base.hidden_size;
++            config.num_heads        = base.num_heads;
++            config.num_kv_heads     = base.num_kv_heads;
++            config.head_dim         = base.head_dim;
++            config.multiple_of      = base.multiple_of;
++            config.ffn_dim_multiplier = base.ffn_dim_multiplier;
++            config.norm_eps         = base.norm_eps;
++            config.qk_norm          = base.qk_norm;
++            config.patch_size       = base.patch_size;
++
++            int max_control_layer  = -1;
++            int max_refiner_layer  = -1;
++            for (const auto& [name, tensor_storage] : tensor_storage_map) {
++                if (!starts_with(name, prefix)) {
++                    continue;
++                }
++                if (name == prefix + "control_all_x_embedder.2-1.weight" && tensor_storage.n_dims == 2) {
++                    int64_t patch_area = config.patch_size * config.patch_size;
++                    config.control_in_dim    = 16;
++                    config.additional_in_dim = tensor_storage.ne[0] / patch_area - config.control_in_dim;
++                } else if (ends_with(name, "control_layers.0.attention.q_norm.weight") && tensor_storage.n_dims == 1) {
++                    config.head_dim  = tensor_storage.ne[0];
++                    config.num_heads = config.hidden_size / config.head_dim;
++                    config.num_kv_heads = config.num_heads;
++                }
++                size_t pos = name.find("control_layers.");
++                if (pos != std::string::npos) {
++                    auto items = split_string(name.substr(pos), '.');
++                    if (items.size() > 1) {
++                        max_control_layer = std::max(max_control_layer, atoi(items[1].c_str()));
++                    }
++                }
++                pos = name.find("control_noise_refiner.");
++                if (pos != std::string::npos) {
++                    auto items = split_string(name.substr(pos), '.');
++                    if (items.size() > 1) {
++                        max_refiner_layer = std::max(max_refiner_layer, atoi(items[1].c_str()));
++                    }
++                }
++            }
++            config.n_control_layers = max_control_layer + 1;
++            config.n_refiner_layers = max_refiner_layer + 1;
++            config.refiner_control  = config.additional_in_dim > 0;
++            LOG_VERBOSE("z_image control: n_control_layers = %d, n_refiner_layers = %d, control_in_dim = %" PRId64 ", additional_in_dim = %" PRId64,
++                        config.n_control_layers,
++                        config.n_refiner_layers,
++                        config.control_in_dim,
++                        config.additional_in_dim);
++            return config;
++        }
++    };
++
++    // Control transformer block: JointTransformerBlock + before_proj/after_proj.
++    // `block_id == 0` applies `before_proj(c) + x`; returns (c_skip, c).
++    struct ZImageControlBlock : public JointTransformerBlock {
++        int64_t control_block_id;
++
++        ZImageControlBlock(int64_t control_block_id,
++                           int64_t hidden_size,
++                           int64_t head_dim,
++                           int64_t num_heads,
++                           int64_t num_kv_heads,
++                           int64_t multiple_of,
++                           float ffn_dim_multiplier,
++                           float norm_eps,
++                           bool qk_norm)
++            : JointTransformerBlock(static_cast<int>(control_block_id),
++                                    hidden_size,
++                                    head_dim,
++                                    num_heads,
++                                    num_kv_heads,
++                                    multiple_of,
++                                    ffn_dim_multiplier,
++                                    norm_eps,
++                                    qk_norm,
++                                    true,
++                                    true,
++                                    true),
++              control_block_id(control_block_id) {
++            if (control_block_id == 0) {
++                blocks["before_proj"] = std::make_shared<Linear>(hidden_size, hidden_size, true);
++            }
++            blocks["after_proj"] = std::make_shared<Linear>(hidden_size, hidden_size, true);
++        }
++
++        std::pair<ggml_tensor*, ggml_tensor*> control_forward(GGMLRunnerContext* ctx,
++                                                              ggml_tensor* c,
++                                                              ggml_tensor* x,
++                                                              ggml_tensor* pe,
++                                                              ggml_tensor* adaln_input) {
++            if (control_block_id == 0) {
++                auto before_proj = std::dynamic_pointer_cast<Linear>(blocks["before_proj"]);
++                c                = ggml_add(ctx->ggml_ctx, before_proj->forward(ctx, c), x);
++            }
++            c             = JointTransformerBlock::forward(ctx, c, pe, nullptr, adaln_input);
++            auto after_proj = std::dynamic_pointer_cast<Linear>(blocks["after_proj"]);
++            return {after_proj->forward(ctx, c), c};
++        }
++    };
++
++    struct ZImageControlModel : public GGMLBlock {
++    public:
++        ZImageControlConfig config;
++
++        ZImageControlModel() = default;
++        ZImageControlModel(ZImageControlConfig config)
++            : config(config) {
++            int64_t in_dim = config.patch_size * config.patch_size * (config.control_in_dim + config.additional_in_dim);
++            blocks["control_all_x_embedder.2-1"] = std::make_shared<Linear>(in_dim, config.hidden_size, true);
++
++            for (int i = 0; i < config.n_control_layers; i++) {
++                blocks["control_layers." + std::to_string(i)] =
++                    std::make_shared<ZImageControlBlock>(i,
++                                                         config.hidden_size,
++                                                         config.head_dim,
++                                                         config.num_heads,
++                                                         config.num_kv_heads,
++                                                         config.multiple_of,
++                                                         config.ffn_dim_multiplier,
++                                                         config.norm_eps,
++                                                         config.qk_norm);
++            }
++            for (int i = 0; i < config.n_refiner_layers; i++) {
++                if (config.refiner_control) {
++                    blocks["control_noise_refiner." + std::to_string(i)] =
++                        std::make_shared<ZImageControlBlock>(i,
++                                                             config.hidden_size,
++                                                             config.head_dim,
++                                                             config.num_heads,
++                                                             config.num_kv_heads,
++                                                             config.multiple_of,
++                                                             config.ffn_dim_multiplier,
++                                                             config.norm_eps,
++                                                             config.qk_norm);
++                } else {
++                    blocks["control_noise_refiner." + std::to_string(i)] =
++                        std::make_shared<JointTransformerBlock>(i,
++                                                                config.hidden_size,
++                                                                config.head_dim,
++                                                                config.num_heads,
++                                                                config.num_kv_heads,
++                                                                config.multiple_of,
++                                                                config.ffn_dim_multiplier,
++                                                                config.norm_eps,
++                                                                config.qk_norm,
++                                                                true);
++                }
++            }
++        }
++
++        ggml_tensor* embed(GGMLRunnerContext* ctx, ggml_tensor* control_context) {
++            auto embedder = std::dynamic_pointer_cast<Linear>(blocks["control_all_x_embedder.2-1"]);
++            auto tokens   = DiT::pad_and_patchify(ctx, control_context, config.patch_size, config.patch_size, false);
++            return embedder->forward(ctx, tokens);
++        }
++
++        std::pair<ggml_tensor*, ggml_tensor*> run_refiner(GGMLRunnerContext* ctx,
++                                                          int layer_id,
++                                                          ggml_tensor* c,
++                                                          ggml_tensor* x,
++                                                          ggml_tensor* pe,
++                                                          ggml_tensor* adaln_input) {
++            auto block = std::dynamic_pointer_cast<ZImageControlBlock>(blocks["control_noise_refiner." + std::to_string(layer_id)]);
++            return block->control_forward(ctx, c, x, pe, adaln_input);
++        }
++
++        // Plain refiner path (refiner_control == false): blocks run up-front, no injection.
++        ggml_tensor* run_refiner_plain(GGMLRunnerContext* ctx,
++                                       int layer_id,
++                                       ggml_tensor* c,
++                                       ggml_tensor* pe,
++                                       ggml_tensor* adaln_input) {
++            auto block = std::dynamic_pointer_cast<JointTransformerBlock>(blocks["control_noise_refiner." + std::to_string(layer_id)]);
++            return block->forward(ctx, c, pe, nullptr, adaln_input);
++        }
++
++        std::pair<ggml_tensor*, ggml_tensor*> run_control_layer(GGMLRunnerContext* ctx,
++                                                                int layer_id,
++                                                                ggml_tensor* c,
++                                                                ggml_tensor* x,
++                                                                ggml_tensor* pe,
++                                                                ggml_tensor* adaln_input) {
++            auto block = std::dynamic_pointer_cast<ZImageControlBlock>(blocks["control_layers." + std::to_string(layer_id)]);
++            return block->control_forward(ctx, c, x, pe, adaln_input);
++        }
++    };
++
++    // base[:, :n] += residual * strength (padding tokens past n are preserved).
++    inline ggml_tensor* add_residual_first_n(GGMLRunnerContext* ctx,
++                                             ggml_tensor* base,
++                                             ggml_tensor* residual,
++                                             int64_t n,
++                                             float strength) {
++        residual = ggml_ext_scale(ctx->ggml_ctx, residual, strength);
++        if (n >= base->ne[1]) {
++            return ggml_add(ctx->ggml_ctx, base, residual);
++        }
++        auto head = ggml_ext_slice(ctx->ggml_ctx, base, 1, 0, n);
++        auto tail = ggml_ext_slice(ctx->ggml_ctx, base, 1, n, base->ne[1]);
++        head      = ggml_add(ctx->ggml_ctx, head, residual);
++        return ggml_concat(ctx->ggml_ctx, head, tail, 1);
++    }
++
+     struct FinalLayer : public GGMLBlock {
+     public:
+         FinalLayer(int64_t hidden_size,
+@@ -486,7 +720,10 @@ namespace ZImage {
+                                   ggml_tensor* x,
+                                   ggml_tensor* timestep,
+                                   ggml_tensor* context,
+-                                  ggml_tensor* pe) {
++                                  ggml_tensor* pe,
++                                  ZImageControlModel* control  = nullptr,
++                                  ggml_tensor* control_context = nullptr,
++                                  float control_strength       = 0.f) {
+             auto x_embedder     = std::dynamic_pointer_cast<Linear>(blocks["x_embedder"]);
+             auto t_embedder     = std::dynamic_pointer_cast<TimestepEmbedder>(blocks["t_embedder"]);
+             auto cap_embedder_0 = std::dynamic_pointer_cast<RMSNorm>(blocks["cap_embedder.0"]);
+@@ -526,6 +763,19 @@ namespace ZImage {
+             auto txt_pe = ggml_ext_slice(ctx->ggml_ctx, pe, 3, 0, txt->ne[1]);
+             auto img_pe = ggml_ext_slice(ctx->ggml_ctx, pe, 3, txt->ne[1], pe->ne[3]);
+ 
++            const bool use_control = control != nullptr && control_context != nullptr && control_strength != 0.f;
++            ggml_tensor* ctrl_c    = nullptr;
++            ggml_tensor* ctrl_pe   = nullptr;
++            if (use_control) {
++                ctrl_c  = control->embed(ctx, control_context);                                 // [N, n_img_token, hidden_size]
++                ctrl_pe = ggml_ext_slice(ctx->ggml_ctx, img_pe, 3, 0, ctrl_c->ne[1]);          // [2,2,64,n_ctrl]
++                if (!control->config.refiner_control) {
++                    for (int i = 0; i < control->config.n_refiner_layers; i++) {
++                        ctrl_c = control->run_refiner_plain(ctx, i, ctrl_c, ctrl_pe, t_emb);
++                    }
++                }
++            }
++
+             for (int i = 0; i < config.num_refiner_layers; i++) {
+                 auto block = std::dynamic_pointer_cast<JointTransformerBlock>(blocks["context_refiner." + std::to_string(i)]);
+ 
+@@ -533,20 +783,71 @@ namespace ZImage {
+                 sd::ggml_graph_cut::mark_graph_cut(txt, "z_image.context_refiner." + std::to_string(i), "txt");
+             }
+ 
++            ggml_tensor* img_refiner_input = img;
+             for (int i = 0; i < config.num_refiner_layers; i++) {
+                 auto block = std::dynamic_pointer_cast<JointTransformerBlock>(blocks["noise_refiner." + std::to_string(i)]);
+ 
+                 img = block->forward(ctx, img, img_pe, nullptr, t_emb);
++                if (use_control && control->config.refiner_control && ctrl_c != nullptr) {
++                    auto x_in = ctrl_c->ne[1] < img_refiner_input->ne[1]
++                                    ? ggml_ext_slice(ctx->ggml_ctx, img_refiner_input, 1, 0, ctrl_c->ne[1])
++                                    : img_refiner_input;
++                    auto proj = control->run_refiner(ctx, i, ctrl_c, x_in, ctrl_pe, t_emb);
++                    ctrl_c    = proj.second;
++                    img       = add_residual_first_n(ctx, img, proj.first, ctrl_c->ne[1], control_strength);
++                }
+                 sd::ggml_graph_cut::mark_graph_cut(img, "z_image.noise_refiner." + std::to_string(i), "img");
+             }
+ 
++            // Officially the control layers operate on the same unified [cap, img] sequence as the
++            // main layers (cap tokens included), not on image tokens alone.
++            ggml_tensor* ctrl_unified    = nullptr;
++            ggml_tensor* ctrl_unified_pe = nullptr;
++            int64_t ctrl_img_tokens      = 0;
++            if (use_control && ctrl_c != nullptr) {
++                ctrl_img_tokens = ctrl_c->ne[1];
++                ctrl_unified    = ggml_concat(ctx->ggml_ctx, txt, ctrl_c, 1);
++                ctrl_unified_pe = ggml_concat(ctx->ggml_ctx, txt_pe, ctrl_pe, 3);
++            }
++
+             auto txt_img = ggml_concat(ctx->ggml_ctx, txt, img, 1);  // [N, n_txt_token + n_txt_pad_token + n_img_token + n_img_pad_token, hidden_size]
+             sd::ggml_graph_cut::mark_graph_cut(txt_img, "z_image.prelude", "txt_img");
+ 
++            ggml_tensor* unified_input = txt_img;
++            int last_control_layer     = -1;
++            ggml_tensor* control_skip     = nullptr;
++            int control_div               = config.num_layers;
++            if (use_control && control->config.n_control_layers > 0) {
++                control_div = (config.num_layers + control->config.n_control_layers / 2) / control->config.n_control_layers;
++            }
++            if (control_div < 1) {
++                control_div = 1;
++            }
++
+             for (int i = 0; i < config.num_layers; i++) {
+                 auto block = std::dynamic_pointer_cast<JointTransformerBlock>(blocks["layers." + std::to_string(i)]);
+ 
+                 txt_img = block->forward(ctx, txt_img, pe, nullptr, t_emb);
++                if (use_control && ctrl_unified != nullptr) {
++                    int cnet_index = i / control_div;
++                    if (cnet_index < control->config.n_control_layers) {
++                        int64_t n_unified = txt->ne[1] + ctrl_img_tokens;
++                        auto x_in = n_unified < unified_input->ne[1]
++                                        ? ggml_ext_slice(ctx->ggml_ctx, unified_input, 1, 0, n_unified)
++                                        : unified_input;
++                        while (last_control_layer < cnet_index) {
++                            last_control_layer++;
++                            auto proj    = control->run_control_layer(ctx, last_control_layer, ctrl_unified, x_in, ctrl_unified_pe, t_emb);
++                            ctrl_unified = proj.second;
++                            control_skip = proj.first;
++                        }
++                        // Each control layer's residual is injected once, at its main-layer place
++                        // (block_index % div == 0), not at every layer in the range.
++                        if (i % control_div == 0) {
++                            txt_img = add_residual_first_n(ctx, txt_img, control_skip, txt->ne[1] + ctrl_img_tokens, control_strength);
++                        }
++                    }
++                }
+                 sd::ggml_graph_cut::mark_graph_cut(txt_img, "z_image.layers." + std::to_string(i), "txt_img");
+             }
+ 
+@@ -562,12 +863,16 @@ namespace ZImage {
+                              ggml_tensor* timestep,
+                              ggml_tensor* context,
+                              ggml_tensor* pe,
+-                             std::vector<ggml_tensor*> ref_latents = {}) {
++                             std::vector<ggml_tensor*> ref_latents = {},
++                             ZImageControlModel* control            = nullptr,
++                             ggml_tensor* control_context           = nullptr,
++                             float control_strength                 = 0.f) {
+             // Forward pass of DiT.
+             // x: [N, C, H, W]
+             // timestep: [N,]
+             // context: [N, L, D]
+             // pe: [L, d_head/2, 2, 2]
++            // control_context: [W, H, C, N] encoded control latent (Fun-ControlNet)
+             // return: [N, C, H, W]
+ 
+             int64_t W = x->ne[0];
+@@ -587,7 +892,7 @@ namespace ZImage {
+                 }
+             }
+ 
+-            auto out = forward_core(ctx, img, timestep, context, pe);
++            auto out = forward_core(ctx, img, timestep, context, pe, control, control_context, control_strength);
+ 
+             out = ggml_ext_slice(ctx->ggml_ctx, out, 1, 0, n_img_token);                              // [N, n_img_token, ph*pw*C]
+             out = DiT::unpatchify_and_crop(ctx->ggml_ctx, out, H, W, patch_size, patch_size, false);  // [N, C, H, W]
+@@ -602,6 +907,9 @@ namespace ZImage {
+     public:
+         ZImageConfig config;
+         ZImageModel z_image;
++        ZImageControlConfig control_config;
++        ZImageControlModel control;
++        bool has_control = false;
+         std::vector<float> pe_vec;
+         std::vector<float> timestep_vec;
+         SDVersion version;
+@@ -615,27 +923,49 @@ namespace ZImage {
+               config(ZImageConfig::detect_from_weights(tensor_storage_map, prefix)) {
+             z_image = ZImageModel(config);
+             z_image.init(params_ctx, tensor_storage_map, prefix);
++
++            // Z-Image Fun-ControlNet is a model patch: its blocks are injected into the
++            // main DiT graph, so it is owned by this runner instead of a separate ControlNet.
++            has_control = ZImageControlConfig::present(tensor_storage_map, "");
++            if (has_control) {
++                control_config = ZImageControlConfig::detect_from_weights(tensor_storage_map, "", config);
++                control        = ZImageControlModel(control_config);
++                control.init(params_ctx, tensor_storage_map, "");
++            }
+         }
+ 
+         std::string get_desc() override {
+             return "z_image";
+         }
+ 
++        int control_context_channels() const override {
++            return has_control ? static_cast<int>(control.config.control_in_dim + control.config.additional_in_dim) : 0;
++        }
++
+         void get_param_tensors(std::map<std::string, ggml_tensor*>& tensors, const std::string& prefix) override {
+             z_image.get_param_tensors(tensors, prefix);
++            if (has_control) {
++                control.get_param_tensors(tensors, "");
++            }
+         }
+ 
+         ggml_cgraph* build_graph(const sd::Tensor<float>& x_tensor,
+                                  const sd::Tensor<float>& timesteps_tensor,
+                                  const sd::Tensor<float>& context_tensor,
+                                  const std::vector<sd::Tensor<float>>& ref_latents_tensor = {},
+-                                 Rope::RefIndexMode ref_index_mode                        = Rope::RefIndexMode::FIXED) {
++                                 Rope::RefIndexMode ref_index_mode                        = Rope::RefIndexMode::FIXED,
++                                 const sd::Tensor<float>& control_context_tensor         = {},
++                                 float control_strength                                  = 0.f) {
+             ggml_cgraph* gf        = new_graph_custom(Z_IMAGE_GRAPH_SIZE);
+             ggml_tensor* x         = make_input(x_tensor);
+             ggml_tensor* timesteps = make_input(timesteps_tensor);
+             GGML_ASSERT(x->ne[3] == 1);
+             GGML_ASSERT(!context_tensor.empty());
+             ggml_tensor* context = make_input(context_tensor);
++            ggml_tensor* control_context = nullptr;
++            if (has_control && !control_context_tensor.empty()) {
++                control_context = make_input(control_context_tensor);
++            }
+             std::vector<ggml_tensor*> ref_latents;
+             ref_latents.reserve(ref_latents_tensor.size());
+             for (const auto& ref_latent_tensor : ref_latents_tensor) {
+@@ -668,7 +998,10 @@ namespace ZImage {
+                                                timesteps,
+                                                context,
+                                                pe,
+-                                               ref_latents);
++                                               ref_latents,
++                                               has_control ? &control : nullptr,
++                                               control_context,
++                                               control_strength);
+ 
+             ggml_build_forward_expand(gf, out);
+ 
+@@ -680,12 +1013,14 @@ namespace ZImage {
+                                   const sd::Tensor<float>& timesteps,
+                                   const sd::Tensor<float>& context,
+                                   const std::vector<sd::Tensor<float>>& ref_latents = {},
+-                                  Rope::RefIndexMode ref_index_mode                 = Rope::RefIndexMode::FIXED) {
++                                  Rope::RefIndexMode ref_index_mode                 = Rope::RefIndexMode::FIXED,
++                                  const sd::Tensor<float>& control_context         = {},
++                                  float control_strength                           = 0.f) {
+             // x: [N, in_channels, h, w]
+             // timesteps: [N, ]
+             // context: [N, max_position, hidden_size]
+             auto get_graph = [&]() -> ggml_cgraph* {
+-                return build_graph(x, timesteps, context, ref_latents, ref_index_mode);
++                return build_graph(x, timesteps, context, ref_latents, ref_index_mode, control_context, control_strength);
+             };
+ 
+             return restore_trailing_singleton_dims(GGMLRunner::compute(get_graph, n_threads, false), x.dim());
+@@ -696,12 +1031,15 @@ namespace ZImage {
+             GGML_ASSERT(diffusion_params.x != nullptr);
+             GGML_ASSERT(diffusion_params.timesteps != nullptr);
+             static const std::vector<sd::Tensor<float>> empty_ref_latents;
++            const auto* control = std::get_if<ZImageDiffusionExtra>(&diffusion_params.extra);
+             return compute(n_threads,
+                            *diffusion_params.x,
+                            *diffusion_params.timesteps,
+                            tensor_or_empty(diffusion_params.context),
+                            diffusion_params.ref_latents && diffusion_params.ref_image_params.pass_to_dit ? *diffusion_params.ref_latents : empty_ref_latents,
+-                           diffusion_params.ref_image_params.ref_index_mode);
++                           diffusion_params.ref_image_params.ref_index_mode,
++                           control != nullptr ? tensor_or_empty(control->control_context) : sd::Tensor<float>(),
++                           control != nullptr ? control->control_strength : 0.f);
+         }
+ 
+         void test() {
 diff --git a/src/pipeline/diffusion_engine.cpp b/src/pipeline/diffusion_engine.cpp
-index e020a2d..e2d54f6 100644
+index e020a2d..70588d4 100644
 --- a/src/pipeline/diffusion_engine.cpp
 +++ b/src/pipeline/diffusion_engine.cpp
 @@ -26,6 +26,7 @@
@@ -872,7 +1408,29 @@ index e020a2d..e2d54f6 100644
  #include "stable-diffusion.h"
  
  #include "conditioning/conditioner.hpp"
-@@ -742,7 +743,10 @@ bool StableDiffusionGGML::init_model_loader(ModelLoader& model_loader, ModelConf
+@@ -586,7 +587,8 @@ bool StableDiffusionGGML::unload_control_net() {
+     }
+     auto next_config = std::make_unique<ModelConfig>(*config_);
+     next_config->set_control_net(0, "");
+-    return apply_model_update(std::move(candidate), std::move(next_config), {RunnerGroup::ControlNet});
++    RunnerGroups groups = sd_version_is_z_image(version) ? RunnerGroups{RunnerGroup::Core} : RunnerGroups{RunnerGroup::ControlNet};
++    return apply_model_update(std::move(candidate), std::move(next_config), groups);
+ }
+ 
+ bool StableDiffusionGGML::load_control_net_from_file(const std::string& path) {
+@@ -608,7 +610,10 @@ bool StableDiffusionGGML::load_control_net_from_file(const std::string& path) {
+     }
+     auto next_config = std::make_unique<ModelConfig>(*config_);
+     next_config->set_control_net(file_id, path);
+-    return apply_model_update(std::move(candidate), std::move(next_config), {RunnerGroup::ControlNet});
++    // Z-Image Fun-ControlNet is a model patch inside the main DiT runner, so the diffusion
++    // (Core) runner must reload to pick up its weights.
++    RunnerGroups groups = sd_version_is_z_image(version) ? RunnerGroups{RunnerGroup::Core} : RunnerGroups{RunnerGroup::ControlNet};
++    return apply_model_update(std::move(candidate), std::move(next_config), groups);
+ }
+ 
+ bool StableDiffusionGGML::init_backend() {
+@@ -742,7 +747,10 @@ bool StableDiffusionGGML::init_model_loader(ModelLoader& model_loader, ModelConf
  
      if (strlen(SAFE_STR(sd_ctx_params->clip_vision_path)) > 0) {
          LOG_INFO("loading clip_vision from '%s'", sd_ctx_params->clip_vision_path);
@@ -884,7 +1442,7 @@ index e020a2d..e2d54f6 100644
              LOG_WARN("loading clip_vision from '%s' failed", sd_ctx_params->clip_vision_path);
          }
      }
-@@ -1311,6 +1315,13 @@ bool StableDiffusionGGML::validate_and_load_runners() {
+@@ -1311,6 +1319,13 @@ bool StableDiffusionGGML::validate_and_load_runners() {
      return true;
  }
  
@@ -898,7 +1456,7 @@ index e020a2d..e2d54f6 100644
  bool StableDiffusionGGML::build_denoiser() {
      const auto* sd_ctx_params      = &config_->params;
      const auto& model_loader       = model_manager->loader();
-@@ -1859,6 +1870,28 @@ sd::Tensor<float> StableDiffusionGGML::get_audio_embedding(const sd_audio_t& aud
+@@ -1859,6 +1874,28 @@ sd::Tensor<float> StableDiffusionGGML::get_audio_embedding(const sd_audio_t& aud
      return audio_encoder->compute(n_threads, mono);
  }
  
@@ -927,7 +1485,7 @@ index e020a2d..e2d54f6 100644
  void StableDiffusionGGML::compute_ip_adapter_tokens(const sd_image_t& image, float strength) {
      ip_adapter_tokens        = {};
      ip_adapter_uncond_tokens = {};
-@@ -1867,9 +1900,11 @@ void StableDiffusionGGML::compute_ip_adapter_tokens(const sd_image_t& image, flo
+@@ -1867,9 +1904,11 @@ void StableDiffusionGGML::compute_ip_adapter_tokens(const sd_image_t& image, flo
          return;
      }
      auto image_tensor = sd_image_to_tensor(image);
@@ -942,7 +1500,7 @@ index e020a2d..e2d54f6 100644
      if (embed.empty()) {
          return;
      }
-@@ -2218,6 +2253,9 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2218,6 +2257,9 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
  
      RunnerEndOnExit sample_control_runner_end{!control_image.empty() && control_net != nullptr ? control_net.get() : nullptr};
  
@@ -952,7 +1510,7 @@ index e020a2d..e2d54f6 100644
      const bool apply_denoise_mask = !denoise_mask.empty() &&
                                      std::any_of(denoise_mask.values().begin(), denoise_mask.values().end(),
                                                  [](float value) { return value != 1.f; });
-@@ -2280,7 +2318,12 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2280,7 +2322,12 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
      if (use_apg_guidance) {
          LOG_INFO("using Adaptive Projected Guidance (APG)");
      }
@@ -966,7 +1524,7 @@ index e020a2d..e2d54f6 100644
      sd::guidance::AdaptiveProjectedGuidance adaptive_projected_guidance(cfg_scale, img_cfg_scale, apg_params);
      const sd::guidance::BaseGuidance& primary_guidance = use_apg_guidance
                                                               ? static_cast<const sd::guidance::BaseGuidance&>(adaptive_projected_guidance)
-@@ -2414,6 +2457,11 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2414,6 +2461,11 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
                      nvf = static_cast<int>(noised_input.shape()[3]);
                  }
                  UNetDiffusionExtra unet_extra{nvf, &controls, control_strength};
@@ -978,7 +1536,16 @@ index e020a2d..e2d54f6 100644
                  const auto& ip_tokens = use_uncond_ip ? ip_adapter_uncond_tokens : ip_adapter_tokens;
                  if (!ip_tokens.empty()) {
                      unet_extra.ip_context = &ip_tokens;
-@@ -2476,6 +2524,18 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2472,10 +2524,27 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+             } else if (sd_version_is_sensenova_u1(version)) {
+                 diffusion_params.extra = SenseNovaU1DiffusionExtra{
+                     condition.c_input_ids.empty() ? nullptr : &condition.c_input_ids};
++            } else if (sd_version_is_z_image(version)) {
++                // Fun-ControlNet context is pre-encoded (VAE) in image.cpp and carried here.
++                diffusion_params.extra = ZImageDiffusionExtra{
++                    control_image.empty() ? nullptr : &control_image,
++                    control_strength};
+             } else {
                  diffusion_params.extra = std::monostate{};
              }
  
@@ -997,7 +1564,7 @@ index e020a2d..e2d54f6 100644
              sd::Tensor<float> cached_output;
              if (step_cache.before_condition(&condition, noised_input, &cached_output)) {
                  return std::move(cached_output);
-@@ -2513,6 +2573,35 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2513,6 +2582,35 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
              return {};
          }
  
@@ -1033,7 +1600,7 @@ index e020a2d..e2d54f6 100644
          if (!uncond.empty()) {
              if (!step_cache.is_step_skipped()) {
                  compute_sample_controls(control_image,
-@@ -2552,7 +2641,10 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2552,7 +2650,10 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
          guidance_input.pred_uncond     = uncond_out.empty() ? nullptr : &uncond_out;
          guidance_input.pred_img_uncond = img_uncond_out.empty() ? nullptr : &img_uncond_out;
  
@@ -1045,7 +1612,7 @@ index e020a2d..e2d54f6 100644
          if (guided.pred.empty()) {
              return {};
          }
-@@ -2573,6 +2665,127 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+@@ -2573,6 +2674,127 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
              return {};
          }
  
@@ -1173,7 +1740,7 @@ index e020a2d..e2d54f6 100644
          denoised = guided.pred * c_out + x * c_skip;
          sd::guidance::GuiderOutput output;
          output.pred = denoised;
-@@ -2763,13 +2976,24 @@ sd::Tensor<float> StableDiffusionGGML::decode_first_stage(const sd::Tensor<float
+@@ -2763,13 +2985,24 @@ sd::Tensor<float> StableDiffusionGGML::decode_first_stage(const sd::Tensor<float
          return sd::ops::clamp((x + 1.f) * 0.5f, 0.0f, 1.0f);
      }
      auto latents                      = first_stage_model->diffusion_to_vae_latents(x);
@@ -1294,10 +1861,63 @@ index f2f8a8c..84e816c 100644
  
      std::vector<float> process_timesteps(const std::vector<float>& timesteps,
 diff --git a/src/pipeline/image.cpp b/src/pipeline/image.cpp
-index 4c90150..9ead9ee 100644
+index 4c90150..a41313b 100644
 --- a/src/pipeline/image.cpp
 +++ b/src/pipeline/image.cpp
-@@ -523,6 +523,26 @@ namespace sd::pipeline {
+@@ -114,6 +114,29 @@ namespace sd::pipeline {
+                    channels);
+     }
+ 
++    // Z-Image Fun-ControlNet consumes an encoded latent context (control_in_dim channels, extra
++    // channels zero-padded) instead of raw hint pixels. It is re-encoded whenever the latent grid
++    // changes (e.g. the hires second stage) so control tokens align with the main image tokens.
++    static sd::Tensor<float> build_z_image_control_context(StableDiffusionGGML* sd,
++                                                           const sd_image_t& control_image,
++                                                           int width,
++                                                           int height) {
++        sd::Tensor<float> pixels = sd_image_to_tensor(control_image, width, height);
++        sd::Tensor<float> latent = sd->encode_first_stage(pixels);
++        if (latent.empty() || sd->diffusion_model == nullptr) {
++            return latent;
++        }
++        int context_channels    = sd->diffusion_model->control_context_channels();
++        int64_t latent_channels = latent.shape()[2];
++        if (context_channels > latent_channels) {
++            sd::Tensor<float> extra = sd::zeros<float>({latent.shape()[0], latent.shape()[1], context_channels - latent_channels, 1});
++            latent                  = sd::ops::concat(latent, extra, 2);
++            LOG_INFO("z_image control context: %" PRId64 " -> %" PRId64 " channels",
++                     latent_channels, latent.shape()[2]);
++        }
++        return latent;
++    }
++
+     static std::optional<ImageGenerationLatents> prepare_image_generation_latents(StableDiffusionGGML* sd,
+                                                                                   const sd_img_gen_params_t* sd_img_gen_params,
+                                                                                   GenerationRequest* request,
+@@ -247,10 +270,18 @@ namespace sd::pipeline {
+         }
+ 
+         if (!control_image_tensor.empty()) {
+-            control_latent = sd->encode_first_stage(control_image_tensor);
+-            if (control_latent.empty()) {
+-                LOG_ERROR("failed to encode control image");
+-                return std::nullopt;
++            if (sd_version_is_z_image(sd->version) && sd->diffusion_model) {
++                control_image_tensor = build_z_image_control_context(sd, sd_img_gen_params->control_image, request->width, request->height);
++                if (control_image_tensor.empty()) {
++                    LOG_ERROR("failed to encode control image");
++                    return std::nullopt;
++                }
++            } else {
++                control_latent = sd->encode_first_stage(control_image_tensor);
++                if (control_latent.empty()) {
++                    LOG_ERROR("failed to encode control image");
++                    return std::nullopt;
++                }
+             }
+         }
+ 
+@@ -523,6 +554,26 @@ namespace sd::pipeline {
          int64_t t1 = ggml_time_ms();
          LOG_INFO("get_learned_condition completed, taking %.2fs", (t1 - prepare_start_ms) * 1.0f / 1000);
  
@@ -1324,7 +1944,7 @@ index 4c90150..9ead9ee 100644
          ImageGenerationEmbeds embeds;
          embeds.img_uncond = std::move(img_uncond);
          embeds.cond       = std::move(cond);
-@@ -638,6 +658,127 @@ namespace sd::pipeline {
+@@ -638,6 +689,127 @@ namespace sd::pipeline {
          return result_images;
      }
  
@@ -1452,7 +2072,7 @@ index 4c90150..9ead9ee 100644
      static sd::Tensor<float> upscale_hires_latent(StableDiffusionGGML* sd,
                                                    const sd::Tensor<float>& latent,
                                                    const GenerationRequest& request,
-@@ -658,6 +799,17 @@ namespace sd::pipeline {
+@@ -658,6 +830,17 @@ namespace sd::pipeline {
              return target_shape;
          };
  
@@ -1470,7 +2090,7 @@ index 4c90150..9ead9ee 100644
          if (request.hires.upscaler == SD_HIRES_UPSCALER_LATENT ||
              request.hires.upscaler == SD_HIRES_UPSCALER_LATENT_NEAREST ||
              request.hires.upscaler == SD_HIRES_UPSCALER_LATENT_NEAREST_EXACT ||
-@@ -809,6 +961,52 @@ namespace sd::pipeline {
+@@ -809,6 +992,52 @@ namespace sd::pipeline {
              return false;
          sd->apply_circular_axes(sd_img_gen_params->circular_x, sd_img_gen_params->circular_y);
  
@@ -1523,6 +2143,52 @@ index 4c90150..9ead9ee 100644
          const RefImageParams ref_image_params = sd->resolve_ref_image_params(sd_img_gen_params->ref_image_args);
  
          ImageVaeAxesGuard axes_guard(sd, sd_img_gen_params, request);
+@@ -979,6 +1208,20 @@ namespace sd::pipeline {
+                                                                            sd::ops::InterpolateMode::NearestMax);
+                 }
+ 
++                // Z-Image control context must match the hires latent grid: re-encode the control
++                // image at the target resolution.
++                sd::Tensor<float> hires_control = latents.control_image;
++                if (sd_version_is_z_image(sd->version) && !latents.control_image.empty() &&
++                    sd_img_gen_params->control_image.data != nullptr) {
++                    sd::Tensor<float> reencoded = build_z_image_control_context(sd,
++                                                                                sd_img_gen_params->control_image,
++                                                                                request.hires.target_width,
++                                                                                request.hires.target_height);
++                    if (!reencoded.empty()) {
++                        hires_control = std::move(reencoded);
++                    }
++                }
++
+                 int64_t hires_sample_start = ggml_time_ms();
+                 sd::Tensor<float> x_0      = sd->sample(sd->diffusion_model,
+                                                         true,
+@@ -987,7 +1230,7 @@ namespace sd::pipeline {
+                                                         embeds.cond,
+                                                         embeds.uncond,
+                                                         embeds.img_uncond,
+-                                                        latents.control_image,
++                                                        hires_control,
+                                                         request.control_strength,
+                                                         request.guidance,
+                                                         plan.eta,
+diff --git a/src/pipeline/model_builders.cpp b/src/pipeline/model_builders.cpp
+index 626bdfe..5dc2cee 100644
+--- a/src/pipeline/model_builders.cpp
++++ b/src/pipeline/model_builders.cpp
+@@ -632,6 +632,11 @@ namespace sd::model_builders {
+         const auto& tensor_storage_map = ctx.tensor_storage_map;
+         const auto version             = ctx.version;
+         const auto& weight_manager     = ctx.weight_manager;
++        if (sd_version_is_z_image(version)) {
++            // Z-Image Fun-ControlNet is a model patch injected into the main DiT graph by
++            // ZImageRunner (weights loaded under the empty prefix), not a separate runner.
++            return true;
++        }
+         if (!ensure_backend_pair(ctx.backends, SDBackendModule::CONTROL_NET)) {
+             return false;
+         }
 diff --git a/src/runtime/denoiser.hpp b/src/runtime/denoiser.hpp
 index 416859e..062e912 100644
 --- a/src/runtime/denoiser.hpp
