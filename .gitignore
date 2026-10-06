@@ -235,6 +235,8 @@ cpp/sdxl_pipeline
 cpp/florence2/img2prompt
 cpp/birefnet/bgremove
 cpp/ocr/imgsocr
+cpp/face/facecli
+cpp/preprocess/preprocesscli
 
 
 # ComfyUI source (read-only reference, not part of this project)
