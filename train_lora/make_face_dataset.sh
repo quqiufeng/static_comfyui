@@ -67,4 +67,4 @@ echo "  \$PY/python \$M/zimage_cache_latents.py --dataset_config \$D/dataset.tom
 echo "  \$PY/python \$M/zimage_cache_text_encoder_outputs.py --dataset_config \$D/dataset.toml --text_encoder /data/models/z-image-te-qwen3.safetensors --batch_size 8 --device cuda"
 echo "  # 训练"
 echo "  DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002.safetensors \\"
-echo "    FP8=0 BLOCKS=12 DIM=32 EPOCHS=10 DATA=$DS OUT=/data/lora/$TRIGGER bash $DIR/musubi_train.sh"
+echo "    FP8=0 BLOCKS=0 DIM=32 EPOCHS=10 OUT_NAME=$TRIGGER DATA=$DS OUT=/data/lora/$TRIGGER bash $DIR/musubi_train.sh"

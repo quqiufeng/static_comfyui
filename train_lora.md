@@ -130,7 +130,7 @@ bash train_lora/musubi_train.sh
 | `DIM` / `LR` | 16 / 1e-4 | network_dim=alpha / 学习率 |
 | `EPOCHS` / `STEPS` | 8 / 空 | 轮数；设 `STEPS` 则用 max_train_steps |
 | `FP8` | 0 | 1=开 fp8（掉质量，默认关） |
-| `BLOCKS` | 12 | `--blocks_to_swap`（省显存） |
+| `BLOCKS` | 12 | `--blocks_to_swap`（省显存）。**512 人脸数据集设 `0` 可提速约 4 倍**（见 §16） |
 
 脚本内固定：`--sdpa --mixed_precision bf16 --timestep_sampling shift --weighting_scheme none
 --discrete_flow_shift 2.0 --optimizer_type adamw8bit --gradient_checkpointing
@@ -311,9 +311,9 @@ $PY/python $M/zimage_cache_text_encoder_outputs.py --dataset_config $D/dataset.t
   --text_encoder /data/models/z-image-te-qwen3.safetensors --batch_size 8 --device cuda
 
 DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002.safetensors \
-  FP8=0 BLOCKS=12 DIM=32 EPOCHS=10 DATA=$D OUT=/data/lora/celebA \
+  FP8=0 BLOCKS=0 DIM=32 EPOCHS=10 DATA=$D OUT=/data/lora/celebA OUT_NAME=celebA \
   bash train_lora/musubi_train.sh
-# → /data/lora/celebA/mystyle_sdcpp.safetensors
+# → /data/lora/celebA/celebA_sdcpp.safetensors
 ```
 
 ### 13.4 出图（触发词自动注入）
@@ -364,9 +364,9 @@ $PY/python $M/zimage_cache_text_encoder_outputs.py --dataset_config $D/dataset.t
   --text_encoder /data/models/z-image-te-qwen3.safetensors --batch_size 8 --device cuda
 
 DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002.safetensors \
-  FP8=0 BLOCKS=12 DIM=32 EPOCHS=12 OUT_NAME=celebA DATA=$D OUT=/data/lora/celebA \
+  FP8=0 BLOCKS=0 DIM=32 EPOCHS=12 OUT_NAME=celebA DATA=$D OUT=/data/lora/celebA \
   bash train_lora/musubi_train.sh
-# → /data/lora/celebA/celebA_sdcpp.safetensors
+# → /data/lora/celebA/celebA_sdcpp.safetensors（512 + BLOCKS=0，约 29 分钟，见 §16）
 ```
 | 超参 | 身份 LoRA 建议 |
 |------|----------------|
@@ -375,6 +375,7 @@ DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002
 | 分辨率 | 512（对齐脸原生） |
 | lr | 1e-4 |
 | fp8 | 关 |
+| blocks_to_swap | **0**（512 显存充裕，比 12 快约 4 倍；见 §16） |
 
 ### 14.5 触发词映射
 `/data/lora/lora_triggers.conf` 加一行：
@@ -414,3 +415,41 @@ celebA_sdcpp.safetensors = celebA
 | `train_lora/musubi_train.sh` | LoRA 训练（`OUT_NAME` 命名，自动转 sd.cpp 命名） |
 | `/data/lora/lora_triggers.conf` | LoRA→触发词映射（backup.sh 自动注入） |
 | `/data/lora/<name>/<OUT_NAME>_sdcpp.safetensors` | 训练产出（sd.cpp 可直接加载） |
+
+---
+
+## 16. 速度调优（2026-10 实测，512 人脸数据集）
+
+> **结论：512 人脸/身份 LoRA 用 `BLOCKS=0`（不换出），约 29 分钟训完，
+> 比旧配方 `BLOCKS=12` 快约 4 倍。** 旧参数一直要 ~50 分钟。
+
+测试环境：RTX 3080 20G；98 张 512 对齐脸；Z-Image Base bf16；rank32；
+12 epochs（1176 步）；`--gradient_checkpointing` 开；fp8 关。
+
+| `BLOCKS` | 显存 | 步速 | 12 epochs 预计 |
+|----------|------|------|----------------|
+| 12（旧默认） | ~10.3G | 6.15 s/步 | ~2h |
+| 4 | ~13.1G | 2.47 s/步 | ~47min |
+| **0（新推荐）** | **~14.5G** | **1.57 s/步** | **~29min** |
+
+原理：
+1. **block swap 是主要瓶颈**：每次前向/反向都要把换出的 block 在 CPU↔GPU 间搬运。
+   实测每多换出 1 个 block ≈ +0.47 s/步（12→6.15、4→2.47 线性外推）。
+2. **512 数据集显存充裕**：Base DiT bf16 全驻留仅 ~12.3G，加激活/优化器共 ~14.5G，
+   20G 卡完全放得下，无需换出。
+3. **不能关 `--gradient_checkpointing`**：实测关掉后 PyTorch 占用 18.6G 仍 OOM
+   （`torch.OutOfMemoryError ... 16.00 MiB`），必须保留 GC。
+
+何时仍用 `BLOCKS=12`：1536 风格数据集（§9）显存不够，必须换出。
+
+命令（身份 LoRA，见 §14.4）：
+```bash
+DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002.safetensors \
+  FP8=0 BLOCKS=0 DIM=32 EPOCHS=12 OUT_NAME=<trigger> \
+  DATA=/data/datasets/<name>_face OUT=/data/lora/<trigger> \
+  bash train_lora/musubi_train.sh
+```
+
+> 注意：`setsid bash ... &` 让训练脱离终端会话运行，避免被父 shell/工具超时杀掉；
+> 日志重定向到文件后轮询进度即可。
+
