@@ -86,6 +86,17 @@
 #   24G 卡:  VAE_TILE_SIZE=256x256 ./backup.sh "portrait" ~/out.png 2560 1440   # 现被夹到 128
 #   LoRA:    ./backup.sh "prompt" ~/out.png 2560 1440 --lora style.safetensors:0.8
 #
+# 【尺寸预设 --preset】
+#   小红书图: ./backup.sh --preset xhs ~/out.png --lora ...   # 1920x2560 (3:4 竖版)
+#   朋友圈图: ./backup.sh --preset pyq ~/out.png --lora ...   # 2560x2560 (1:1, 方图不被裁，最清晰)
+#   （也可用别名 小红书 / 朋友圈；未给 preset 时默认 2560x1440 横版）
+#
+# 【参数元数据 / 参考图复刻】
+#   每张出图都会把生成参数写入 PNG tEXt 'parameters'（ComfyUI 风格，可回读）。
+#   查看:   cpp/sd/build/img_hires --dump-meta ~/out.png
+#   复刻:   ./backup.sh --from-image ~/out.png ~/new.png     # 读取旧图 prompt/seed/steps/cfg/sampler/lora/尺寸
+#   说明:   CLI/env 显式给的参数优先，未给的用参考图里的；不带 --from-image 时正常生成。
+#
 # 【采样加速（2026-09-24 实测，默认已开）】
 #   RTX 3080 20G / 2560×1440 / E1xMIN 配方 seed=25630：
 #     优化前 ~665s（11min）→ 优化后 ~210s（3.5min），约 3.2×。
@@ -127,6 +138,8 @@ VAE_TILE_SIZE="${VAE_TILE_SIZE:-128x128}"
 VAE_TILE_OVERLAP="${VAE_TILE_OVERLAP:-0.5}"
 
 UPSCALE_FLAG=0; LORA_CONFIGS=(); PROMPT_SCHEDULE=""; REGIONAL_PROMPTS=""
+PRESET=""
+FROM_IMAGE=""
 FACE_RESTORE_FLAG=0; FACE_RESTORE_MODEL=""
 FACE_SWAP_FLAG=0; FACE_SWAP_SOURCE=""
 IPADAPTER_FLAG=0; IPADAPTER_MODEL=""; IPADAPTER_IMAGE=""
@@ -146,6 +159,8 @@ while [ $i -lt $# ]; do
         --lora)             next_val "$@"; LORA_CONFIGS+=("$_NV") ;;
         --prompt-schedule)  next_val "$@"; PROMPT_SCHEDULE="$_NV" ;;
         --regional-prompts) next_val "$@"; REGIONAL_PROMPTS="$_NV" ;;
+        --preset)           next_val "$@"; PRESET="$_NV" ;;
+        --from-image)       next_val "$@"; FROM_IMAGE="$_NV" ;;
         --face-restore)     FACE_RESTORE_FLAG=1 ;;
         --face-restore-model) next_val "$@"; FACE_RESTORE_MODEL="$_NV" ;;
         --face-swap)        FACE_SWAP_FLAG=1 ;;
@@ -179,9 +194,45 @@ for a in "${_str[@]}"; do
     elif [ -z "$PROMPT_ARG" ]; then PROMPT_ARG="$a"; fi
 done
 
-PROMPT="${PROMPT_ARG:-solo,single woman,half body portrait of a young woman, soft natural lighting, elegant pose, studio lighting, sharp eyes, solid soft light green background, sage green, clean seamless plain background, no props, flat solid color backdrop, fair skin, pale skin, smooth skin, matte skin, porcelain skin, flawless skin, medium close up}"
-WIDTH="${_num[0]:-2560}"
-HEIGHT="${_num[1]:-1440}"
+# 尺寸预设（--preset）：xhs=小红书图 1920x2560(3:4)；pyq=朋友圈图 2560x2560(1:1)
+PRESET_W=""; PRESET_H=""
+case "${PRESET:-}" in
+    ""|none) : ;;
+    xhs|xiaohongshu|小红书) PRESET_W=1920; PRESET_H=2560 ;;
+    pyq|moments|朋友圈)      PRESET_W=2560; PRESET_H=2560 ;;
+    *) echo "Error: 未知 --preset '$PRESET'（可用: xhs/小红书, pyq/朋友圈）" >&2; exit 1 ;;
+esac
+
+# --from-image <png>：读取参考图内嵌参数复刻（prompt/seed/steps/cfg/sampler/lora/尺寸）
+if [ -n "$FROM_IMAGE" ]; then
+    FROM_IMAGE="${FROM_IMAGE/#\~/$HOME}"
+    [ -f "$FROM_IMAGE" ] || { echo "Error: --from-image 文件不存在: $FROM_IMAGE" >&2; exit 1; }
+    META="$("$SD_CLI" --dump-meta "$FROM_IMAGE" 2>/dev/null || true)"
+    [ -n "$META" ] || { echo "Error: $FROM_IMAGE 无内嵌参数（非 img_hires/backup.sh 生成？）" >&2; exit 1; }
+    meta_get() { printf '%s\n' "$META" | awk -F': ' -v k="$1" '$1==k{sub(/^[^:]*: /,"");print;exit}'; }
+    _mp="$(meta_get prompt)"; [ -z "$PROMPT_ARG" ] && [ -n "$_mp" ] && PROMPT_ARG="$_mp"
+    if [ -z "${_num[0]:-}" ]; then
+        _mw="$(meta_get width)"; _mh="$(meta_get height)"
+        [ -n "$_mw" ] && { PRESET_W="$_mw"; PRESET_H="$_mh"; }
+    fi
+    [ -z "${SEED:-}" ]            && { _v="$(meta_get seed)";           [ -n "$_v" ] && export SEED="$_v"; }
+    [ -z "${STEPS:-}" ]           && { _v="$(meta_get steps)";          [ -n "$_v" ] && export STEPS="$_v"; }
+    [ -z "${HIRES_STEPS:-}" ]     && { _v="$(meta_get hires_steps)";    [ -n "$_v" ] && export HIRES_STEPS="$_v"; }
+    [ -z "${CFG_SCALE:-}" ]       && { _v="$(meta_get cfg)";            [ -n "$_v" ] && export CFG_SCALE="$_v"; }
+    [ -z "${SAMPLING_METHOD:-}" ] && { _v="$(meta_get method)";         [ -n "$_v" ] && export SAMPLING_METHOD="$_v"; }
+    [ -z "${SCHEDULER:-}" ]       && { _v="$(meta_get scheduler)";      [ -n "$_v" ] && export SCHEDULER="$_v"; }
+    [ -z "${HIRES_STRENGTH:-}" ]  && { _v="$(meta_get hires_strength)"; [ -n "$_v" ] && export HIRES_STRENGTH="$_v"; }
+    [ -z "${HIRES_UPSCALER:-}" ]  && { _v="$(meta_get hires_upscaler)"; [ -n "$_v" ] && export HIRES_UPSCALER="$_v"; }
+    if [ "${#LORA_CONFIGS[@]}" -eq 0 ]; then
+        while IFS= read -r _l; do [ -n "$_l" ] && LORA_CONFIGS+=("$_l"); done < \
+            <(printf '%s\n' "$META" | awk -F': ' '$1=="lora"{sub(/^[^:]*: /,"");print}')
+    fi
+    echo -e "${CYAN}✓ 参考图恢复参数: $(basename "$FROM_IMAGE")${NC}"
+fi
+
+PROMPT="${PROMPT_ARG:-solo,single woman,half body standard portrait of a young woman, centered composition, white dress, soft natural lighting, elegant pose, studio lighting, sharp eyes, solid soft light green background, sage green, clean seamless plain background, no props, flat solid color backdrop, fair skin, pale skin, smooth skin, matte skin, porcelain skin, flawless skin, medium close up}"
+WIDTH="${_num[0]:-${PRESET_W:-2560}}"
+HEIGHT="${_num[1]:-${PRESET_H:-1440}}"
 unset _str _num PROMPT_ARG
 
 if [[ "$OUTPUT_FILE" == ~* ]]; then
