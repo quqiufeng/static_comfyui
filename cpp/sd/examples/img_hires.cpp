@@ -21,6 +21,131 @@ static int save_png(const char* path, const uint8_t* data, int w, int h, int c) 
     return stbi_write_png(path, w, h, c, data, 0);
 }
 
+// ---- 生成参数元数据（A1111/ComfyUI 风格，写入 PNG tEXt 'parameters'）----
+static std::string fmt_f(float x) {
+    char b[32];
+    std::snprintf(b, sizeof(b), "%g", x);
+    return std::string(b);
+}
+
+static void meta_put(std::string& out, const std::string& k, const std::string& v) {
+    out += k; out += ": "; out += v; out += "\n";
+}
+
+static uint32_t png_crc32(const unsigned char* d, size_t n) {
+    static uint32_t table[256];
+    static bool init = false;
+    if (!init) {
+        for (uint32_t i = 0; i < 256; ++i) {
+            uint32_t c = i;
+            for (int k = 0; k < 8; ++k) c = (c & 1) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
+            table[i] = c;
+        }
+        init = true;
+    }
+    uint32_t c = 0xFFFFFFFFu;
+    for (size_t i = 0; i < n; ++i) c = table[(c ^ d[i]) & 0xFF] ^ (c >> 8);
+    return c ^ 0xFFFFFFFFu;
+}
+
+static bool png_read_file(const std::string& path, std::vector<unsigned char>& buf) {
+    FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) return false;
+    std::fseek(f, 0, SEEK_END);
+    long sz = std::ftell(f);
+    std::fseek(f, 0, SEEK_SET);
+    if (sz <= 0) { std::fclose(f); return false; }
+    buf.resize(static_cast<size_t>(sz));
+    size_t rd = std::fread(buf.data(), 1, buf.size(), f);
+    std::fclose(f);
+    return rd == buf.size();
+}
+
+// 在 IEND 前插入一个 tEXt 块（keyword\0value）
+static bool png_add_text(const std::string& path, const std::string& key, const std::string& value) {
+    std::vector<unsigned char> buf;
+    if (!png_read_file(path, buf)) return false;
+    static const unsigned char sig[8] = {137, 80, 78, 71, 13, 10, 26, 10};
+    if (buf.size() < 8 || std::memcmp(buf.data(), sig, 8) != 0) return false;
+    size_t insert_pos = buf.size();
+    size_t pos = 8;
+    while (pos + 8 <= buf.size()) {
+        uint32_t len = (static_cast<uint32_t>(buf[pos]) << 24) | (buf[pos + 1] << 16) |
+                       (static_cast<uint32_t>(buf[pos + 2]) << 8) | buf[pos + 3];
+        std::string type(reinterpret_cast<char*>(&buf[pos + 4]), 4);
+        if (type == "IEND") { insert_pos = pos; break; }
+        if (pos + 12 + len > buf.size()) break;
+        pos += 12 + len;
+    }
+    std::vector<unsigned char> data;
+    data.insert(data.end(), key.begin(), key.end());
+    data.push_back(0);
+    data.insert(data.end(), value.begin(), value.end());
+
+    const char* t = "tEXt";
+    std::vector<unsigned char> chunk;
+    uint32_t dlen = static_cast<uint32_t>(data.size());
+    chunk.push_back((dlen >> 24) & 0xFF);
+    chunk.push_back((dlen >> 16) & 0xFF);
+    chunk.push_back((dlen >> 8) & 0xFF);
+    chunk.push_back(dlen & 0xFF);
+    chunk.insert(chunk.end(), t, t + 4);
+    chunk.insert(chunk.end(), data.begin(), data.end());
+    std::vector<unsigned char> crcbuf;
+    crcbuf.insert(crcbuf.end(), t, t + 4);
+    crcbuf.insert(crcbuf.end(), data.begin(), data.end());
+    uint32_t crc = png_crc32(crcbuf.data(), crcbuf.size());
+    chunk.push_back((crc >> 24) & 0xFF);
+    chunk.push_back((crc >> 16) & 0xFF);
+    chunk.push_back((crc >> 8) & 0xFF);
+    chunk.push_back(crc & 0xFF);
+
+    std::vector<unsigned char> out;
+    out.reserve(buf.size() + chunk.size());
+    out.insert(out.end(), buf.begin(), buf.begin() + insert_pos);
+    out.insert(out.end(), chunk.begin(), chunk.end());
+    out.insert(out.end(), buf.begin() + insert_pos, buf.end());
+
+    FILE* f = std::fopen(path.c_str(), "wb");
+    if (!f) return false;
+    size_t wr = std::fwrite(out.data(), 1, out.size(), f);
+    std::fclose(f);
+    return wr == out.size();
+}
+
+// 读取 PNG 内首个 tEXt 的指定 key，并把 value 打印到 stdout
+static int png_dump_text(const std::string& path, const std::string& key) {
+    std::vector<unsigned char> buf;
+    if (!png_read_file(path, buf)) { std::fprintf(stderr, "cannot read %s\n", path.c_str()); return 1; }
+    static const unsigned char sig[8] = {137, 80, 78, 71, 13, 10, 26, 10};
+    if (buf.size() < 8 || std::memcmp(buf.data(), sig, 8) != 0) {
+        std::fprintf(stderr, "not a png: %s\n", path.c_str());
+        return 1;
+    }
+    size_t pos = 8;
+    while (pos + 8 <= buf.size()) {
+        uint32_t len = (static_cast<uint32_t>(buf[pos]) << 24) | (buf[pos + 1] << 16) |
+                       (static_cast<uint32_t>(buf[pos + 2]) << 8) | buf[pos + 3];
+        std::string type(reinterpret_cast<char*>(&buf[pos + 4]), 4);
+        if (pos + 12 + len > buf.size()) break;
+        if (type == "tEXt") {
+            const unsigned char* d = &buf[pos + 8];
+            size_t klen = 0;
+            while (klen < len && d[klen] != 0) klen++;
+            std::string k(reinterpret_cast<const char*>(d), klen);
+            if (k == key) {
+                std::string v(reinterpret_cast<const char*>(d + klen + 1), len - klen - 1);
+                std::fwrite(v.data(), 1, v.size(), stdout);
+                return 0;
+            }
+        }
+        if (type == "IEND") break;
+        pos += 12 + len;
+    }
+    std::fprintf(stderr, "metadata key '%s' not found in %s\n", key.c_str(), path.c_str());
+    return 1;
+}
+
 static std::string expand_tilde(const std::string& path) {
     if (!path.empty() && path[0] == '~') {
         const char* home = std::getenv("HOME");
@@ -101,6 +226,7 @@ static void print_usage(const char* argv0) {
     std::fprintf(stderr, "  --edge-sharpen <float>    Edge-mask sharpen amount, 0.0-3.0 (default: 1.5)\n");
     std::fprintf(stderr, "  --edge-sharpen-radius <int>   Edge detection radius, 1-10 (default: 2)\n");
     std::fprintf(stderr, "  --edge-sharpen-threshold <float> Edge threshold, 0.0-1.0 (default: 0.3)\n");
+    std::fprintf(stderr, "  --dump-meta <png>         Print embedded generation metadata (tEXt 'parameters') and exit\n");
 }
 
 static int64_t parse_seed(const char* s) {
@@ -228,6 +354,12 @@ int main(int argc, char** argv) {
     postproc.edge_sharpen_threshold = 0.3f;
 
     std::vector<char*> positional;
+    // --dump-meta <png>：读取内嵌参数并退出（不加载模型）
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--dump-meta") == 0 && i + 1 < argc) {
+            return png_dump_text(expand_tilde(argv[i + 1]), "parameters");
+        }
+    }
     for (int i = 1; i < argc; ++i) {
         if ((std::strcmp(argv[i], "-m") == 0 || std::strcmp(argv[i], "--model") == 0) && i + 1 < argc) {
             model = argv[++i];
@@ -641,6 +773,55 @@ int main(int argc, char** argv) {
     if (!save_png(final_output.c_str(), image.data.data(), image.width, image.height, image.channels)) {
         std::fprintf(stderr, "Failed to save %s\n", final_output.c_str());
         return 1;
+    }
+    // 写入生成参数（PNG tEXt 'parameters'），便于日后从图片恢复参数复刻
+    {
+        std::string meta;
+        meta_put(meta, "application", "img_hires");
+        meta_put(meta, "prompt", prompt);
+        meta_put(meta, "negative", neg);
+        meta_put(meta, "steps", std::to_string(steps));
+        meta_put(meta, "hires_steps", std::to_string(hires_steps));
+        meta_put(meta, "cfg", fmt_f(cfg));
+        meta_put(meta, "seed", std::to_string(static_cast<long long>(seed)));
+        meta_put(meta, "method", method);
+        meta_put(meta, "scheduler", scheduler);
+        meta_put(meta, "width", std::to_string(image.width));
+        meta_put(meta, "height", std::to_string(image.height));
+        meta_put(meta, "base_width", std::to_string(low_w));
+        meta_put(meta, "base_height", std::to_string(low_h));
+        meta_put(meta, "hires", hires ? "1" : "0");
+        meta_put(meta, "hires_width", std::to_string(hires_width));
+        meta_put(meta, "hires_height", std::to_string(hires_height));
+        meta_put(meta, "hires_strength", fmt_f(hires_strength));
+        meta_put(meta, "hires_upscaler", hires_upscaler);
+        meta_put(meta, "vae_tiling", vae_tiling ? "1" : "0");
+        meta_put(meta, "vae_tile_size", std::to_string(vae_tile_size));
+        meta_put(meta, "vae_tile_overlap", fmt_f(vae_tile_overlap));
+        if (!model.empty())           meta_put(meta, "model", model);
+        if (!diffusion_model.empty()) meta_put(meta, "diffusion_model", diffusion_model);
+        if (!llm.empty())             meta_put(meta, "llm", llm);
+        if (!vae.empty())             meta_put(meta, "vae", vae);
+        if (!clip_l.empty())          meta_put(meta, "clip_l", clip_l);
+        if (!clip_g.empty())          meta_put(meta, "clip_g", clip_g);
+        for (const sd::LoraConfig& l : loras) {
+            meta_put(meta, "lora", l.path + ":" + fmt_f(l.multiplier));
+        }
+        meta_put(meta, "fresca", std::string(fresca ? "1" : "0") + "," + fmt_f(fresca_low) +
+                                "," + fmt_f(fresca_high) + "," + std::to_string(fresca_cutoff));
+        meta_put(meta, "cache", cache_mode + "," + fmt_f(cache_threshold) + "," +
+                               fmt_f(cache_start) + "," + fmt_f(cache_end));
+        meta_put(meta, "clarity", fmt_f(postproc.clarity));
+        meta_put(meta, "sharpen", fmt_f(postproc.sharpen_amount) + "," + std::to_string(postproc.sharpen_radius));
+        meta_put(meta, "smart_sharpen", fmt_f(postproc.smart_sharpen_strength) + "," + std::to_string(postproc.smart_sharpen_radius));
+        meta_put(meta, "edge_sharpen", fmt_f(postproc.edge_sharpen_amount) + "," +
+                                       std::to_string(postproc.edge_sharpen_radius) + "," +
+                                       fmt_f(postproc.edge_sharpen_threshold));
+        if (png_add_text(final_output, "parameters", meta)) {
+            std::fprintf(stderr, "Metadata: embedded %zu bytes as PNG tEXt 'parameters'\n", meta.size());
+        } else {
+            std::fprintf(stderr, "Metadata: failed to embed\n");
+        }
     }
     std::fprintf(stderr, "Saved %s (%dx%d, %d channels) in %.2fs\n",
                  final_output.c_str(), image.width, image.height, image.channels,
