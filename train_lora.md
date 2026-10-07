@@ -477,3 +477,46 @@ DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002
 3. 想更"像"应走**推理侧**：LoRA 权重 0.7→0.9、CFG 2.0→3.0、或人脸局部重绘
    （ADetailer 式），继续调训练配方收益很低。
 
+---
+
+## 18. 出图尺寸预设（小红书图 / 朋友圈图）
+
+`backup.sh` 内置 `--preset` 社媒尺寸（Q8 默认，双 LoRA 照常）：
+
+| preset | 别名 | 尺寸 | 比例 | 用途 |
+|--------|------|------|------|------|
+| `xhs` | `小红书` / `xiaohongshu` | **1920×2560** | 3:4 | 小红书竖图 |
+| `pyq` | `朋友圈` / `moments` | **2560×2560** | 1:1 | 朋友圈方图（最清晰，约 10min/张） |
+
+```bash
+./cpp/sd/backup.sh --preset xhs ~/xhs.png \
+  --lora /data/lora/liuhaocun/liuhaocun_sdcpp.safetensors:0.7 \
+  --lora /data/lora/mystyle_base/mystyle_sdcpp.safetensors:0.6
+
+./cpp/sd/backup.sh --preset pyq ~/pyq.png \
+  --lora /data/lora/liuhaocun/liuhaocun_sdcpp.safetensors:0.7 \
+  --lora /data/lora/mystyle_base/mystyle_sdcpp.safetensors:0.6
+```
+
+说明：不给 preset 时默认 2560×1440 横版；也可直接传像素，如 `backup.sh 1920 2560 ...`。
+1440×1440 偏糊，朋友圈统一用 2560×2560。
+
+---
+
+## 19. 出图参数内嵌 + 参考图复刻（ComfyUI 风格）
+
+每张出图都会把生成参数写入 PNG `tEXt` 块 `parameters`（`img_hires` 实现），
+含：prompt / negative / steps / hires_steps / cfg / seed / method / scheduler /
+尺寸（最终 + base）/ hires 参数 / 模型路径 / **lora 列表** / fresca / cache / 后处理。
+
+```bash
+# 查看某张图的参数
+./cpp/sd/build/img_hires --dump-meta ~/out.png
+
+# 从参考图复刻（读回 prompt/seed/steps/cfg/sampler/lora/尺寸，重出一张）
+./cpp/sd/backup.sh --from-image ~/out.png ~/new.png
+# 说明：CLI/env 显式给的参数优先，未给的用参考图里的
+```
+
+用途：忘了用过的 prompt / 参数，直接拿参考图即可复刻。旧图（本功能之前生成的）没有该元数据。
+
