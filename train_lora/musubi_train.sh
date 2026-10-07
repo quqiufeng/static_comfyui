@@ -28,6 +28,43 @@ DIM="${DIM:-16}"
 LR="${LR:-1e-4}"
 EPOCHS="${EPOCHS:-8}"
 FP8="${FP8:-0}"
+
+# ── 显存自检 & 自动 blocks_to_swap（未显式设置 BLOCKS 时）──────────────
+detect_vram_gb() {
+    local v=""
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        v="$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | sort -n | head -1 || true)"
+        [ -n "$v" ] && { awk -v m="$v" 'BEGIN{printf "%d", m/1024}'; return; }
+    fi
+    if [ -x "$PY/python" ]; then
+        "$PY/python" -c "import torch;print(int(torch.cuda.get_device_properties(0).total_memory/1024**3))" 2>/dev/null || true
+    fi
+}
+auto_blocks() {  # $1=vram_gb $2=resolution(max side)
+    local vram="$1" res="$2" act
+    [ -z "$vram" ] && { echo 12; return; }   # 探测失败→保守
+    case "$res" in
+        512)  act=2.0 ;;
+        768)  act=2.5 ;;
+        1024) act=3.5 ;;
+        1280) act=4.5 ;;
+        *)    act=6.0 ;;   # 1536+
+    esac
+    # 基座 DiT ~12G(bf16)/30 块；框架+LoRA+8bit 优化器 ~3G；激活按分辨率估
+    awk -v v="$vram" -v a="$act" 'BEGIN{
+        d=12.0; o=3.0; per=d/30.0; avail=v*0.90; need=d+o+a;
+        b=(need<=avail)?0:int((need-avail)/per+0.999);
+        if(b<0)b=0; if(b>28)b=28; printf "%d", b }'
+}
+VRAM_GB="$(detect_vram_gb)"
+RES=1024
+[ -f "$DATA/dataset.toml" ] && RES="$(grep -oE 'resolution *= *\[[0-9]+' "$DATA/dataset.toml" 2>/dev/null | grep -oE '[0-9]+' | sort -n | tail -1)"
+RES="${RES:-1024}"
+if [ -z "${BLOCKS:-}" ]; then
+    BLOCKS="$(auto_blocks "$VRAM_GB" "$RES")"
+    GPU_NAME="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || true)"
+    echo "[auto] GPU=${GPU_NAME:-?} VRAM=${VRAM_GB:-?}G res=${RES} -> BLOCKS=${BLOCKS}"
+fi
 BLOCKS="${BLOCKS:-12}"
 
 mkdir -p "$OUT"
@@ -35,7 +72,15 @@ mkdir -p "$OUT"
 EXTRA=()
 [ -n "$ADAPTER" ] && EXTRA+=(--base_weights "$ADAPTER")
 [ "$FP8" = "1" ] && EXTRA+=(--fp8_base --fp8_scaled)
-[ -n "$BLOCKS" ] && [ "$BLOCKS" != "0" ] && EXTRA+=(--blocks_to_swap "$BLOCKS")
+if [ -n "$BLOCKS" ] && [ "$BLOCKS" != "0" ]; then
+    EXTRA+=(--blocks_to_swap "$BLOCKS")
+    # 加速 CPU<->GPU 换出：LoRA 冻基座只需 H2D 流式 + pinned 内存（SWAP_MODE=plain 可关）
+    case "${SWAP_MODE:-h2d}" in
+        plain)  : ;;
+        pinned) EXTRA+=(--use_pinned_memory_for_block_swap) ;;
+        *)      EXTRA+=(--use_pinned_memory_for_block_swap --block_swap_h2d_only --block_swap_ring_size 2) ;;
+    esac
+fi
 
 EPOCH_ARGS=(--max_train_epochs "$EPOCHS" --save_every_n_epochs 1)
 [ -n "${STEPS:-}" ] && EPOCH_ARGS=(--max_train_steps "$STEPS" --save_every_n_steps "${SAVE_EVERY:-200}")
