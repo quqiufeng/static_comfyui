@@ -486,7 +486,7 @@ DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002
 | preset | 别名 | 尺寸 | 比例 | 用途 |
 |--------|------|------|------|------|
 | `xhs` | `小红书` / `xiaohongshu` | **1920×2560** | 3:4 | 小红书竖图 |
-| `pyq` | `朋友圈` / `moments` | **2560×2560** | 1:1 | 朋友圈方图（最清晰，约 10min/张） |
+| `pyq` | `朋友圈` / `moments` | **2048×2048** | 1:1 | 朋友圈方图（约 2.5min/张） |
 
 ```bash
 ./cpp/sd/backup.sh --preset xhs ~/xhs.png \
@@ -499,7 +499,7 @@ DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002
 ```
 
 说明：不给 preset 时默认 2560×1440 横版；也可直接传像素，如 `backup.sh 1920 2560 ...`。
-1440×1440 偏糊，朋友圈统一用 2560×2560。
+朋友圈统一用 2048×2048（1440×1440 偏糊，2560² 太慢）。
 
 ---
 

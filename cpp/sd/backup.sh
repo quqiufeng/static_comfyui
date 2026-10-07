@@ -88,7 +88,7 @@
 #
 # 【尺寸预设 --preset】
 #   小红书图: ./backup.sh --preset xhs ~/out.png --lora ...   # 1920x2560 (3:4 竖版)
-#   朋友圈图: ./backup.sh --preset pyq ~/out.png --lora ...   # 2560x2560 (1:1, 方图不被裁，最清晰)
+#   朋友圈图: ./backup.sh --preset pyq ~/out.png --lora ...   # 2048x2048 (1:1, 方图不被裁，最清晰)
 #   （也可用别名 小红书 / 朋友圈；未给 preset 时默认 2560x1440 横版）
 #
 # 【参数元数据 / 参考图复刻】
@@ -194,12 +194,12 @@ for a in "${_str[@]}"; do
     elif [ -z "$PROMPT_ARG" ]; then PROMPT_ARG="$a"; fi
 done
 
-# 尺寸预设（--preset）：xhs=小红书图 1920x2560(3:4)；pyq=朋友圈图 2560x2560(1:1)
+# 尺寸预设（--preset）：xhs=小红书图 1920x2560(3:4)；pyq=朋友圈图 2048x2048(1:1)
 PRESET_W=""; PRESET_H=""
 case "${PRESET:-}" in
     ""|none) : ;;
     xhs|xiaohongshu|小红书) PRESET_W=1920; PRESET_H=2560 ;;
-    pyq|moments|朋友圈)      PRESET_W=2560; PRESET_H=2560 ;;
+    pyq|moments|朋友圈)      PRESET_W=2048; PRESET_H=2048 ;;
     *) echo "Error: 未知 --preset '$PRESET'（可用: xhs/小红书, pyq/朋友圈）" >&2; exit 1 ;;
 esac
 
@@ -230,7 +230,7 @@ if [ -n "$FROM_IMAGE" ]; then
     echo -e "${CYAN}✓ 参考图恢复参数: $(basename "$FROM_IMAGE")${NC}"
 fi
 
-PROMPT="${PROMPT_ARG:-solo,single woman,half body standard portrait of a young woman, centered composition, white dress, soft natural lighting, elegant pose, studio lighting, sharp eyes, solid soft light green background, sage green, clean seamless plain background, no props, flat solid color backdrop, fair skin, pale skin, smooth skin, matte skin, porcelain skin, flawless skin, medium close up}"
+PROMPT="${PROMPT_ARG:-solo,single woman,half body standard portrait of a young woman, subject perfectly centered, symmetrical composition, front view, soft natural lighting, elegant pose, studio lighting, sharp eyes, solid soft light green background, sage green, clean seamless plain background, no props, flat solid color backdrop, fair skin, pale skin, smooth skin, matte skin, porcelain skin, flawless skin, medium close up}"
 WIDTH="${_num[0]:-${PRESET_W:-2560}}"
 HEIGHT="${_num[1]:-${PRESET_H:-1440}}"
 unset _str _num PROMPT_ARG
