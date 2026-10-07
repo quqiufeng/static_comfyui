@@ -128,6 +128,21 @@ def cmd_shutdown(args):
     print(json.dumps(r, indent=2, ensure_ascii=False))
 
 
+def cmd_shutdown_keep_gpu(args):
+    r = _request("/open/instance/shutdown", method="POST", body={"id": args.id})
+    print(json.dumps(r, indent=2, ensure_ascii=False))
+
+
+def cmd_boot(args):
+    body = {"id": args.id}
+    if args.gpu_model:
+        body["gpu_model"] = args.gpu_model
+    if args.gpu_count:
+        body["gpu_count"] = args.gpu_count
+    r = _request("/open/instance/boot", method="POST", body=body)
+    print(json.dumps(r, indent=2, ensure_ascii=False))
+
+
 def cmd_destroy(args):
     r = _request("/open/instance/destroy", method="POST", body={"id": args.id})
     print(json.dumps(r, indent=2, ensure_ascii=False))
@@ -135,6 +150,16 @@ def cmd_destroy(args):
 
 def cmd_shutdown_destroy(args):
     r = _request("/open/instance/shutdown_destroy", method="POST", body={"id": args.id})
+    print(json.dumps(r, indent=2, ensure_ascii=False))
+
+
+def cmd_saveimage(args):
+    r = _request("/open/instance/saveimage", method="POST", body={"id": args.id})
+    print(json.dumps(r, indent=2, ensure_ascii=False))
+
+
+def cmd_saveimage_destroy(args):
+    r = _request("/open/instance/saveimage_destroy", method="POST", body={"id": args.id})
     print(json.dumps(r, indent=2, ensure_ascii=False))
 
 
@@ -182,12 +207,23 @@ def main():
 
     shutdown = sub.add_parser("shutdown", help="shutdown and release GPU")
     shutdown.add_argument("id", help="instance id")
+    shutdown_keep = sub.add_parser("shutdown_keep_gpu", help="shutdown keeping GPU reserved")
+    shutdown_keep.add_argument("id", help="instance id")
+    boot = sub.add_parser("boot", help="boot a shutdown instance")
+    boot.add_argument("id", help="instance id")
+    boot.add_argument("--gpu-model", default="")
+    boot.add_argument("--gpu-count", type=int, default=1)
 
     destroy = sub.add_parser("destroy", help="destroy instance")
     destroy.add_argument("id", help="instance id")
 
     shutdown_destroy = sub.add_parser("shutdown_destroy", help="shutdown and destroy instance (stops billing)")
     shutdown_destroy.add_argument("id", help="instance id")
+
+    saveimage = sub.add_parser("saveimage", help="save instance as a private image (async)")
+    saveimage.add_argument("id", help="instance id")
+    saveimage_destroy = sub.add_parser("saveimage_destroy", help="save instance as image then destroy it")
+    saveimage_destroy.add_argument("id", help="instance id")
 
     ssh = sub.add_parser("ssh", help="print ssh command")
     ssh.add_argument("id", help="instance id")
