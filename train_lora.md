@@ -29,11 +29,11 @@
 
 | 组件 | 默认文件 | 说明 |
 |------|----------|------|
-| 扩散模型 | `/data/models/image/z_image_turbo-Q5_K_M.gguf` | **Z-Image-Turbo**（~6B DiT，GGUF 量化） |
+| 扩散模型 | `/data/models/image/z_image_turbo-Q8_K_M.gguf` | **Z-Image-Turbo Q8**（~6B DiT，GGUF 量化；2026-10 起为默认） |
 | VAE | `/data/models/image/ae.safetensors` | Z-Image VAE |
 | 文本编码器 | `/data/models/image/Qwen3-4B-Instruct-2507-Q4_K_M.gguf` | Qwen3-4B |
 
-→ 用 **Base 训 LoRA，挂到 Turbo 推理**（业界标准：非蒸馏 Base 的 latent dynamics 完整，风格向量纯净，挂 Turbo 后保留底模高频细节）。另有 `z_image_turbo-Q8_K_M.gguf`。
+→ 用 **Base 训 LoRA，挂到 Turbo 推理**（业界标准：非蒸馏 Base 的 latent dynamics 完整，风格向量纯净，挂 Turbo 后保留底模高频细节）。推理默认 **Q8**（细节/通透更好），另有 `z_image_turbo-Q5_K_M.gguf`（省 ~2G，细节略差）。
 
 ---
 
@@ -452,4 +452,28 @@ DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002
 
 > 注意：`setsid bash ... &` 让训练脱离终端会话运行，避免被父 shell/工具超时杀掉；
 > 日志重定向到文件后轮询进度即可。
+
+---
+
+## 17. 训练配方对比结论（2026-10 实测：训练无显著增益，Q8 才有效）
+
+为提升 liuhaocun 身份 LoRA 的"像"程度，做了 A/B：
+
+| 配方 | caption | rank | epochs | 数据 |
+|------|---------|------|--------|------|
+| BASE | Florence 描述式（`liuhaocun, A woman with long black hair...`） | 32 | 12 | `/data/datasets/liuhaocun_face`（98） |
+| V1 | **极简，只写 `liuhaocun`** | 32 | 10 | `/data/datasets/liuhaocun_min`（98） |
+| V2 | 极简，只写 `liuhaocun` | **64** | 10 | `/data/datasets/liuhaocun_min`（98） |
+
+评估：`backup.sh` **2560×1440**，**Q8** 模型，同一 seed，双 LoRA
+（`liuhaocun:X` + `mystyle:0.6`）。LoRA：`/data/lora/exp/liuhaocun_min_r{32,64}_sdcpp.safetensors`；
+对比图 `~/cmpq8_{BASE,V1,V2}_*.png`、竖版 `~/vq8_{BASE,V1,V2}_*.png`。
+
+**结论**：
+1. **2560×1440 下 BASE / V1 / V2 几乎无差别** → caption 解耦、rank 32→64
+   都没有可感知收益（数据与身份已足够）。
+2. **Q8 明显优于 Q5**（细节/通透），是真正有效的杠杆 —— 优先用
+   `DIFFUSION_MODEL=/data/models/image/z_image_turbo-Q8_K_M.gguf`。
+3. 想更"像"应走**推理侧**：LoRA 权重 0.7→0.9、CFG 2.0→3.0、或人脸局部重绘
+   （ADetailer 式），继续调训练配方收益很低。
 
