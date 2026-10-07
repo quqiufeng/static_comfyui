@@ -9,7 +9,7 @@
 # =============================================================================
 #
 # 【默认配方（2026-09-27 更新）】
-#   默认已切到「MIN 全低配」人像档（Q5 模型 / seed 时间戳随机 / 皮肤词负面已固化）:
+# 默认已切到「MIN 全低配」人像档（扩散模型 2026-10 起默认 **Q8**（细节/通透更好，多占 ~2G）; seed 时间戳随机 / 皮肤词负面已固化）:
 #   CFG=2.0  Steps=20→40  HiRes strength=0.25  upscaler=latent-bicubic
 #   clarity=0.0  edge-sharpen=0.0  Sampler=euler  Scheduler=discrete
 #   效果: 皮肤白净柔和、无锐化痕迹（原胜出图 ~/scan_MIN_q5_20260927_171626.png, 16→30 步）。
@@ -117,7 +117,7 @@ SD_BACKEND_DIR="${SD_BACKEND_DIR:-/opt/sd/build-dl/bin}"
 # 运行环境依赖内聚到脚本内, 外部无需再 export
 export LD_LIBRARY_PATH="$SCRIPT_DIR/build:$SD_BACKEND_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export GGML_BACKEND_PATH="${GGML_BACKEND_PATH:-$SD_BACKEND_DIR/libggml-cuda.so}"
-DIFFUSION_MODEL="${DIFFUSION_MODEL:-$MODEL_DIR/z_image_turbo-Q5_K_M.gguf}"
+DIFFUSION_MODEL="${DIFFUSION_MODEL:-$MODEL_DIR/z_image_turbo-Q8_K_M.gguf}"
 VAE_MODEL="${VAE_MODEL:-$MODEL_DIR/ae.safetensors}"
 LLM_MODEL="${LLM_MODEL:-$MODEL_DIR/Qwen3-4B-Instruct-2507-Q4_K_M.gguf}"
 UPSCALE_MODEL="${UPSCALE_MODEL:-$MODEL_DIR/2x_ESRGAN.gguf}"
