@@ -13,8 +13,8 @@
 | fp8 | **关**（`--fp8_base --fp8_scaled` 会掉质量） |
 | 分辨率 | **1536**（bucketed） |
 | 网络 | lora_zimage，`rank=alpha=16` |
-| epochs/步数 | **8 epochs ≈ 448 步** |
-| 显存 | 20G：`--blocks_to_swap 12` |
+| 步数 | **总步数 = 图片数 × repeats × epochs ÷ batch_size**（例：200 张×1×8 = 1600 步；8 epochs 是常见值）。**每 1~2 个 epoch 存 checkpoint，训完出图盲测选最优**——最优往往**不是**最后一步 |
+| 显存 | 20G：`--blocks_to_swap 12`（见 §16；显存被占时需更大，或先释放占显存的服务） |
 | 实测 | 11.4s/步，~1h25m；LoRA ~140MB |
 | 出图 | `backup.sh ... --lora <lora_sdcpp.safetensors>:0.7` |
 
@@ -519,4 +519,34 @@ DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002
 ```
 
 用途：忘了用过的 prompt / 参数，直接拿参考图即可复刻。旧图（本功能之前生成的）没有该元数据。
+
+---
+
+## 20. 数据集清洗 + 批量训练（2026-10 新增，替代手动 prepare_dataset）
+
+### 20.1 一键数据集：`train_lora/curate_dataset.py`
+「图片目录」→ LoRA 数据集（复用 `cpp/face/facecli` + `cpp/florence2/img2prompt`，都走**批量**=模型只加载一次）：
+
+1. **检测筛**：有人脸 + **单脸**（多脸/无脸剔）+ **是写真人像**（Florence 反推描述，排除 动漫/插画/截图/海报/logo）+ 画质(Laplacian 方差) + 去重(dHash)
+2. **统一尺寸**：**宽 = 训练宽**（style 1536 / face 512，`--train-width`），**高按原比例**；**横图(宽>高)以人脸为锚裁竖构图**（左右留余量、人物大，`--land-aspect`/`--face-scale`）
+3. **自然语言打标**：Florence 批量（style `<DETAILED_CAPTION>`，face `<CAPTION>`）
+4. 产出 `<out>/images/` + 同名 `.txt` + `dataset.toml` + `report.csv`（每张判据/原因）
+
+关键参数：`--mode style|face`、`--train-width`、`--land-aspect`(默认0.75)、`--face-scale`(默认6)、`--max-faces`(默认1)、`--rm-rejected`(删不合格原图)、`--rm-source`(处理完删源图)、`--copy-to`。
+
+### 20.2 步数怎么定（通用最佳实践）
+- **总步数 = 图片数 × repeats × epochs ÷ batch_size**。例：200 张×1×8 = 1600 步；几十张的小集 8 epochs ≈ 400 步也够。
+- **epochs 8 是常见起点**（要更充分/复杂风格 10~16），**不是固定值**——最终按**出图盲测**定。
+- **黄金法则**：`--save_every_n_epochs 1`（每轮存 checkpoint），训完**出图盲测挑最优**（最优往往不是最后一步；本项目 `musubi_train.sh` 已每轮存）。
+- **rank/alpha**：人像/简单风格 **16~32**（复杂/DiT 可 64+），`alpha=rank`；**lr**：DiT/SDXL `5e-5~2e-4`（本项目实测 **1e-4**）；优化器 `adamw8bit`；bf16；调度 cosine + warmup 0.05。
+- `musubi_train.sh` 支持 `STEPS`(max_train_steps) 或 `EPOCHS`；`lora.sh` 用 `LORA_STYLE_STEPS`/`LORA_FACE_STEPS` 覆盖（不设则走 epochs）。**没有捷径**：正规训练就是每人上千步、数小时。
+
+### 20.3 my-agent 集成：`tools/lora.sh train <图片目录> <触发词> --mode style|face|both`
+- **both = 图片处理两遍、两个 LoRA 先后训练**：① 写真/整体（缩放→写真人像检测→打标→训练）；② 人脸（基于 ① 的图 → 扣脸→打标→训练）
+- 合格图存 `<源目录>/style`、`<源目录>/face`（**已存在即直接复用、跳过处理**）；两个 LoRA 也各存回 `<源目录>`
+- 后台跑、每个完成自动发微信；`status` / `list` / `cancel`
+- 批量（一批人）：**每个 LoRA 串行**；务必用步数封顶（20.2）
+
+### 20.4 facecli 批量模式（新增）
+`facecli detect --batch` / `facecli crop --batch`：从 stdin 每行一个路径，**模型只加载一次**——单张 2.9s → ~0.1–0.7s。
 
