@@ -37,46 +37,91 @@ void* img_crop(void* p, int x, int y, int w, int h) {
     return o;
 }
 
+// ---- Pillow ImagingResample 精确移植（定点系数 + 两趟 separable）----
+static double rf_box(double x) { return (x > -0.5 && x <= 0.5) ? 1.0 : 0.0; }
+static double rf_bilinear(double x) { x = fabs(x); return x < 1.0 ? 1.0 - x : 0.0; }
+static double rf_hamming(double x) { x = fabs(x); if (x == 0.0) return 1.0; if (x >= 1.0) return 0.0; x *= M_PI; return sin(x) / x * (0.54 + 0.46 * cos(x)); }
+static double rf_bicubic(double x) { const double a = -0.5; x = fabs(x); if (x < 1.0) return ((a + 2.0) * x - (a + 3.0)) * x * x + 1; if (x < 2.0) return (((x - 5) * x + 8) * x - 4) * a; return 0.0; }
+static double rf_sinc(double x) { if (x == 0.0) return 1.0; x *= M_PI; return sin(x) / x; }
+static double rf_lanczos(double x) { if (x >= -3.0 && x < 3.0) return rf_sinc(x) * rf_sinc(x / 3); return 0.0; }
+
+struct RSFilter { double (*fn)(double); double support; };
+static const int PREC = 22;  // PRECISION_BITS = 32-8-2
+
+struct Coeffs { int ksize = 1; std::vector<int> bounds; std::vector<int> k; };
+static Coeffs precompute(int inSize, int outSize, const RSFilter& flt) {
+    Coeffs c;
+    double scale = (double)inSize / outSize, fscale = scale < 1.0 ? 1.0 : scale;
+    double support = flt.support * fscale;
+    int ksize = (int)ceil(support) * 2 + 1;
+    c.ksize = ksize; c.bounds.assign(outSize * 2, 0); std::vector<double> kd(outSize * ksize, 0.0);
+    double inv = 1.0 / fscale;
+    for (int xx = 0; xx < outSize; ++xx) {
+        double center = (xx + 0.5) * scale, ww = 0.0;
+        int xmin = (int)(center - support + 0.5); if (xmin < 0) xmin = 0;
+        int xmax = (int)(center + support + 0.5); if (xmax > inSize) xmax = inSize;
+        xmax -= xmin;
+        double* k = &kd[xx * ksize];
+        for (int x = 0; x < xmax; ++x) { double w = flt.fn((x + xmin - center + 0.5) * inv); k[x] = w; ww += w; }
+        if (ww != 0.0) for (int x = 0; x < xmax; ++x) k[x] /= ww;
+        for (int x = xmax; x < ksize; ++x) k[x] = 0.0;
+        c.bounds[xx * 2] = xmin; c.bounds[xx * 2 + 1] = xmax;
+    }
+    c.k.assign(outSize * ksize, 0);
+    for (size_t i = 0; i < kd.size(); ++i) c.k[i] = (int)((kd[i] < 0 ? -0.5 : 0.5) + kd[i] * (1 << PREC));
+    return c;
+}
+static inline uint8_t clip8_fx(int in) { int v = in >> PREC; return v < 0 ? 0 : (v > 255 ? 255 : (uint8_t)v); }
+
 void* img_resize(void* p, int nw, int nh, const char* resample) {
     Image* im = (Image*)p; if (!im || nw <= 0 || nh <= 0) return nullptr;
-    int method = 1;
-    if (resample) { std::string s = resample; if (s == "nearest") method = 0; else if (s == "bicubic") method = 2; else if (s == "lanczos") method = 3; else method = 1; }
+    std::string s = resample ? resample : "bilinear";
     Image* rg = as_rgba(im);
+    if (s == "nearest") {
+        Image* o = new_rgba(nw, nh, rg->n); o->loop = rg->loop;
+        for (int f = 0; f < rg->n; ++f) { o->frames[f].delay = rg->frames[f].delay; uint8_t* sp = rg->frames[f].data.data(); uint8_t* dp = o->frames[f].data.data();
+            float sx = (float)rg->w / nw, sy = (float)rg->h / nh;
+            for (int y = 0; y < nh; ++y) for (int x = 0; x < nw; ++x) { int ix = clampi((int)floor((x + 0.5f) * sx), 0, rg->w - 1), iy = clampi((int)floor((y + 0.5f) * sy), 0, rg->h - 1); memcpy(dp + ((size_t)y * nw + x) * 4, sp + ((size_t)iy * rg->w + ix) * 4, 4); } }
+        if (rg != im) delete rg; return o;
+    }
+    RSFilter flt = {rf_bilinear, 1.0};
+    if (s == "box") flt = {rf_box, 0.5};
+    else if (s == "hamming") flt = {rf_hamming, 1.0};
+    else if (s == "bicubic") flt = {rf_bicubic, 2.0};
+    else if (s == "lanczos") flt = {rf_lanczos, 3.0};
+
+    const int W = rg->w, H = rg->h;
+    Coeffs ch, cv;
+    bool need_h = (nw != W), need_v = (nh != H);
+    if (need_h) ch = precompute(W, nw, flt);
+    if (need_v) cv = precompute(H, nh, flt);
+
     Image* o = new_rgba(nw, nh, rg->n); o->loop = rg->loop;
     for (int f = 0; f < rg->n; ++f) {
         o->frames[f].delay = rg->frames[f].delay;
-        uint8_t* sp = rg->frames[f].data.data(); uint8_t* dp = o->frames[f].data.data();
-        float sx = (float)rg->w / nw, sy = (float)rg->h / nh;
-        for (int y = 0; y < nh; ++y) for (int x = 0; x < nw; ++x) {
-            float fx = (x + 0.5f) * sx - 0.5f, fy = (y + 0.5f) * sy - 0.5f;
-            uint8_t* d = dp + ((size_t)y * nw + x) * 4;
-            if (method == 0) {
-                int ix = clampi((int)floor(fx + 0.5f), 0, rg->w - 1), iy = clampi((int)floor(fy + 0.5f), 0, rg->h - 1);
-                memcpy(d, sp + ((size_t)iy * rg->w + ix) * 4, 4);
-            } else if (method == 1) {
-                int x0 = (int)floor(fx), y0 = (int)floor(fy); float tx = fx - x0, ty = fy - y0;
-                for (int c = 0; c < 4; ++c) {
-                    float v = 0;
-                    for (int j = 0; j < 2; ++j) for (int i = 0; i < 2; ++i) {
-                        int xx = clampi(x0 + i, 0, rg->w - 1), yy = clampi(y0 + j, 0, rg->h - 1);
-                        v += (i ? tx : 1 - tx) * (j ? ty : 1 - ty) * sp[((size_t)yy * rg->w + xx) * 4 + c];
-                    }
-                    d[c] = clamp8(v);
-                }
-            } else {
-                float (*kern)(float) = (method == 2) ? cubic : lanczos;
-                int rad = (method == 2) ? 2 : 3, x0 = (int)floor(fx), y0 = (int)floor(fy);
-                for (int c = 0; c < 4; ++c) {
-                    float sum = 0, wsum = 0;
-                    for (int j = -rad + 1; j <= rad; ++j) for (int i = -rad + 1; i <= rad; ++i) {
-                        int xx = clampi(x0 + i, 0, rg->w - 1), yy = clampi(y0 + j, 0, rg->h - 1);
-                        float wt = kern(fx - (x0 + i)) * kern(fy - (y0 + j));
-                        sum += wt * sp[((size_t)yy * rg->w + xx) * 4 + c]; wsum += wt;
-                    }
-                    d[c] = clamp8(wsum != 0 ? sum / wsum : sum);
-                }
+        const uint8_t* src = rg->frames[f].data.data();
+        int curw = W;
+        std::vector<uint8_t> hbuf, vbuf;
+        if (need_h) {
+            hbuf.assign((size_t)nw * H * 4, 0);
+            for (int y = 0; y < H; ++y) for (int xx = 0; xx < nw; ++xx) {
+                int xmin = ch.bounds[xx * 2], xmax = ch.bounds[xx * 2 + 1]; const int* k = &ch.k[xx * ch.ksize];
+                for (int c = 0; c < 4; ++c) { int ss = 1 << (PREC - 1); for (int x = 0; x < xmax; ++x) ss += src[((size_t)y * W + xmin + x) * 4 + c] * k[x]; hbuf[((size_t)y * nw + xx) * 4 + c] = clip8_fx(ss); }
             }
+            src = hbuf.data(); curw = nw;
         }
+        const uint8_t* out;
+        if (need_v) {
+            vbuf.assign((size_t)nw * nh * 4, 0);
+            for (int yy = 0; yy < nh; ++yy) {
+                int ymin = cv.bounds[yy * 2], ymax = cv.bounds[yy * 2 + 1]; const int* k = &cv.k[yy * cv.ksize];
+                for (int x = 0; x < nw; ++x) for (int c = 0; c < 4; ++c) { int ss = 1 << (PREC - 1); for (int y = 0; y < ymax; ++y) ss += src[((size_t)(ymin + y) * curw + x) * 4 + c] * k[y]; vbuf[((size_t)yy * nw + x) * 4 + c] = clip8_fx(ss); }
+            }
+            out = vbuf.data();
+        } else {
+            out = hbuf.data();
+        }
+        memcpy(o->frames[f].data.data(), out, (size_t)nw * nh * 4);
     }
     if (rg != im) delete rg;
     return o;

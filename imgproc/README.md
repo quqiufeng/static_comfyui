@@ -40,7 +40,10 @@ bash imgproc/build.sh
 LD_LIBRARY_PATH=$PWD/cpp/imgproc/build ./imgproc/mirror_gif IN.gif OUT.gif
 ```
 
-## 自动化迁移夹具
+## 自动化迁移夹具（自省 → 铺桩 → 差分对齐）
+
+整套方法论见 **[MIGRATION.md](./MIGRATION.md)**。要点：Python 自省把"接口面"机器枚举出来，
+差分测试把"语义"自动验证——人只写实现，对不齐由机器报。
 
 ```bash
 # 1) 自省 Pillow API → 清单（每个名字 = 一个待迁移接口）
@@ -50,7 +53,8 @@ LD_LIBRARY_PATH=$PWD/cpp/imgproc/build ./imgproc/mirror_gif IN.gif OUT.gif
 /data/venv/bin/python imgproc/difftest.py -v
 ```
 
-`difftest.py` 是"再调"的驱动：改动 C++ 后重跑，绿了就对齐了。
+`difftest.py` 是"再调"的驱动：改动 C++ 后重跑，**绿了就对齐了**（当前 38/38 全绿）。
+对不上的项照 Pillow 源码对齐（`Filter.c` / `Resample.c` / `ImageOps.py` …）。
 
 ## 当前覆盖 / 状态
 
@@ -64,8 +68,8 @@ LD_LIBRARY_PATH=$PWD/cpp/imgproc/build ./imgproc/mirror_gif IN.gif OUT.gif
 - **ImageStat**：mean/median/extrema/stddev/sum。
 - **ImageDraw**：point/line/rectangle/rounded_rectangle/ellipse/polygon/arc。**ImageFont**：stb_truetype 文字。
 
-差分测试当前 38 项中 **36 项通过（max=0）**；剩 **resize.bilinear / resize.lanczos** 为算法差异
-（Pillow 用定点抗锯齿重采样，需另对齐 `ImagingResample`）。GIF 镜像与源逐像素 **maxdiff=0**。
+差分测试当前 **38 项全部通过（max=0）**——含 `resize.{nearest,bilinear,lanczos}`（已按 Pillow
+`Resample.c` 定点算法精确对齐）、全部 transpose / Ops / Chops / Enhance / Filter。GIF 镜像与源逐像素 **maxdiff=0**。
 
 ## 写新算子
 
