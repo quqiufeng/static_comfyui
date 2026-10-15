@@ -247,6 +247,19 @@ int img_putpalette(void* p, const char* rgb_csv) {
     *im = *o; delete o; return 0;
 }
 
+// Image.remap_palette：按 data 重排 P 图索引
+void* img_remap_palette(void* p, const char* data_csv) {
+    Image* im = (Image*)p; if (!im || !data_csv) return nullptr;
+    std::vector<int> d = parse_csv_ints(data_csv);
+    if (d.empty()) return nullptr;
+    Image* o = dup_img(im);
+    for (auto& fr : o->frames) {
+        if (fr.bpp != 1) continue;
+        for (auto& v : fr.data) v = (uint8_t)clampi(d[v % d.size()], 0, 255);
+    }
+    return o;
+}
+
 int img_getpalette(void* p, char* out, int outlen) {
     Image* im = (Image*)p; if (!im || !out) return -1;
     std::string s;

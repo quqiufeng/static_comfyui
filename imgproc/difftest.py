@@ -300,6 +300,16 @@ try:
 except Exception as e:
     results.append(("font.bbox", "ERR", repr(e)[:60], 999))
 
+# ---- quantize / remap_palette（功能校验）----
+try:
+    hq = P.img_quantize(h_rgb, 16, 0)
+    buf = C.create_string_buffer(8192); P.img_getpalette(hq, buf, 8192)
+    ncol = len([x for x in buf.value.decode().rstrip(",").split(",") if x]) // 3
+    ok = 1 <= ncol <= 16
+    results.append(("quantize", "PASS" if ok else "DIFF", f"colors={ncol}", 0 if ok else 1))
+except Exception as e:
+    results.append(("quantize", "ERR", repr(e)[:60], 999))
+
 # 报告
 print(f"{'case':28} {'st':4}  detail")
 fails = 0

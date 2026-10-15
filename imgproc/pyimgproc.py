@@ -51,6 +51,8 @@ img_split = _sig("img_split", _p, [_p, _ci])
 img_merge_rgb = _sig("img_merge_rgb", _p, [_p, _p, _p])
 img_point = _sig("img_point", _p, [_p, _ci, _cs])
 img_quantize = _sig("img_quantize", _p, [_p, _ci, _ci])
+img_remap_palette = _sig("img_remap_palette", _p, [_p, _cs])
+img_getpalette = _sig("img_getpalette", _ci, [_p, C.c_char_p, _ci])
 
 img_invert = _sig("img_invert", _p, [_p])
 img_grayscale = _sig("img_grayscale", _p, [_p])
