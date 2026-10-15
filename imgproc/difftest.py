@@ -284,6 +284,22 @@ results.append(("convert.P (floyd)", "PASS" if _ratio > 0.98 else "DIFF", f"matc
 
 case("effect.mandelbrot", lambda: Image.effect_mandelbrot((60, 50), (-2.0, -1.5, 1.0, 1.5), 32), lambda: P.img_effect_mandelbrot(60, 50, -2.0, -1.5, 1.0, 1.5, 32), tol=0)
 
+# ---- font.getbbox ----
+try:
+    from PIL import ImageFont
+    FPATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+    if os.path.exists(FPATH):
+        pf = ImageFont.truetype(FPATH, 20); of = P.img_font_load(FPATH.encode(), 20.0)
+        worst = 0
+        for t in ["Hello", "Ag", "W", "Hello World"]:
+            buf = C.create_string_buffer(64); P.img_font_bbox(of, t.encode(), buf, 64)
+            we = [int(x) for x in buf.value.decode().split(",")]
+            pi = list(pf.getbbox(t))
+            worst = max(worst, max(abs(a - b) for a, b in zip(we, pi)))
+        results.append(("font.bbox", "PASS" if worst <= 2 else "DIFF", f"maxΔ={worst}px", worst))
+except Exception as e:
+    results.append(("font.bbox", "ERR", repr(e)[:60], 999))
+
 # 报告
 print(f"{'case':28} {'st':4}  detail")
 fails = 0

@@ -103,6 +103,9 @@ img_draw_pieslice = _sig("img_draw_pieslice", _ci, [_p, _ci, _ci, _ci, _ci, _cf,
 img_font_load = _sig("img_font_load", _p, [_cs, _cf])
 img_font_free = _sig("img_font_free", _ci, [_p])
 img_font_text_width = _sig("img_font_text_width", _ci, [_p, _cs])
+img_font_bbox = _sig("img_font_bbox", _ci, [_p, _cs, C.c_char_p, _ci])
+img_draw_multiline_text = _sig("img_draw_multiline_text", _ci, [_p, _ci, _ci, _cs, _p, _ci, _ci])
+img_putalpha = _sig("img_putalpha", _p, [_p, _p])
 img_draw_text = _sig("img_draw_text", _ci, [_p, _ci, _ci, _cs, _p, _ci])
 
 

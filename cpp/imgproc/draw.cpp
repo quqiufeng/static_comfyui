@@ -3,6 +3,7 @@
 #include "imgproc_internal.h"
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include FT_GLYPH_H
 
 namespace {
 void ensure_rgba(Image* im) { if (im->frames[0].bpp != 4) { Image* t = to_rgba(im); *im = *t; delete t; } }
@@ -202,6 +203,58 @@ int img_font_text_width(void* fp, const char* s) {
         p += len;
     }
     return (int)FT_PIXEL(pos);
+}
+
+// 字体文字 bbox：对齐 Pillow FreeTypeFont.getbbox（CBox 累加）
+int img_font_bbox(void* fp, const char* s, char* out, int outlen) {
+    Font* f = (Font*)fp; if (!f || !s || !out) return -1;
+    FT_Face face = (FT_Face)f->info;
+    long position = 0;
+    int x_min = 0, x_max = 0, y_min = 0, y_max = 0;
+    for (const unsigned char* p = (const unsigned char*)s; *p;) {
+        int cp = *p; int len = 1;
+        if (cp >= 0xF0) { cp = ((p[0] & 7) << 18) | ((p[1] & 63) << 12) | ((p[2] & 63) << 6) | (p[3] & 63); len = 4; }
+        else if (cp >= 0xE0) { cp = ((p[0] & 15) << 12) | ((p[1] & 63) << 6) | (p[2] & 63); len = 3; }
+        else if (cp >= 0xC0) { cp = ((p[0] & 31) << 6) | (p[1] & 63); len = 2; }
+        FT_UInt idx = FT_Get_Char_Index(face, cp);
+        int px = (int)FT_PIXEL(position), py = 0;
+        if (!FT_Load_Glyph(face, idx, FT_LOAD_DEFAULT)) {
+            FT_Glyph glyph;
+            if (!FT_Get_Glyph(face->glyph, &glyph)) {
+                FT_BBox bb; FT_Glyph_Get_CBox(glyph, FT_GLYPH_BBOX_PIXELS, &bb);
+                if (bb.xMax + px > x_max) x_max = bb.xMax + px;
+                if (bb.xMin + px < x_min) x_min = bb.xMin + px;
+                if (bb.yMax + py > y_max) y_max = bb.yMax + py;
+                if (bb.yMin + py < y_min) y_min = bb.yMin + py;
+                FT_Done_Glyph(glyph);
+            }
+            position += face->glyph->advance.x;
+            int adv = (int)FT_PIXEL(position);
+            if (adv > x_max) x_max = adv;
+        }
+        p += len;
+    }
+    long y_anchor = FT_PIXEL(face->size->metrics.ascender);
+    snprintf(out, outlen, "%d,%d,%d,%d", x_min, (int)(y_anchor - y_max), x_max, (int)(y_anchor - y_min));
+    return 0;
+}
+
+// 多行文字（行距 = ascent - descent + spacing）
+int img_draw_multiline_text(void* ip, int x, int y, const char* s, void* fp, int rgba, int spacing) {
+    Font* f = (Font*)fp; if (!ip || !f || !s) return -1;
+    FT_Face face = (FT_Face)f->info;
+    long lineh = FT_PIXEL(face->size->metrics.ascender) - FT_PIXEL(face->size->metrics.descender) + spacing;
+    int ly = y;
+    std::string line;
+    for (const char* p = s;; ++p) {
+        if (*p == '\n' || *p == '\0') {
+            if (!line.empty()) img_draw_text(ip, x, ly, line.c_str(), fp, rgba);
+            line.clear();
+            if (*p == '\0') break;
+            ly += (int)lineh;
+        } else line += *p;
+    }
+    return 0;
 }
 
 int img_draw_text(void* ip, int x, int y, const char* s, void* fp, int rgba) {

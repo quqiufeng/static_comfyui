@@ -91,6 +91,14 @@ void* img_colorize(void* p, int black, int white, const char* mid_csv) {
 
 void* img_expand(void* p, int border, int rgba) { return img_pad(p, border, border, border, border, rgba); }
 
+// Image.putalpha：把 alpha 图（L/RGBA 的通道0）写到图像 alpha
+void* img_putalpha(void* imp, void* alphap) {
+    Image* im = (Image*)imp; Image* al = (Image*)alphap; if (!im || !al) return nullptr;
+    Image* o = to_rgba(im); Image* ra = to_rgba(al);
+    for (int f = 0; f < o->n && f < ra->n; ++f) { uint8_t* d = o->frames[f].data.data(); uint8_t* s = ra->frames[f].data.data(); for (size_t i = 0; i < npx(o); ++i) d[i * 4 + 3] = s[i * 4]; }
+    delete ra; return o;
+}
+
 // ---------------- ImageChops ----------------
 void* img_chop(void* ap, void* bp, const char* op) {
     Image* a = (Image*)ap; Image* b = (Image*)bp; if (!a || !b || !op || a->w != b->w || a->h != b->h) return nullptr;

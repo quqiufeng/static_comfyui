@@ -135,6 +135,9 @@ int         img_font_free(void* font);
 int         img_font_text_width(void* font, const char* utf8);
 int         img_font_text_height(void* font);
 int         img_draw_text(void* im, int x, int y, const char* utf8, void* font, int rgba);
+int         img_font_bbox(void* font, const char* utf8, char* out_csv, int outlen);
+int         img_draw_multiline_text(void* im, int x, int y, const char* utf8, void* font, int rgba, int spacing);
+void*       img_putalpha(void* im, void* alpha);
 
 #ifdef __cplusplus
 }
