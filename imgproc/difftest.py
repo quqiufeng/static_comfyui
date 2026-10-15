@@ -364,6 +364,43 @@ case("point.lut", lambda: img_rgb.point(lambda v: v // 2), lambda: P.img_point(h
 case("split.merge", lambda: Image.merge("RGB", img_rgb.split()[::-1]), lambda: P.img_merge_rgb(P.img_split(h_rgb, 2), P.img_split(h_rgb, 1), P.img_split(h_rgb, 0)), tol=0)
 case("getpixel", lambda: Image.new("RGB", (1, 1), img_rgb.getpixel((3, 4))), lambda: P.from_np(np.full((1, 1, 3), [P.img_getpixel(h_rgb, 3, 4) >> 24 & 255, P.img_getpixel(h_rgb, 3, 4) >> 16 & 255, P.img_getpixel(h_rgb, 3, 4) >> 8 & 255], np.uint8)), tol=0)
 
+# ---- 滤波器 & 绘图 补充 ----
+for pn, nm, tol in [("BoxBlur", "BoxBlur", 3), ("GaussianBlur", "GaussianBlur", 16), ("UnsharpMask", "UnsharpMask", 30), ("MedianFilter", "MedianFilter", 0), ("MinFilter", "MinFilter", 0), ("MaxFilter", "MaxFilter", 0), ("DETAIL", "DETAIL", 1), ("CONTOUR", "CONTOUR", 0), ("EDGE_ENHANCE", "EDGE_ENHANCE", 0)]:
+    def maker(pn=pn):
+        f = getattr(ImageFilter, pn)
+        try:
+            obj = f() if pn in ("BoxBlur", "GaussianBlur", "UnsharpMask", "MedianFilter", "MinFilter", "MaxFilter") else f
+        except Exception:
+            obj = f
+        if pn == "BoxBlur":
+            obj = ImageFilter.BoxBlur(2)
+        if pn == "GaussianBlur":
+            obj = ImageFilter.GaussianBlur(2)
+        if pn == "UnsharpMask":
+            obj = ImageFilter.UnsharpMask(2, 150, 3)
+        if pn == "MedianFilter":
+            obj = ImageFilter.MedianFilter(3)
+        if pn in ("MinFilter", "MaxFilter"):
+            obj = getattr(ImageFilter, pn)(3)
+        return img_rgb.filter(obj)
+    def ourmaker(nm=nm):
+        if nm == "BoxBlur":
+            return P.img_filter(h_rgb, b"BoxBlur", 2, 0, 0)
+        if nm == "GaussianBlur":
+            return P.img_filter(h_rgb, b"GaussianBlur", 2, 0, 0)
+        if nm == "UnsharpMask":
+            return P.img_filter(h_rgb, b"UnsharpMask", 2, 150, 3)
+        if nm in ("MedianFilter", "MinFilter", "MaxFilter"):
+            return P.img_filter(h_rgb, nm.encode(), 0, 0, 3)
+        return P.img_filter(h_rgb, nm.encode(), 0, 0, 0)
+    case(f"filter2.{pn}", maker, ourmaker, tol=tol)
+
+def pil_rrect():
+    im = img_rgb.copy(); ImageDraw.Draw(im).rounded_rectangle((5, 5, 35, 30), 8, fill=(200, 40, 40)); return im
+def our_rrect():
+    h = P.img_copy(h_rgb); P.img_draw_rounded_rect(h, 5, 5, 35, 30, 8, 0, 0xC82828FF); return h
+case("draw.rounded_rect", pil_rrect, our_rrect, tol=220)
+
 # 报告
 print(f"{'case':28} {'st':4}  detail")
 fails = 0
