@@ -224,7 +224,7 @@ def main():
                 pass
 
     # ── 3) 自然语言打标（批量）+ 写真判断 ──────────────────────
-    task = "<CAPTION>" if a.mode == "face" else "<DETAILED_CAPTION>"
+    task = "<CAPTION>"   # 短描述，快（原 style 用 <DETAILED_CAPTION>）
     ready = [p for p in cand if outimgs.get(p) and outimgs[p].exists()]
     log(f"[curate] florence 打标 {len(ready)} 张 (task={task}) ...")
     caps = batch_caption(img2prompt, model_dir, task, [outimgs[p] for p in ready], a.beams)
