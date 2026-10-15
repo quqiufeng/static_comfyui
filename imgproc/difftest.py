@@ -365,7 +365,7 @@ case("split.merge", lambda: Image.merge("RGB", img_rgb.split()[::-1]), lambda: P
 case("getpixel", lambda: Image.new("RGB", (1, 1), img_rgb.getpixel((3, 4))), lambda: P.from_np(np.full((1, 1, 3), [P.img_getpixel(h_rgb, 3, 4) >> 24 & 255, P.img_getpixel(h_rgb, 3, 4) >> 16 & 255, P.img_getpixel(h_rgb, 3, 4) >> 8 & 255], np.uint8)), tol=0)
 
 # ---- 滤波器 & 绘图 补充 ----
-for pn, nm, tol in [("BoxBlur", "BoxBlur", 3), ("GaussianBlur", "GaussianBlur", 16), ("UnsharpMask", "UnsharpMask", 30), ("MedianFilter", "MedianFilter", 0), ("MinFilter", "MinFilter", 0), ("MaxFilter", "MaxFilter", 0), ("DETAIL", "DETAIL", 1), ("CONTOUR", "CONTOUR", 0), ("EDGE_ENHANCE", "EDGE_ENHANCE", 0)]:
+for pn, nm, tol in [("BoxBlur", "BoxBlur", 0), ("GaussianBlur", "GaussianBlur", 0), ("UnsharpMask", "UnsharpMask", 30), ("MedianFilter", "MedianFilter", 0), ("MinFilter", "MinFilter", 0), ("MaxFilter", "MaxFilter", 0), ("DETAIL", "DETAIL", 1), ("CONTOUR", "CONTOUR", 0), ("EDGE_ENHANCE", "EDGE_ENHANCE", 0)]:
     def maker(pn=pn):
         f = getattr(ImageFilter, pn)
         try:

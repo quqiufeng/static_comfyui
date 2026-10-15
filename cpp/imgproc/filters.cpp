@@ -34,42 +34,67 @@ Image* convolve(Image* rg, const int* k, int kw, int kh, int scale, int offset) 
     return o;
 }
 
-// 单次盒模糊（radius 半径，窗口 2r+1），边缘 clamp
-Image* box_blur_radius(Image* rg, int radius) {
-    if (radius < 1) return dup_img(rg);
-    int W = rg->w, H = rg->h, k = 2 * radius + 1;
+// Pillow BoxBlur.c 精确移植：分数半径滑窗盒模糊（uint32 定点 + 边界复制）
+static double gauss_box_radius(double radius, int passes) {
+    double sigma2 = radius * radius / passes;
+    double L = sqrt(12.0 * sigma2 + 1.0);
+    double l = floor((L - 1.0) / 2.0);
+    double a = (2 * l + 1) * (l * (l + 1) - 3 * sigma2);
+    a /= 6 * (sigma2 - (l + 1) * (l + 1));
+    return l + a;
+}
+
+static Image* horiz_box_blur(Image* rg, double floatRadius) {
+    int W = rg->w, H = rg->h;
     Image* o = new_rgba(W, H, rg->n); o->loop = rg->loop;
-    std::vector<int> tmp((size_t)W * H * 4);
+    int radius = (int)floatRadius;
+    uint32_t ww = (uint32_t)((double)(1u << 24) / (floatRadius * 2.0 + 1.0));
+    uint32_t fw = (uint32_t)(((double)(1u << 24) - (double)(radius * 2 + 1) * (double)ww) / 2.0);
+    int lastx = W - 1;
+    int edgeA = std::min(radius + 1, W);
+    int edgeB = std::max(W - radius - 1, 0);
     for (int f = 0; f < rg->n; ++f) {
-        uint8_t* s = rg->frames[f].data.data();
-        for (int y = 0; y < H; ++y) for (int x = 0; x < W; ++x) {
-            int sr = 0, sg = 0, sb = 0;
-            for (int i = -radius; i <= radius; ++i) { uint8_t* q = s + ((size_t)y * W + clampi(x + i, 0, W - 1)) * 4; sr += q[0]; sg += q[1]; sb += q[2]; }
-            size_t oo = ((size_t)y * W + x) * 4;
-            tmp[oo] = sr / k; tmp[oo + 1] = sg / k; tmp[oo + 2] = sb / k; tmp[oo + 3] = s[oo + 3];
-        }
-        for (int y = 0; y < H; ++y) for (int x = 0; x < W; ++x) {
-            int sr = 0, sg = 0, sb = 0;
-            for (int j = -radius; j <= radius; ++j) { size_t q = ((size_t)clampi(y + j, 0, H - 1) * W + x) * 4; sr += tmp[q]; sg += tmp[q + 1]; sb += tmp[q + 2]; }
-            uint8_t* d = o->frames[f].data.data() + ((size_t)y * W + x) * 4;
-            d[0] = sr / k; d[1] = sg / k; d[2] = sb / k; d[3] = s[((size_t)y * W + x) * 4 + 3];
+        const uint8_t* base = rg->frames[f].data.data(); uint8_t* ob = o->frames[f].data.data();
+        for (int y = 0; y < H; ++y) {
+            const uint8_t* in = base + (size_t)y * W * 4; uint8_t* out = ob + (size_t)y * W * 4;
+            uint32_t acc[4];
+            for (int c = 0; c < 4; ++c) acc[c] = (uint32_t)in[c] * (radius + 1);
+            for (int x = 0; x < edgeA - 1; ++x) for (int c = 0; c < 4; ++c) acc[c] += in[x * 4 + c];
+            for (int c = 0; c < 4; ++c) acc[c] += (uint32_t)in[lastx * 4 + c] * (uint32_t)(radius - edgeA + 1);
+            uint32_t bulk[4];
+            auto move = [&](int sub, int add) { for (int c = 0; c < 4; ++c) acc[c] += in[add * 4 + c] - in[sub * 4 + c]; };
+            auto addfar = [&](int left, int right) { for (int c = 0; c < 4; ++c) bulk[c] = acc[c] * ww + (uint32_t)(in[left * 4 + c] + in[right * 4 + c]) * fw; };
+            auto save = [&](int x) { for (int c = 0; c < 4; ++c) out[x * 4 + c] = (uint8_t)((bulk[c] + (1u << 23)) >> 24); };
+            if (edgeA <= edgeB) {
+                for (int x = 0; x < edgeA; ++x) { move(0, x + radius); addfar(0, x + radius + 1); save(x); }
+                for (int x = edgeA; x < edgeB; ++x) { move(x - radius - 1, x + radius); addfar(x - radius - 1, x + radius + 1); save(x); }
+                for (int x = edgeB; x <= lastx; ++x) { move(x - radius - 1, lastx); addfar(x - radius - 1, lastx); save(x); }
+            } else {
+                for (int x = 0; x < edgeB; ++x) { move(0, x + radius); addfar(0, x + radius + 1); save(x); }
+                for (int x = edgeB; x < edgeA; ++x) { move(0, lastx); addfar(0, lastx); save(x); }
+                for (int x = edgeA; x <= lastx; ++x) { move(x - radius - 1, lastx); addfar(x - radius - 1, lastx); save(x); }
+            }
         }
     }
     return o;
 }
 
-// Pillow 风格高斯：3 次盒模糊近似（sigma=radius）
-Image* gaussian_blur_r(Image* rg, float radius) {
-    if (radius <= 0) return dup_img(rg);
-    const int n = 3; float sigma = radius;
-    float wIdeal = sqrt((12 * sigma * sigma / n) + 1);
-    int wl = (int)floor(wIdeal); if (wl % 2 == 0) wl--;
-    int wu = wl + 2;
-    float mIdeal = (12 * sigma * sigma - n * wl * wl - 4 * n * wl - 3 * n) / (-4.0f * wl - 4);
-    int m = (int)round(mIdeal);
+static Image* box_blur_exact(Image* rg, double xr, double yr, int n) {
     Image* cur = dup_img(rg);
-    for (int i = 0; i < n; ++i) { int sz = (i < m ? wl : wu) / 2; Image* nx = box_blur_radius(cur, sz); delete cur; cur = nx; }
+    if (xr != 0) for (int i = 0; i < n; ++i) { Image* nx = horiz_box_blur(cur, xr); delete cur; cur = nx; }
+    if (yr != 0) {
+        Image* tr = (Image*)img_transpose(cur, 5);   // TRANSPOSE
+        for (int i = 0; i < n; ++i) { Image* nx = horiz_box_blur(tr, yr); delete tr; tr = nx; }
+        Image* back = (Image*)img_transpose(tr, 5);
+        delete tr; delete cur; cur = back;
+    }
     return cur;
+}
+
+static Image* gaussian_blur_r(Image* rg, float radius) {
+    if (radius <= 0) return dup_img(rg);
+    double r = gauss_box_radius(radius, 3);
+    return box_blur_exact(rg, r, r, 3);
 }
 
 Image* rank_filter(Image* rg, int size, int mode) {
@@ -125,7 +150,7 @@ void* img_filter(void* p, const char* name, float r1, float r2, int i1) {
     else if (n == "FIND_EDGES") out = convolve(rg, FE, 3, 3, 1, 0);
     else if (n == "CONTOUR") out = convolve(rg, FE, 3, 3, 1, 255);
     else if (n == "EMBOSS") out = convolve(rg, EMB, 3, 3, 1, 128);
-    else if (n == "BoxBlur") out = box_blur_radius(rg, std::max(1, (int)(r1 > 0 ? r1 : 1)));
+    else if (n == "BoxBlur") out = box_blur_exact(rg, r1 > 0 ? r1 : 1.0, r1 > 0 ? r1 : 1.0, 1);
     else if (n == "GaussianBlur") out = gaussian_blur_r(rg, r1 > 0 ? r1 : 2);
     else if (n == "UnsharpMask") {
         float radius = r1 > 0 ? r1 : 2, percent = r2 > 0 ? r2 : 150; int threshold = i1;
