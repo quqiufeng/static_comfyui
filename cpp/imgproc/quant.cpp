@@ -120,8 +120,41 @@ struct Quant {
 
 extern "C" {
 
-// 对齐 Pillow ImagingQuantize(mode=MEDIANCUT)。仅 RGB（忽略 alpha）。
+static long distsq(int r1,int g1,int b1,int r2,int g2,int b2){long a=r1-r2,b=g1-g2,c=b1-b2;return a*a+b*b+c*c;}
+
+// 对齐 Pillow quantize2（MAXCOVERAGE = 最远点采样）
+static Image* maxcov_quantize(Image* rg, int colors) {
+    int W=rg->w,H=rg->h; long nPixels=(long)W*H; uint8_t* data=rg->frames[0].data.data();
+    std::unordered_map<uint32_t,int> seen; std::vector<uint32_t> U;
+    long sr=0,sg=0,sb=0;
+    for(long i=0;i<nPixels;++i){uint8_t*q=data+i*4;sr+=q[0];sg+=q[1];sb+=q[2];uint32_t k=((uint32_t)q[0]<<16)|((uint32_t)q[1]<<8)|q[2];if(seen.find(k)==seen.end()){seen[k]=1;U.push_back(k);}}
+    int mr=(int)(0.5+(double)sr/nPixels),mg=(int)(0.5+(double)sg/nPixels),mb=(int)(0.5+(double)sb/nPixels);
+    std::vector<long> dist(U.size(), 0x7fffffff);
+    int farR=mr,farG=mg,farB=mb;
+    std::vector<RGB> pal(colors);
+    for(int k=0;k<colors;++k){
+        long furthestDistance=0; size_t furthestIdx=0; bool second=(k==1);
+        for(size_t idx=0;idx<U.size();++idx){int r=(U[idx]>>16)&255,g=(U[idx]>>8)&255,b=U[idx]&255;
+            long nd=distsq(farR,farG,farB,r,g,b); long old=dist[idx];
+            if(second||nd<old){dist[idx]=nd;old=nd;}
+            if(old>furthestDistance){furthestDistance=old;furthestIdx=idx;}
+        }
+        uint32_t fv=U[furthestIdx]; farR=(fv>>16)&255;farG=(fv>>8)&255;farB=fv&255;
+        pal[k]={(uint8_t)farR,(uint8_t)farG,(uint8_t)farB};
+    }
+    Image* o=new Image();o->w=W;o->h=H;o->n=1;o->mode="P";o->frames.resize(1);
+    Frame& d=o->frames[0];d.bpp=1;d.hasPalette=true;d.palette=pal;d.data.assign(nPixels,0);
+    std::unordered_map<uint32_t,int> mem;
+    for(long i=0;i<nPixels;++i){uint8_t*q=data+i*4;uint32_t key=((uint32_t)q[0]<<16)|((uint32_t)q[1]<<8)|q[2];
+        auto it=mem.find(key); if(it!=mem.end()){d.data[i]=(uint8_t)it->second;continue;}
+        int best=0; long bd=1L<<60; for(int j=0;j<colors;++j){long dd=distsq(q[0],q[1],q[2],pal[j].r,pal[j].g,pal[j].b);if(dd<bd){bd=dd;best=j;}}
+        mem[key]=best;d.data[i]=(uint8_t)best;}
+    return o;
+}
+
+// 对齐 Pillow ImagingQuantize。仅 RGB（忽略 alpha）。
 void* img_quantize(void* p, int colors, int method) {
+    if (method == 1) { Image* im=(Image*)p; if(!im) return nullptr; Image* rg=(im->frames[0].bpp==4)?im:to_rgba(im); Image* o=maxcov_quantize(rg, colors); if(rg!=im) delete rg; return o; }
     (void)method;
     Image* im = (Image*)p; if (!im || colors < 1 || colors > 256) return nullptr;
     Image* rg = (im->frames[0].bpp == 4) ? im : to_rgba(im);
