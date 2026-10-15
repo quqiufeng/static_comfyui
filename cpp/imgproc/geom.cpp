@@ -81,10 +81,16 @@ void* img_resize_ex(void* p, int nw, int nh, const char* resample, float bx0, fl
     if (bx1 <= bx0) { bx0 = 0; bx1 = (float)W; }
     if (by1 <= by0) { by0 = 0; by1 = (float)H; }
     if (s == "nearest") {
+        // 对齐 Pillow ImagingScaleAffine：double 增量累加（xo += a0）
         Image* o = new_rgba(nw, nh, rg->n); o->loop = rg->loop;
-        for (int f = 0; f < rg->n; ++f) { o->frames[f].delay = rg->frames[f].delay; uint8_t* sp = rg->frames[f].data.data(); uint8_t* dp = o->frames[f].data.data();
-            float sx = (bx1 - bx0) / nw, sy = (by1 - by0) / nh;
-            for (int y = 0; y < nh; ++y) for (int x = 0; x < nw; ++x) { int ix = clampi((int)floor(bx0 + (x + 0.5f) * sx), 0, W - 1), iy = clampi((int)floor(by0 + (y + 0.5f) * sy), 0, H - 1); memcpy(dp + ((size_t)y * nw + x) * 4, sp + ((size_t)iy * W + ix) * 4, 4); } }
+        double a0 = (bx1 - bx0) / (double)nw, a4 = (by1 - by0) / (double)nh;
+        std::vector<int> xtab(nw), ytab(nh);
+        double xo = bx0 + a0 * 0.5;
+        for (int x = 0; x < nw; ++x) { xtab[x] = clampi((int)xo, 0, W - 1); xo += a0; }
+        double yo = by0 + a4 * 0.5;
+        for (int y = 0; y < nh; ++y) { ytab[y] = clampi((int)yo, 0, H - 1); yo += a4; }
+        for (int f = 0; f < rg->n; ++f) { o->frames[f].delay = rg->frames[f].delay; const uint8_t* sp = rg->frames[f].data.data(); uint8_t* dp = o->frames[f].data.data();
+            for (int y = 0; y < nh; ++y) for (int x = 0; x < nw; ++x) memcpy(dp + ((size_t)y * nw + x) * 4, sp + ((size_t)ytab[y] * W + xtab[x]) * 4, 4); }
         if (rg != im) delete rg; return o;
     }
     RSFilter flt = {rf_bilinear, 1.0};

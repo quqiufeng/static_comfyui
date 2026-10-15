@@ -35,6 +35,7 @@ img_fill = _sig("img_fill", _ci, [_p, _ci])
 img_set_delay = _sig("img_set_delay", _ci, [_p, _ci, _ci])
 
 img_crop = _sig("img_crop", _p, [_p, _ci, _ci, _ci, _ci])
+img_scale = _sig("img_scale", _p, [_p, _cf, _cf, _cs])
 img_resize = _sig("img_resize", _p, [_p, _ci, _ci, _cs])
 img_rotate = _sig("img_rotate", _p, [_p, _cf, _ci, _ci])
 img_transpose = _sig("img_transpose", _p, [_p, _ci])
@@ -136,3 +137,7 @@ def from_np(arr):
 
 def open_np(path):
     return to_np(img_open(path))
+
+img_thumbnail = _sig("img_thumbnail", _p, [_p, _ci, _ci])
+img_getpixel = _sig("img_getpixel", _ci, [_p, _ci, _ci])
+img_putpixel = _sig("img_putpixel", _ci, [_p, _ci, _ci, _ci])

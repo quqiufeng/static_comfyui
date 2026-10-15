@@ -262,7 +262,7 @@ int img_save(void* p, const char* path) {
             TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
             TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
             TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_RGB);
-            uint16 es = EXTRASAMPLE_ASSOCALPHA;
+            uint16_t es = EXTRASAMPLE_ASSOCALPHA;
             TIFFSetField(tif, TIFFTAG_EXTRASAMPLES, 1, &es);
             TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, TIFFDefaultStripSize(tif, rg->w * 4));
             ok = 1;

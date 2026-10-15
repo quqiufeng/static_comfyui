@@ -78,14 +78,29 @@ void* img_equalize(void* p) {
 void* img_colorize(void* p, int black, int white, const char* mid_csv) {
     Image* im = (Image*)p; if (!im) return nullptr;
     std::vector<int> mid = parse_csv_ints(mid_csv);
-    Image* rg = as_rgba(im);
-    Image* o = dup_img(rg); if (rg != im) delete rg;
-    int bR = CH_R(black), bG = CH_G(black), bB = CH_B(black);
-    int wR = CH_R(white), wG = CH_G(white), wB = CH_B(white);
     bool hasm = mid.size() >= 3;
-    int mR = hasm ? mid[0] : 0, mG = hasm ? mid[1] : 0, mB = hasm ? mid[2] : 0;
-    int midpt = hasm && (int)mid.size() >= 4 ? mid[3] : 128;
-    for (int f = 0; f < o->n; ++f) { uint8_t* s = o->frames[f].data.data(); for (size_t i = 0; i < npx(o); ++i) { int l = s[i * 4]; int r0, g0, b0, r1, g1, b1; float tt; if (hasm && l < midpt) { r0 = bR; g0 = bG; b0 = bB; r1 = mR; g1 = mG; b1 = mB; tt = midpt ? (float)l / midpt : 0; } else if (hasm) { r0 = mR; g0 = mG; b0 = mB; r1 = wR; g1 = wG; b1 = wB; tt = (255 - midpt) ? (float)(l - midpt) / (255 - midpt) : 0; } else { r0 = bR; g0 = bG; b0 = bB; r1 = wR; g1 = wG; b1 = wB; tt = l / 255.0f; } s[i * 4] = clamp8(r0 + (r1 - r0) * tt); s[i * 4 + 1] = clamp8(g0 + (g1 - g0) * tt); s[i * 4 + 2] = clamp8(b0 + (b1 - b0) * tt); } }
+    int bp = 0, wp = 255, mp = 127;
+    int lut[3][256];
+    for (int c = 0; c < 3; ++c) {
+        int bc = (c == 0) ? CH_R(black) : (c == 1) ? CH_G(black) : CH_B(black);
+        int wc = (c == 0) ? CH_R(white) : (c == 1) ? CH_G(white) : CH_B(white);
+        int mc = hasm ? mid[c] : 0;
+        int idx = 0;
+        for (int i = 0; i < bp; ++i) lut[c][idx++] = bc;
+        if (!hasm) {
+            int len = wp - bp;
+            for (int i = 0; i < len; ++i) lut[c][idx++] = bc + i * (wc - bc) / len;
+        } else {
+            int len1 = mp - bp, len2 = wp - mp;
+            for (int i = 0; i < len1; ++i) lut[c][idx++] = bc + i * (mc - bc) / len1;
+            for (int i = 0; i < len2; ++i) lut[c][idx++] = mc + i * (wc - mc) / len2;
+        }
+        for (int i = wp; i < 256; ++i) lut[c][idx++] = wc;
+    }
+    Image* g = (Image*)img_convert(im, "L");
+    Image* o = to_rgba(g);
+    for (int f = 0; f < o->n; ++f) { uint8_t* s = o->frames[f].data.data(); for (size_t i = 0; i < npx(o); ++i) { int v = s[i * 4]; s[i * 4] = (uint8_t)lut[0][v]; s[i * 4 + 1] = (uint8_t)lut[1][v]; s[i * 4 + 2] = (uint8_t)lut[2][v]; } }
+    delete g;
     return o;
 }
 
