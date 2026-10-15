@@ -315,6 +315,20 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 | `HiResFix` | `LATENT` | 高清修复（hires + FreeU/SAG/VAE Tiling + 后处理） |
 | `ADetailer` | `IMAGE` | 局部重绘修复 |
 
+### 视频 / AnimateDiff（sd.cpp motion module）
+
+| 节点 | 输出 | 说明 |
+|------|------|------|
+| `AnimateDiffLoader` | `MODEL` | 加载 motion module（sd.cpp `--motion`） |
+| `AnimateDiffVideo` | `IMAGE` | 直接整段出视频帧（N 帧 PNG） |
+| `ADE_AnimateDiffLoaderWithContext`（+5 变体） | `MODEL`, `CONTEXT_OPTIONS` | AnimateDiff-Evolved 兼容 Loader |
+| `ADE_AnimateDiffUniformContextOptions` / `ContextOptions` | `CONTEXT_OPTIONS` | context 参数（透传） |
+| `ADE_AnimateDiffSampler` / `ADE_AnimateDiffVideo` | `IMAGE` | 视频采样；支持运动 LoRA（`lora`）与逐帧 ControlNet（`control_net` + `control_frames`） |
+| `ADE_AnimateDiffCombine` | `IMAGE` | 透传 |
+
+> 一键出动画：`./anim.sh "<prompt>" [outdir] [W H] [frames fps] [steps cfg seed]`。
+> 环境变量：`MODEL/VAE/MOTION/NEG/NODE_SET`，外加 `LORA`（运动 LoRA）、`CONTROL_NET`/`CONTROL_DIR`/`CONTROL_STRENGTH`（逐帧 ControlNet）。
+
 ### 模型增强 / 风格注入
 
 | 节点 | 输出 | 说明 |

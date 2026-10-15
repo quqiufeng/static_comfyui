@@ -213,6 +213,72 @@ LD_LIBRARY_PATH=cpp/sd/build:/opt/sd/build-dl/bin \
 
 ---
 
+## 扩展集成最佳实践（新增节点 / FFI / sd.cpp 补丁）
+
+以移植 **AnimateDiff（逐帧 ControlNet + 运动 LoRA）** 为例：新增一个能力通常要自底向上改 3~4 层，每层各改各的，最后按序重编。
+
+### Step 1 — sd.cpp 后端（`/opt/sd`，以补丁维护）
+
+sd.cpp 已有的能力直接调；**没有的行为才改源码**（例如给 `sd_img_gen_params_t` 加 `control_frames`、在 `image.cpp` 里按帧堆 batch 走 ControlNet）。
+`/opt/sd` 是上游仓（无推送权），改动以补丁纳入本仓库：
+
+```bash
+cd /opt/sd
+git add -N <新增文件>                      # 新增文件必须 -N 才会进 diff
+git diff > /opt/static_comfyui/cpp/sd/patches/sdcpp-freeu-sag-v2.patch
+git reset -q
+```
+
+> 别把无关的临时文件（如误建的 `1`）带进补丁；生成后 `grep -c "^diff --git"` 核对文件数。
+
+### Step 2 — 适配层 C API（`cpp/sd/src/adapters/sdcpp_adapter.{h,cpp}`）
+
+- 在 `SDPipeline` 加方法（如 `set_control_frames`），`Impl` 里**自持所有权**（拷贝像素 buffer，别留悬空指针）。
+- 加 C ABI 函数 `sd_pipeline_xxx`；C 侧不能过数组/复杂类型，故再提供 **CSV/换行字符串**变体（`..._csv`），方便 FFI。
+- 在 `generate_video` / `generate_image` 里把参数填进 `sd_*_gen_params_t`。
+
+### Step 3 — FFI 声明 + 包装（`comfycli/sd_backend.static.py`）
+
+```python
+extern fn sd_pipeline_xxx(pipeline: ptr, a: str, b: float) -> int from "sdcpp_adapter"
+
+def sd_xxx(pipeline: ptr, a: str, b: float) -> int:
+    return sd_pipeline_xxx(pipeline, a, b)
+```
+
+### Step 4 — 节点（`comfycli/nodes.static.py`）
+
+- 取值用 `get_str/get_int/get_float`；**取上游句柄必须带注解**：`m: SDPipelineHandle = dict_get(inputs, "model")`。
+- `register_node("ClassName", "显示名", "handler", (输出类型...), is_output)`。
+- 加入 `dispatch_*` 的 `elif class_type == "..."`（**不能**用字符串→函数查表）；多输出节点要在 `register_group(..., 2)` 注册。
+- 复用逻辑抽 helper，参数同样要带 `SDPipelineHandle` 注解（如 `setup_animatediff_extras(model, inputs)`）。
+
+### Step 5 — 脚本 / 文档
+
+把新参数用环境变量暴露给使用脚本（如 `anim.sh` 的 `LORA` / `CONTROL_NET` / `CONTROL_DIR`），并在本文 + `AGENTS.md` 记一笔。
+
+### 踩过的坑（先看这里）
+
+| 坑 | 规避 |
+|----|------|
+| 取句柄不写注解 → 译成裸变量，运行报 `variable pipeline is not bound` | 所有 `dict_get(inputs, ...)` 取的句柄都写 `x: SDPipelineHandle = ...` |
+| 模块级 `for` 循环不生效 | 节点注册写显式 `register_node(...)`，不要循环注册 |
+| FFI 传不了字符串数组 | C 侧收 CSV/换行串并 split；StaticPy 侧传单串 |
+| 适配层帧 buffer 指针失效 | `std::vector<std::vector<uint8_t>>` 先 `reserve()` 再 `push_back`，否则 realloc 使已存的 `sd_image_t::data` 悬空 |
+| sd.cpp 结构体插字段后偏移变化 | 结构体中间插字段会改后续偏移 → 必须连同适配层重编；`*params = {}` 会清零新字段 |
+| 运动 LoRA 不生效 | sd.cpp lora 键约定是 `lora.<模型张量名>.lora_down`；motion 块在模型里嵌于 `model.diffusion_model.motion_module.*`，而 LoRA 键在 UNet 顶层 → 在 `name_conversion.cpp` 识别并重嵌；`convert_sep_to_dot` 保护词需含 `motion_module(s)/attention_blocks/temporal_transformer`，否则 `_` 被拆坏 |
+| 改了 `/opt/sd` 却没重编库 | 见下方重编顺序第 1 步 |
+
+### 重编顺序（改哪层编哪层）
+
+```bash
+bash cpp/sd/build_sd_dl.sh        # 1. 改过 /opt/sd 源码/补丁
+bash cpp/sd/scripts/build.sh      # 2. 改过适配层（会先确保 libstable-diffusion.so）
+./build.sh                        # 3. 改过 comfycli/*.static.py
+```
+
+---
+
 ## 与官方 StaticPy 的关系
 
 本项目从 `/opt/ReScheme`（StaticPy 官方仓库）拷贝编译器核心到 `staticpy/`：

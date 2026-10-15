@@ -146,6 +146,14 @@ comfycli-bin workflow.json --output-dir ./output
 - `list` 即 Scheme vector（`len`→`list_length`，索引→`vector-ref`）
 - `extern fn foo(x: int) -> int from "sdcpp_adapter"` 声明 C FFI；共享库由 `comfycli_ffi.scm` 加载
 
+## 扩展集成（新增节点 / FFI / sd.cpp 补丁）
+
+自底向上四层：**sd.cpp 后端（`/opt/sd`，以补丁维护）→ 适配层 C API（`sdcpp_adapter.h/.cpp`）→ FFI（`sd_backend.static.py`）→ 节点（`nodes.static.py`）**，最后按序重编（`build_sd_dl.sh` → `cpp/sd/scripts/build.sh` → `./build.sh`）。完整步骤、踩坑清单与重编顺序见 **[BUILD.md「扩展集成最佳实践」](./BUILD.md#扩展集成最佳实践新增节点--ffi--sdcpp-补丁)**。
+
+两条最易踩的坑：
+- 取上游句柄**必须写类型注解** `m: SDPipelineHandle = dict_get(inputs, "model")`，否则被译成裸变量、运行报 `variable ... is not bound`。
+- FFI **不能传字符串数组** → C 侧提供 `..._csv`（CSV/换行串）变体。
+
 ## 开发顺序（bottom-up）
 
 ### Phase 0: 基础设施（已完成）
