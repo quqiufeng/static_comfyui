@@ -25,7 +25,7 @@ MAP = {
     ("ImageOps", "mirror"): "img_mirror", ("ImageOps", "pad"): "img_ops_pad",
     ("ImageOps", "posterize"): "img_posterize", ("ImageOps", "scale"): "img_scale",
     ("ImageOps", "solarize"): "img_solarize", ("ImageOps", "exif_transpose"): "pil_exif_transpose",
-    ("ImageOps", "deform"): None, ("ImageOps", "crop"): "img_crop",
+    ("ImageOps", "deform"): "pil_ops_deform(逆向映射)", ("ImageOps", "crop"): "img_crop",
     ("ImageChops", "add"): "img_chop", ("ImageChops", "subtract"): "img_chop",
     ("ImageChops", "difference"): "img_chop", ("ImageChops", "multiply"): "img_chop",
     ("ImageChops", "screen"): "img_chop", ("ImageChops", "darker"): "img_chop",

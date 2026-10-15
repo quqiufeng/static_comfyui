@@ -355,6 +355,37 @@ int img_getbbox4(void* p, int rgba, char* out, int outlen) {
 }
 void* img_getbbox(void* p, int rgba) { (void)p; (void)rgba; return nullptr; }
 
+// img_warp：按给定每像素源坐标（CSV:"sx,sy,..."）逆向采样（对称 deform 的基本能力）
+void* img_warp(void* p, int nw, int nh, const char* coords_csv, const char* resample) {
+    Image* im = (Image*)p; if (!im) return nullptr;
+    std::vector<float> co = parse_csv_floats(coords_csv);
+    if ((int)co.size() < nw * nh * 2) return nullptr;
+    std::string rs = resample ? resample : "bilinear";
+    Image* rg = (im->frames[0].bpp == 4) ? im : to_rgba(im);
+    int W = rg->w, H = rg->h;
+    Image* o = new_rgba(nw, nh, rg->n); o->loop = rg->loop;
+    for (int f = 0; f < rg->n; ++f) {
+        uint8_t* sp = rg->frames[f].data.data(); uint8_t* dp = o->frames[f].data.data();
+        for (int y = 0; y < nh; ++y) for (int x = 0; x < nw; ++x) {
+            float sx = co[(y * nw + x) * 2], sy = co[(y * nw + x) * 2 + 1];
+            uint8_t* d = dp + ((size_t)y * nw + x) * 4;
+            if (rs == "nearest") { int ix = clampi((int)floor(sx + 0.5f), 0, W - 1), iy = clampi((int)floor(sy + 0.5f), 0, H - 1); memcpy(d, sp + ((size_t)iy * W + ix) * 4, 4); continue; }
+            int x0 = (int)floor(sx), y0 = (int)floor(sy); float tx = sx - x0, ty = sy - y0;
+            for (int c = 0; c < 4; ++c) {
+                float v = 0;
+                for (int j = 0; j < 2; ++j) for (int i = 0; i < 2; ++i) {
+                    int xx = clampi(x0 + i, 0, W - 1), yy = clampi(y0 + j, 0, H - 1);
+                    v += (i ? tx : 1 - tx) * (j ? ty : 1 - ty) * sp[((size_t)yy * W + xx) * 4 + c];
+                }
+                d[c] = clamp8(v);
+            }
+        }
+    }
+    if (rg != im) delete rg;
+    return o;
+}
+
+
 void* img_alpha_composite_at(void* bp, void* op, int x, int y) {
     Image* base = (Image*)bp; Image* over = (Image*)op;
     if (!base || !over) return nullptr;

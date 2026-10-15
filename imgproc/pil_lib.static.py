@@ -24,6 +24,7 @@ extern fn img_rotate(im: ptr, deg: float, expand: int, fill: int) -> ptr from "i
 extern fn img_transpose(im: ptr, m: int) -> ptr from "imgproc"
 extern fn img_mirror(im: ptr) -> ptr from "imgproc"
 extern fn img_pad(im: ptr, l: int, t: int, r: int, b: int, rgba: int) -> ptr from "imgproc"
+extern fn img_warp(im: ptr, w: int, h: int, coords_csv: str, resample: str) -> ptr from "imgproc"
 extern fn img_fit(im: ptr, w: int, h: int, rs: str, cx: float, cy: float, fill: int) -> ptr from "imgproc"
 extern fn img_contain(im: ptr, w: int, h: int, rs: str, fill: int) -> ptr from "imgproc"
 extern fn img_ops_pad(im: ptr, w: int, h: int, rs: str, rgba: int, cx: float, cy: float) -> ptr from "imgproc"
@@ -102,3 +103,20 @@ def pil_eval(im: ptr, fn) -> ptr:
         lut = lut + string_of_int(fn(v))
         v = v + 1
     return img_point(im, -1, lut)
+
+
+def pil_ops_deform(im: ptr, fnx, fny) -> ptr:
+    # ImageOps.deform 的逆向映射用法：fnx/fny(x,y)->源坐标
+    w: int = img_width(im)
+    h: int = img_height(im)
+    csv: str = ""
+    y: int = 0
+    while y < h:
+        x: int = 0
+        while x < w:
+            if x > 0 or y > 0:
+                csv = csv + ","
+            csv = csv + format_float(fnx(x, y), 4) + "," + format_float(fny(x, y), 4)
+            x = x + 1
+        y = y + 1
+    return img_warp(im, w, h, csv, "bilinear")

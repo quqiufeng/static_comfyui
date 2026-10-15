@@ -62,6 +62,7 @@ void*       img_paste_mask(void* base, void* src, int x, int y, void* mask); // 
 void*       img_composite(void* base, void* over);                          // alpha 合成（同尺寸）
 void*       img_blend(void* a, void* b, float alpha);                       // a*(1-a)+b*a
 void*       img_getbbox(void* im, int rgba);                                // 非背景包围盒
+void*       img_warp(void* im, int w, int h, const char* coords_csv, const char* resample);
 int         img_getbbox4(void* im, int rgba, char* out_csv, int out_len);   // "x0,y0,x1,y1"
 
 /* ============================ 颜色 / 模式 / 调色板 ============================ */
