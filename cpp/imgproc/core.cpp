@@ -252,4 +252,39 @@ int img_u8_set(void* p, long off, int v) { *((char*)p + off) = (char)v; return 0
 unsigned int img_u32_get(void* p, long off) { unsigned int v; memcpy(&v, (const char*)p + off, 4); return v; }
 void img_u32_set(void* p, long off, unsigned int v) { memcpy((char*)p + off, &v, 4); }
 
+unsigned char* img_data_ptr(void* p, int i) { return img_frame_ptr(p, i); }
+
+void* img_frombytes(const char* mode, int w, int h, void* data, int len) {
+    if (!mode || w <= 0 || h <= 0 || !data) return nullptr;
+    std::string m = mode;
+    Image* im = new_rgba(w, h, 1);
+    const uint8_t* s = (const uint8_t*)data; uint8_t* d = im->frames[0].data.data();
+    size_t n = (size_t)w * h;
+    if (m == "RGBA") { if (len < (int)(n * 4)) { delete im; return nullptr; } memcpy(d, s, n * 4); }
+    else if (m == "RGB") { if (len < (int)(n * 3)) { delete im; return nullptr; } for (size_t i = 0; i < n; ++i) { d[i * 4] = s[i * 3]; d[i * 4 + 1] = s[i * 3 + 1]; d[i * 4 + 2] = s[i * 3 + 2]; d[i * 4 + 3] = 255; } }
+    else if (m == "L") { if (len < (int)n) { delete im; return nullptr; } for (size_t i = 0; i < n; ++i) { d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = s[i]; d[i * 4 + 3] = 255; } }
+    else if (m == "LA") { if (len < (int)(n * 2)) { delete im; return nullptr; } for (size_t i = 0; i < n; ++i) { d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = s[i * 2]; d[i * 4 + 3] = s[i * 2 + 1]; } }
+    else { delete im; return nullptr; }
+    im->mode = m;
+    return im;
+}
+
+int img_tobytes(void* p, int frame, const char* mode, void* out, int outlen) {
+    Image* im = (Image*)p; if (!im || frame < 0 || frame >= im->n || !mode || !out) return -1;
+    Image* rg = (im->frames[frame].bpp == 4) ? im : to_rgba(im);
+    std::string m = mode; size_t n = (size_t)im->w * im->h;
+    uint8_t* s = rg->frames[frame].data.data(); uint8_t* o = (uint8_t*)out;
+    if (m == "RGBA") { if (outlen < (int)(n * 4)) { if (rg != im) delete rg; return -2; } memcpy(o, s, n * 4); }
+    else if (m == "RGB") { if (outlen < (int)(n * 3)) { if (rg != im) delete rg; return -2; } for (size_t i = 0; i < n; ++i) { o[i * 3] = s[i * 4]; o[i * 3 + 1] = s[i * 4 + 1]; o[i * 3 + 2] = s[i * 4 + 2]; } }
+    else if (m == "L") { if (outlen < (int)n) { if (rg != im) delete rg; return -2; } for (size_t i = 0; i < n; ++i) o[i] = s[i * 4]; }
+    else { if (rg != im) delete rg; return -1; }
+    if (rg != im) delete rg;
+    return 0;
+}
+
+void* img_getchannel(void* p, int ch) {
+    Image* im = (Image*)p; if (!im) return nullptr;
+    return img_split(p, clampi(ch, 0, 3));
+}
+
 }  // extern "C"

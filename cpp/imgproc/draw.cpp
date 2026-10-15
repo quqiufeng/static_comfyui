@@ -120,6 +120,46 @@ int img_draw_arc(void* p, int x0, int y0, int x1, int y1, float start, float end
     return 0;
 }
 
+static void sector_fill(Image* im, int x0, int y0, int x1, int y1, float start, float end, int rgba, bool chord) {
+    if (x1 < x0) std::swap(x0, x1); if (y1 < y0) std::swap(y0, y1);
+    float cx = (x0 + x1) / 2.0f, cy = (y0 + y1) / 2.0f, rx = (x1 - x0) / 2.0f, ry = (y1 - y0) / 2.0f;
+    if (rx <= 0 || ry <= 0) return;
+    float s = start, e = end; while (e < s) e += 360;
+    // 弦端点（chord 时用于判断在弧一侧）
+    float a1 = s * M_PI / 180.0f, a2 = e * M_PI / 180.0f;
+    float px1 = cx + rx * cos(a1), py1 = cy + ry * sin(a1);
+    float px2 = cx + rx * cos(a2), py2 = cy + ry * sin(a2);
+    for (int y = std::max(0, y0); y <= std::min(im->h - 1, y1); ++y) for (int x = std::max(0, x0); x <= std::min(im->w - 1, x1); ++x) {
+        float nx = (x - cx) / rx, ny = (y - cy) / ry;
+        if (nx * nx + ny * ny > 1.0f) continue;
+        float ang = atan2(ny, nx) * 180.0f / M_PI; if (ang < 0) ang += 360; float a = ang; while (a < s) a += 360;
+        if (a > e) continue;
+        if (chord) {
+            // 必须在弦的弧一侧（叉积同号）
+            float cross = (px2 - px1) * (y - py1) - (py2 - py1) * (x - px1);
+            float mid = (s + e) / 2.0f * M_PI / 180.0f;
+            float mx = cx + rx * cos(mid), my = cy + ry * sin(mid);
+            float cross2 = (px2 - px1) * (my - py1) - (py2 - py1) * (mx - px1);
+            if ((cross > 0) != (cross2 > 0)) continue;
+        }
+        blend_px(im, x, y, rgba);
+    }
+}
+
+int img_draw_pieslice(void* p, int x0, int y0, int x1, int y1, float s, float e, int rgba, int fill_rgba) {
+    Image* im = (Image*)p; if (!im) return -1; ensure_rgba(im);
+    if (CH_A(fill_rgba)) sector_fill(im, x0, y0, x1, y1, s, e, fill_rgba, false);
+    if (CH_A(rgba)) { float cx = (x0 + x1) / 2.0f, cy = (y0 + y1) / 2.0f; img_draw_line(im, (int)cx, (int)cy, (int)(cx + (x1 - x0) / 2.0 * cos(s * M_PI / 180)), (int)(cy + (y1 - y0) / 2.0 * sin(s * M_PI / 180)), rgba, 1); img_draw_line(im, (int)cx, (int)cy, (int)(cx + (x1 - x0) / 2.0 * cos(e * M_PI / 180)), (int)(cy + (y1 - y0) / 2.0 * sin(e * M_PI / 180)), rgba, 1); img_draw_arc(im, x0, y0, x1, y1, s, e, rgba, 1); }
+    return 0;
+}
+
+int img_draw_chord(void* p, int x0, int y0, int x1, int y1, float s, float e, int rgba, int fill_rgba) {
+    Image* im = (Image*)p; if (!im) return -1; ensure_rgba(im);
+    if (CH_A(fill_rgba)) sector_fill(im, x0, y0, x1, y1, s, e, fill_rgba, true);
+    if (CH_A(rgba)) { float cx = (x0 + x1) / 2.0f, cy = (y0 + y1) / 2.0f, rxx = (x1 - x0) / 2.0f, ryy = (y1 - y0) / 2.0f; img_draw_line(im, (int)(cx + rxx * cos(s * M_PI / 180)), (int)(cy + ryy * sin(s * M_PI / 180)), (int)(cx + rxx * cos(e * M_PI / 180)), (int)(cy + ryy * sin(e * M_PI / 180)), rgba, 1); img_draw_arc(im, x0, y0, x1, y1, s, e, rgba, 1); }
+    return 0;
+}
+
 // ---------------- ImageFont ----------------
 void* img_font_load(const char* ttf_path, float pxsz) {
     FILE* fp = fopen(ttf_path, "rb"); if (!fp) return nullptr;

@@ -150,4 +150,33 @@ int img_getpalette(void* p, char* out, int outlen) {
     strcpy(out, s.c_str()); return 0;
 }
 
+// ImageColor.getrgb：hex / rgb() / 常用命名色
+static bool color_named(const std::string& n, int& r, int& g, int& b) {
+    static const struct { const char* nm; int r, g, b; } T[] = {
+        {"black",0,0,0},{"white",255,255,255},{"red",255,0,0},{"green",0,128,0},{"lime",0,255,0},
+        {"blue",0,0,255},{"yellow",255,255,0},{"cyan",0,255,255},{"aqua",0,255,255},{"magenta",255,0,255},
+        {"fuchsia",255,0,255},{"gray",128,128,128},{"grey",128,128,128},{"silver",192,192,192},
+        {"maroon",128,0,0},{"olive",128,128,0},{"navy",0,0,128},{"teal",0,128,128},{"purple",128,0,128},
+        {"orange",255,165,0},{"pink",255,192,203},{"brown",165,42,42},{"gold",255,215,0},
+    };
+    for (auto& t : T) if (n == t.nm) { r = t.r; g = t.g; b = t.b; return true; }
+    return false;
+}
+int img_color_getrgb(const char* color, char* out, int outlen) {
+    if (!color || !out) return -1;
+    std::string c = color;
+    int r = 0, g = 0, b = 0;
+    if (!c.empty() && c[0] == '#') {
+        std::string h = c.substr(1);
+        if (h.size() == 3) { r = strtol(std::string(1, h[0]).c_str(), 0, 16) * 17; g = strtol(std::string(1, h[1]).c_str(), 0, 16) * 17; b = strtol(std::string(1, h[2]).c_str(), 0, 16) * 17; }
+        else if (h.size() >= 6) { r = strtol(h.substr(0, 2).c_str(), 0, 16); g = strtol(h.substr(2, 2).c_str(), 0, 16); b = strtol(h.substr(4, 2).c_str(), 0, 16); }
+        else return -1;
+    } else if (c.rfind("rgb", 0) == 0) {
+        std::vector<int> v = parse_csv_ints(c.substr(c.find('(') + 1).c_str());
+        if (v.size() < 3) return -1; r = v[0]; g = v[1]; b = v[2];
+    } else if (!color_named(c, r, g, b)) return -1;
+    snprintf(out, outlen, "%d,%d,%d", clampi(r, 0, 255), clampi(g, 0, 255), clampi(b, 0, 255));
+    return 0;
+}
+
 }  // extern "C"

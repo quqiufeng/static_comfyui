@@ -108,8 +108,50 @@ for k, pn in [("brightness", "Brightness"), ("contrast", "Contrast"), ("color", 
 for pn, nm in [("SHARPEN", "SHARPEN"), ("BLUR", "BLUR"), ("EMBOSS", "EMBOSS"), ("FIND_EDGES", "FIND_EDGES"), ("SMOOTH", "SMOOTH")]:
     case(f"filter.{pn}", lambda pn=pn: img_rgb.filter(getattr(ImageFilter, pn)), lambda nm=nm: P.img_filter(h_rgb, nm.encode(), 1.0, 0, 0), tol=40)
 
-# ---- ImageStat ----
-case("stat.mean", lambda: img_rgb, lambda: h_rgb, tol=999)  # placeholder（下面单独测）
+# ---- 通道 / 数据进出 ----
+for i, band in enumerate("RGBA"):
+    case(f"getchannel.{band}", lambda band=band: img_rgba.getchannel(band), lambda i=i: P.img_getchannel(h_rgba, i))
+raw = img_rgba.tobytes("raw", "RGBA")
+def pil_frombytes():
+    return Image.frombytes("RGBA", (W, H), raw)
+def our_frombytes():
+    buf = C.create_string_buffer(raw)
+    return P.img_frombytes(b"RGBA", W, H, C.cast(buf, C.c_void_p), len(raw))
+case("frombytes.RGBA", pil_frombytes, our_frombytes, space="rgba", tol=0)
+def pil_tobytes():
+    return img_rgb
+def our_tobytes():
+    buf = C.create_string_buffer(W * H * 3)
+    P.img_tobytes(h_rgb, 0, b"RGB", C.cast(buf, C.c_void_p), W * H * 3)
+    a = np.frombuffer(buf.raw, np.uint8).reshape(H, W, 3).astype(int)
+    return P.from_np(a)
+case("tobytes.RGB", pil_tobytes, our_tobytes, tol=0)
+
+# ---- alpha_composite(带位置) ----
+small = Image.fromarray(rng.integers(0, 256, (10, 12, 4), dtype=np.uint8), "RGBA")
+small_path = "/tmp/opencode/difftest_small.png"; small.save(small_path)
+h_small = P.img_open(small_path.encode())
+def pil_ac():
+    b = img_rgba.copy(); b.alpha_composite(small, (7, 5)); return b
+def our_ac():
+    b = P.img_copy(h_rgba); P.img_alpha_composite_at(b, h_small, 7, 5); return b
+case("alpha_composite", pil_ac, our_ac, space="rgba", tol=1)
+
+# ---- ImageOps.fit / contain ----
+case("ops.fit", lambda: ImageOps.fit(img_rgb, (20, 30), Image.Resampling.LANCZOS), lambda: P.img_fit(h_rgb, 20, 30, b"lanczos", 0.5, 0.5, 0), tol=1)
+case("ops.contain", lambda: ImageOps.contain(img_rgb, (20, 30), Image.Resampling.LANCZOS), lambda: P.img_contain(h_rgb, 20, 30, b"lanczos", 0), tol=1)
+
+# ---- ImageColor ----
+def pil_getrgb():
+    import PIL.ImageColor as IC
+    rgb = IC.getrgb("#3a7bc8")
+    return Image.new("RGB", (2, 2), rgb)
+def our_getrgb():
+    buf = C.create_string_buffer(32)
+    P.img_color_getrgb(b"#3a7bc8", buf, 32)
+    v = [int(x) for x in buf.value.decode().split(",")]
+    return P.from_np(np.full((2, 2, 3), v, np.uint8))
+case("color.getrgb", pil_getrgb, our_getrgb, tol=0)
 
 # ---- ImageDraw ----
 from PIL import ImageDraw
@@ -118,6 +160,26 @@ def pil_draw_line():
 def our_draw_line():
     h = P.img_copy(h_rgb); P.img_draw_line(h, 0, 0, W - 1, H - 1, 0xFF0000FF, 3); return h
 case("draw.line", pil_draw_line, our_draw_line, tol=999 if True else 0)
+
+# ---- getbbox / chop 变体 ----
+def pil_bbox():
+    bb = img_rgba.getbbox()
+    a = np.zeros((H, W, 3), int)
+    if bb:
+        a[bb[1]:bb[3], bb[0]:bb[2]] = 255
+    return Image.fromarray(a.astype(np.uint8), "RGB")
+def our_bbox():
+    buf = C.create_string_buffer(64)
+    P.img_getbbox4(h_rgba, 0, buf, 64)
+    a = np.zeros((H, W, 3), int)
+    s = buf.value.decode()
+    if s != "None":
+        x0, y0, x1, y1 = [int(v) for v in s.split(",")]
+        a[y0:y1, x0:x1] = 255
+    return P.from_np(a)
+case("getbbox", pil_bbox, our_bbox, tol=0)
+case("chops.offset", lambda: ImageChops.offset(img_rgb, 5, -3), lambda: P.img_chop_offset(h_rgb, 5, -3), tol=0)
+case("chops.add_const", lambda: ImageChops.add(img_rgb, Image.new("RGB", (W, H), (20, 20, 20))), lambda: P.img_chop_const(h_rgb, b"add", 20), tol=1)
 
 # 报告
 print(f"{'case':28} {'st':4}  detail")

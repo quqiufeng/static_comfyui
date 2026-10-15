@@ -51,6 +51,7 @@ void         img_u32_set(void* p, long off, unsigned int v);
 /* ============================ 几何 ============================ */
 void*       img_crop(void* im, int x, int y, int w, int h);
 void*       img_resize(void* im, int w, int h, const char* resample);      // nearest/bilinear/bicubic/lanczos
+void*       img_resize_ex(void* im, int w, int h, const char* resample, float bx0, float by0, float bx1, float by1);
 void*       img_thumbnail(void* im, int w, int h);                          // 就地缩放到 fit
 void*       img_rotate(void* im, float deg, int expand, int fill_rgba);
 void*       img_transpose(void* im, int method);   // 0 FLIP_LR 1 FLIP_TB 2 ROT90 3 ROT180 4 ROT270 5 TRANSPOSE 6 TRANSVERSE
@@ -105,6 +106,18 @@ int         img_draw_rounded_rect(void* im, int x0, int y0, int x1, int y1, int 
 int         img_draw_ellipse(void* im, int x0, int y0, int x1, int y1, int rgba, int fill_rgba);
 int         img_draw_polygon(void* im, const char* xy_csv, int rgba, int fill_rgba);
 int         img_draw_arc(void* im, int x0, int y0, int x1, int y1, float start, float end, int rgba, int width);
+
+/* ==================== 数据进出 / 通道 / 更多 Ops ==================== */
+unsigned char* img_data_ptr(void* im, int frame);                            // 原始像素首地址
+void*       img_frombytes(const char* mode, int w, int h, void* data, int len);
+int         img_tobytes(void* im, int frame, const char* mode, void* out, int outlen);
+void*       img_getchannel(void* im, int ch);                                // -> L 图（0R1G2B3A）
+void*       img_alpha_composite_at(void* base, void* over, int x, int y);    // 就地
+void*       img_fit(void* im, int w, int h, const char* resample, float cx, float cy, int fill_rgba);
+void*       img_contain(void* im, int w, int h, const char* resample, int fill_rgba);
+int         img_color_getrgb(const char* color, char* out_csv, int outlen);  // ImageColor.getrgb
+int         img_draw_chord(void* im, int x0, int y0, int x1, int y1, float s, float e, int rgba, int fill_rgba);
+int         img_draw_pieslice(void* im, int x0, int y0, int x1, int y1, float s, float e, int rgba, int fill_rgba);
 
 /* ============================ ImageFont / 文字 ============================ */
 void*       img_font_load(const char* ttf_path, float px);

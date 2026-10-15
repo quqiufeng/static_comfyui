@@ -78,6 +78,17 @@ img_draw_ellipse = _sig("img_draw_ellipse", _ci, [_p, _ci, _ci, _ci, _ci, _ci, _
 img_draw_polygon = _sig("img_draw_polygon", _ci, [_p, _cs, _ci, _ci])
 img_draw_arc = _sig("img_draw_arc", _ci, [_p, _ci, _ci, _ci, _ci, _cf, _cf, _ci, _ci])
 
+img_data_ptr = _sig("img_data_ptr", _p, [_p, _ci])
+img_frombytes = _sig("img_frombytes", _p, [_cs, _ci, _ci, _p, _ci])
+img_tobytes = _sig("img_tobytes", _ci, [_p, _ci, _cs, _p, _ci])
+img_getchannel = _sig("img_getchannel", _p, [_p, _ci])
+img_alpha_composite_at = _sig("img_alpha_composite_at", _p, [_p, _p, _ci, _ci])
+img_fit = _sig("img_fit", _p, [_p, _ci, _ci, _cs, _cf, _cf, _ci])
+img_contain = _sig("img_contain", _p, [_p, _ci, _ci, _cs, _ci])
+img_color_getrgb = _sig("img_color_getrgb", _ci, [_cs, C.c_char_p, _ci])
+img_draw_chord = _sig("img_draw_chord", _ci, [_p, _ci, _ci, _ci, _ci, _cf, _cf, _ci, _ci])
+img_draw_pieslice = _sig("img_draw_pieslice", _ci, [_p, _ci, _ci, _ci, _ci, _cf, _cf, _ci, _ci])
+
 img_font_load = _sig("img_font_load", _p, [_cs, _cf])
 img_font_free = _sig("img_font_free", _ci, [_p])
 img_font_text_width = _sig("img_font_text_width", _ci, [_p, _cs])

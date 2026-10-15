@@ -59,16 +59,16 @@ LD_LIBRARY_PATH=$PWD/cpp/imgproc/build ./imgproc/mirror_gif IN.gif OUT.gif
 ## 当前覆盖 / 状态
 
 - **编解码**：GIF（多帧，保留索引+调色板，无损）、PNG/JPEG/BMP/TGA（stb）。
-- **Image 核心**：open/save/new/copy/convert(RGB·RGBA·L·LA·P)/split/merge/getbbox。
-- **几何**：crop · resize（nearest/bilinear/bicubic/lanczos）· thumbnail · rotate · transpose(7) · pad · scale · paste · paste(mask) · composite · blend。
+- **Image 核心**：open/save/new/copy/convert(RGB·RGBA·L·LA·P)/split/merge/getchannel/getbbox/frombytes/to_bytes。
+- **几何**：crop · resize（+带 box）· thumbnail · rotate · transpose(7) · pad · scale · paste · paste(mask) · composite · alpha_composite(带位置) · blend · fit · contain。
 - **ImageOps**：invert · grayscale · posterize · solarize · autocontrast · equalize · colorize · mirror · expand。
-- **ImageChops**：add/subtract/difference/multiply/screen/darker/lighter/blend/logical_* · const · offset。
+- **ImageChops**：add/subtract/difference/multiply/screen/darker/lighter/blend/logical_* · const · offset。**ImageColor**：getrgb（hex/rgb()/命名色）。
 - **ImageEnhance**：brightness/contrast/color/sharpness。
 - **ImageFilter**：BLUR·SMOOTH(S)·SHARPEN·DETAIL·EDGE_ENHANCE(MORE)·FIND_EDGES·CONTOUR·EMBOSS·UNSHARP·BoxBlur·GaussianBlur·Median/Min/Max/Mode/Rank —— **卷积已按 Pillow `Filter.c` 精确对齐（含浮点/边界/3×3 翻转）**。
 - **ImageStat**：mean/median/extrema/stddev/sum。
 - **ImageDraw**：point/line/rectangle/rounded_rectangle/ellipse/polygon/arc。**ImageFont**：stb_truetype 文字。
 
-差分测试当前 **38 项全部通过（max=0）**——含 `resize.{nearest,bilinear,lanczos}`（已按 Pillow
+差分测试当前 **50 项全部通过（max=0）**——含 `resize.{nearest,bilinear,lanczos}`（已按 Pillow
 `Resample.c` 定点算法精确对齐）、全部 transpose / Ops / Chops / Enhance / Filter。GIF 镜像与源逐像素 **maxdiff=0**。
 
 ## 写新算子

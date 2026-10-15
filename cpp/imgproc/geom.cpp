@@ -49,15 +49,15 @@ struct RSFilter { double (*fn)(double); double support; };
 static const int PREC = 22;  // PRECISION_BITS = 32-8-2
 
 struct Coeffs { int ksize = 1; std::vector<int> bounds; std::vector<int> k; };
-static Coeffs precompute(int inSize, int outSize, const RSFilter& flt) {
+static Coeffs precompute(int inSize, double in0, double in1, int outSize, const RSFilter& flt) {
     Coeffs c;
-    double scale = (double)inSize / outSize, fscale = scale < 1.0 ? 1.0 : scale;
+    double scale = (in1 - in0) / outSize, fscale = scale < 1.0 ? 1.0 : scale;
     double support = flt.support * fscale;
     int ksize = (int)ceil(support) * 2 + 1;
     c.ksize = ksize; c.bounds.assign(outSize * 2, 0); std::vector<double> kd(outSize * ksize, 0.0);
     double inv = 1.0 / fscale;
     for (int xx = 0; xx < outSize; ++xx) {
-        double center = (xx + 0.5) * scale, ww = 0.0;
+        double center = in0 + (xx + 0.5) * scale, ww = 0.0;
         int xmin = (int)(center - support + 0.5); if (xmin < 0) xmin = 0;
         int xmax = (int)(center + support + 0.5); if (xmax > inSize) xmax = inSize;
         xmax -= xmin;
@@ -73,15 +73,18 @@ static Coeffs precompute(int inSize, int outSize, const RSFilter& flt) {
 }
 static inline uint8_t clip8_fx(int in) { int v = in >> PREC; return v < 0 ? 0 : (v > 255 ? 255 : (uint8_t)v); }
 
-void* img_resize(void* p, int nw, int nh, const char* resample) {
+void* img_resize_ex(void* p, int nw, int nh, const char* resample, float bx0, float by0, float bx1, float by1) {
     Image* im = (Image*)p; if (!im || nw <= 0 || nh <= 0) return nullptr;
     std::string s = resample ? resample : "bilinear";
     Image* rg = as_rgba(im);
+    const int W = rg->w, H = rg->h;
+    if (bx1 <= bx0) { bx0 = 0; bx1 = (float)W; }
+    if (by1 <= by0) { by0 = 0; by1 = (float)H; }
     if (s == "nearest") {
         Image* o = new_rgba(nw, nh, rg->n); o->loop = rg->loop;
         for (int f = 0; f < rg->n; ++f) { o->frames[f].delay = rg->frames[f].delay; uint8_t* sp = rg->frames[f].data.data(); uint8_t* dp = o->frames[f].data.data();
-            float sx = (float)rg->w / nw, sy = (float)rg->h / nh;
-            for (int y = 0; y < nh; ++y) for (int x = 0; x < nw; ++x) { int ix = clampi((int)floor((x + 0.5f) * sx), 0, rg->w - 1), iy = clampi((int)floor((y + 0.5f) * sy), 0, rg->h - 1); memcpy(dp + ((size_t)y * nw + x) * 4, sp + ((size_t)iy * rg->w + ix) * 4, 4); } }
+            float sx = (bx1 - bx0) / nw, sy = (by1 - by0) / nh;
+            for (int y = 0; y < nh; ++y) for (int x = 0; x < nw; ++x) { int ix = clampi((int)floor(bx0 + (x + 0.5f) * sx), 0, W - 1), iy = clampi((int)floor(by0 + (y + 0.5f) * sy), 0, H - 1); memcpy(dp + ((size_t)y * nw + x) * 4, sp + ((size_t)iy * W + ix) * 4, 4); } }
         if (rg != im) delete rg; return o;
     }
     RSFilter flt = {rf_bilinear, 1.0};
@@ -90,11 +93,10 @@ void* img_resize(void* p, int nw, int nh, const char* resample) {
     else if (s == "bicubic") flt = {rf_bicubic, 2.0};
     else if (s == "lanczos") flt = {rf_lanczos, 3.0};
 
-    const int W = rg->w, H = rg->h;
     Coeffs ch, cv;
-    bool need_h = (nw != W), need_v = (nh != H);
-    if (need_h) ch = precompute(W, nw, flt);
-    if (need_v) cv = precompute(H, nh, flt);
+    bool need_h = (nw != W) || (bx0 != 0) || (bx1 != W), need_v = (nh != H) || (by0 != 0) || (by1 != H);
+    if (need_h) ch = precompute(W, bx0, bx1, nw, flt);
+    if (need_v) cv = precompute(H, by0, by1, nh, flt);
 
     Image* o = new_rgba(nw, nh, rg->n); o->loop = rg->loop;
     for (int f = 0; f < rg->n; ++f) {
@@ -125,6 +127,10 @@ void* img_resize(void* p, int nw, int nh, const char* resample) {
     }
     if (rg != im) delete rg;
     return o;
+}
+
+void* img_resize(void* p, int nw, int nh, const char* resample) {
+    return img_resize_ex(p, nw, nh, resample, 0, 0, 0, 0);
 }
 
 void* img_thumbnail(void* p, int w, int h) {
@@ -288,5 +294,49 @@ int img_getbbox4(void* p, int rgba, char* out, int outlen) {
     return 0;
 }
 void* img_getbbox(void* p, int rgba) { (void)p; (void)rgba; return nullptr; }
+
+void* img_alpha_composite_at(void* bp, void* op, int x, int y) {
+    Image* base = (Image*)bp; Image* over = (Image*)op;
+    if (!base || !over) return nullptr;
+    if (base->frames[0].bpp != 4) { Image* t = to_rgba(base); *base = *t; delete t; }
+    Image* o = to_rgba(over);
+    for (int f = 0; f < base->n && f < o->n; ++f) {
+        uint8_t* a = base->frames[f].data.data(); uint8_t* b = o->frames[f].data.data();
+        for (int oy = 0; oy < o->h; ++oy) for (int ox = 0; ox < o->w; ++ox) {
+            int bx = x + ox, by = y + oy;
+            if (bx < 0 || bx >= base->w || by < 0 || by >= base->h) continue;
+            size_t bi = ((size_t)by * base->w + bx) * 4, oi = ((size_t)oy * o->w + ox) * 4;
+            float sa = b[oi + 3] / 255.0f, da = a[bi + 3] / 255.0f;
+            float oa = sa + da * (1 - sa);
+            if (oa <= 0) { a[bi + 3] = 0; continue; }
+            for (int c = 0; c < 3; ++c) a[bi + c] = clamp8((b[oi + c] * sa + a[bi + c] * da * (1 - sa)) / oa);
+            a[bi + 3] = clamp8(oa * 255);
+        }
+    }
+    delete o; return base;
+}
+
+// ImageOps.contain：等比缩放到能放进 (w,h)，返回缩放后的图（不补边）
+void* img_contain(void* p, int w, int h, const char* resample, int fill_rgba) {
+    (void)fill_rgba;
+    Image* im = (Image*)p; if (!im) return nullptr;
+    float s = std::min((float)w / im->w, (float)h / im->h);
+    int nw = std::max(1, (int)round(im->w * s)), nh = std::max(1, (int)round(im->h * s));
+    return img_resize(im, nw, nh, resample);
+}
+
+// ImageOps.fit：按 Pillow 算法算 crop box，再用「带 box 的 resize」一步出
+void* img_fit(void* p, int w, int h, const char* resample, float cx, float cy, int fill_rgba) {
+    (void)fill_rgba;
+    Image* im = (Image*)p; if (!im || w <= 0 || h <= 0) return nullptr;
+    float sw = (float)im->w, sh = (float)im->h;
+    float out_ratio = (float)w / h, live_ratio = sw / sh;
+    float crop_w, crop_h;
+    if (live_ratio == out_ratio) { crop_w = sw; crop_h = sh; }
+    else if (live_ratio >= out_ratio) { crop_w = out_ratio * sh; crop_h = sh; }
+    else { crop_w = sw; crop_h = sw / out_ratio; }
+    float left = (sw - crop_w) * cx, top = (sh - crop_h) * cy;
+    return img_resize_ex(im, w, h, resample, left, top, left + crop_w, top + crop_h);
+}
 
 }  // extern "C"
