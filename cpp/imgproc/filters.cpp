@@ -167,4 +167,14 @@ int img_stat(void* p, const char* what, char* out, int outlen) {
     strcpy(out, s.c_str()); return 0;
 }
 
+int img_getextrema(void* p, char* out, int outlen) {
+    Image* im = (Image*)p; if (!im || !out) return -1;
+    Image* rg = as_rgba(im);
+    int mn[4] = {255, 255, 255, 255}, mx[4] = {0, 0, 0, 0};
+    for (size_t i = 0; i < npx(rg); ++i) for (int c = 0; c < 4; ++c) { int v = rg->frames[0].data[i * 4 + c]; if (v < mn[c]) mn[c] = v; if (v > mx[c]) mx[c] = v; }
+    if (rg != im) delete rg;
+    snprintf(out, outlen, "%d,%d,%d,%d,%d,%d,%d,%d", mn[0], mx[0], mn[1], mx[1], mn[2], mx[2], mn[3], mx[3]);
+    return 0;
+}
+
 }  // extern "C"

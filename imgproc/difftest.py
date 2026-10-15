@@ -207,6 +207,40 @@ for what in ["mean", "median", "stddev", "sum"]:
 
 case("ops.pad", lambda: ImageOps.pad(img_rgb, (60, 60), Image.Resampling.LANCZOS, (10, 20, 30)), lambda: P.img_ops_pad(h_rgb, 60, 60, b"lanczos", 0x0A141EFF, 0.5, 0.5), tol=1)
 
+# ---- 多帧 / chops.composite / stat.extrema ----
+mf = [Image.fromarray(rng.integers(0, 256, (H, W, 3), dtype=np.uint8), "RGB") for _ in range(3)]
+mf_path = "/tmp/opencode/difftest_mf.gif"
+mf[0].save(mf_path, save_all=True, append_images=mf[1:], duration=100, loop=0)
+h_mf = P.img_open(mf_path.encode())
+pmf = Image.open(mf_path)
+for i in range(3):
+    def pil_f(i=i):
+        pmf.seek(i); return pmf.convert("RGB")
+    def our_f(i=i):
+        return P.img_convert(P.img_frame(h_mf, i), b"RGB")
+    case(f"multiframe.frame{i}", pil_f, our_f, tol=0)
+
+mask_L = Image.fromarray(rng.integers(0, 256, (H, W), dtype=np.uint8), "L")
+mask_path = "/tmp/opencode/difftest_mask.png"; mask_L.save(mask_path)
+h_mask = P.img_open(mask_path.encode())
+case("chops.composite", lambda: ImageChops.composite(img_rgb, img2, mask_L), lambda: P.img_chops_composite(h_rgb, h2, h_mask), tol=0)
+
+def pil_extrema():
+    ex = ImageStat.Stat(img_rgb).extrema
+    a = np.zeros((2, 8, 3), int)
+    for c in range(3):
+        a[0, c * 2] = ex[c][0]; a[0, c * 2 + 1] = ex[c][1]
+    return Image.fromarray(a.astype(np.uint8), "RGB")
+def our_extrema():
+    buf = C.create_string_buffer(128)
+    P.img_getextrema(h_rgb, buf, 128)
+    v = [int(x) for x in buf.value.decode().split(",")]
+    a = np.zeros((2, 8, 3), int)
+    for c in range(3):
+        a[0, c * 2] = v[c * 2]; a[0, c * 2 + 1] = v[c * 2 + 1]
+    return P.from_np(a)
+case("stat.extrema", pil_extrema, our_extrema, tol=0)
+
 # 报告
 print(f"{'case':28} {'st':4}  detail")
 fails = 0

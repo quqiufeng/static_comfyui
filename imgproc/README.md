@@ -59,16 +59,16 @@ LD_LIBRARY_PATH=$PWD/cpp/imgproc/build ./imgproc/mirror_gif IN.gif OUT.gif
 ## 当前覆盖 / 状态
 
 - **编解码**：GIF（多帧，保留索引+调色板，无损）、PNG/JPEG/BMP/TGA（stb）。
-- **Image 核心**：open/save/new/copy/convert(RGB·RGBA·L·LA·P)/split/merge/getchannel/getbbox/frombytes/to_bytes。
+- **Image 核心**：open/save/new/copy/convert(RGB·RGBA·L·LA·P)/split/merge/getchannel/getbbox/frombytes/to_bytes/**多帧取用(img_frame/set_frame/append_frame)**。
 - **几何**：crop · resize（+带 box）· thumbnail · rotate · transpose(7) · pad · scale · paste · paste(mask) · composite · alpha_composite(带位置) · blend · fit · contain。
 - **ImageOps**：invert · grayscale · posterize · solarize · autocontrast · equalize · colorize · mirror · expand · fit · contain · pad。
-- **ImageChops**：add/subtract/difference/multiply/screen/darker/lighter/blend · **add_modulo/subtract_modulo** · **soft_light/hard_light/overlay** · logical_and/or/xor · const · offset。**ImageColor**：getrgb。
+- **ImageChops**：add/subtract/difference/multiply/screen/darker/lighter/blend · **add_modulo/subtract_modulo** · **soft_light/hard_light/overlay** · logical_and/or/xor · const · offset · **composite(a,b,mask)**。**ImageColor**：getrgb。**ImageStat**：getextrema。
 - **ImageEnhance**：brightness/contrast/color/sharpness。
 - **ImageFilter**：BLUR·SMOOTH(S)·SHARPEN·DETAIL·EDGE_ENHANCE(MORE)·FIND_EDGES·CONTOUR·EMBOSS·UNSHARP·BoxBlur·GaussianBlur·Median/Min/Max/Mode/Rank —— **卷积已按 Pillow `Filter.c` 精确对齐（含浮点/边界/3×3 翻转）**。
 - **ImageStat**：mean/median/extrema/stddev/sum。
 - **ImageDraw**：point/line/rectangle/rounded_rectangle/ellipse/polygon/arc。**ImageFont**：stb_truetype 文字。
 
-差分测试当前 **63 项全部通过（max=0）**——含 `resize.{nearest,bilinear,lanczos}`（已按 Pillow
+差分测试当前 **68 项全部通过（max=0）**——含 `resize.{nearest,bilinear,lanczos}`（已按 Pillow
 `Resample.c` 定点算法精确对齐）、全部 transpose / Ops / Chops / Enhance / Filter。GIF 镜像与源逐像素 **maxdiff=0**。
 
 ## 写新算子

@@ -170,6 +170,19 @@ void* img_enhance(void* p, const char* kind, float factor) {
     return out;
 }
 
+// ImageChops.composite(a,b,mask)：out = a + (b-a)*mask/255（逐通道，含 A）
+void* img_chops_composite(void* ap, void* bp, void* mp) {
+    Image* a = (Image*)ap; Image* b = (Image*)bp; Image* m = (Image*)mp;
+    if (!a || !b || !m || a->w != b->w || a->h != b->h) return nullptr;
+    Image* ra = to_rgba(a); Image* rb = to_rgba(b); Image* rm = to_rgba(m);
+    Image* out = dup_img(ra);
+    for (int f = 0; f < out->n; ++f) {
+        uint8_t* pa = out->frames[f].data.data(); uint8_t* pb = rb->frames[f].data.data(); uint8_t* pm = rm->frames[f].data.data();
+        for (size_t i = 0; i < npx(a); ++i) { int mm = pm[i * 4]; for (int c = 0; c < 4; ++c) pa[i * 4 + c] = (uint8_t)((pa[i * 4 + c] * mm + pb[i * 4 + c] * (255 - mm) + 127) / 255); }
+    }
+    delete ra; delete rb; delete rm; return out;
+}
+
 // ImageOps.pad：等比缩放到放进 (w,h)，再按 centering 贴到 (w,h) 的纯色底上
 void* img_ops_pad(void* p, int w, int h, const char* resample, int color_rgba, float cx, float cy) {
     Image* im = (Image*)p; if (!im || w <= 0 || h <= 0) return nullptr;

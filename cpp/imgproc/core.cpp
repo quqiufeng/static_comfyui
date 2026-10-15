@@ -254,6 +254,27 @@ void img_u32_set(void* p, long off, unsigned int v) { memcpy((char*)p + off, &v,
 
 unsigned char* img_data_ptr(void* p, int i) { return img_frame_ptr(p, i); }
 
+void* img_frame(void* p, int i) {
+    Image* im = (Image*)p; if (!im || i < 0 || i >= im->n) return nullptr;
+    Image* o = new Image(); o->w = im->w; o->h = im->h; o->n = 1; o->loop = 0; o->mode = im->mode;
+    o->frames.push_back(im->frames[i]);
+    return o;
+}
+int img_set_frame(void* p, int i, void* fp) {
+    Image* im = (Image*)p; Image* f = (Image*)fp;
+    if (!im || !f || f->n < 1 || i < 0 || i >= im->n) return -1;
+    im->frames[i] = f->frames[0];
+    return 0;
+}
+void* img_append_frame(void* p, void* fp) {
+    Image* im = (Image*)p; Image* f = (Image*)fp;
+    if (!im || !f || f->n < 1) return nullptr;
+    Image* o = new Image(*im);
+    o->frames.push_back(f->frames[0]);
+    o->n = (int)o->frames.size();
+    return o;
+}
+
 void* img_frombytes(const char* mode, int w, int h, void* data, int len) {
     if (!mode || w <= 0 || h <= 0 || !data) return nullptr;
     std::string m = mode;

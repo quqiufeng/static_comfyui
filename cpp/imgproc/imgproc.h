@@ -109,6 +109,11 @@ int         img_draw_arc(void* im, int x0, int y0, int x1, int y1, float start, 
 
 /* ==================== 数据进出 / 通道 / 更多 Ops ==================== */
 unsigned char* img_data_ptr(void* im, int frame);                            // 原始像素首地址
+void*       img_frame(void* im, int i);                                      // 取单帧 -> 新图
+int         img_set_frame(void* im, int i, void* frame);
+void*       img_append_frame(void* im, void* frame);                         // 追加一帧
+void*       img_chops_composite(void* a, void* b, void* mask);               // a*(1-mask)+b*mask
+int         img_getextrema(void* im, char* out_csv, int outlen);             // rmin,rmax,gmin,gmax,...
 void*       img_frombytes(const char* mode, int w, int h, void* data, int len);
 int         img_tobytes(void* im, int frame, const char* mode, void* out, int outlen);
 void*       img_getchannel(void* im, int ch);                                // -> L 图（0R1G2B3A）
