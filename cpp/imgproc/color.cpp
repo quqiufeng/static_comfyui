@@ -1,3 +1,4 @@
+#include <unordered_map>
 // color.cpp — 模式转换 / 拆分合并 / point(LUT) / 调色板 / 量化（median cut）
 #include "imgproc.h"
 #include "imgproc_internal.h"
@@ -245,6 +246,27 @@ int img_putpalette(void* p, const char* rgb_csv) {
     if (pal.empty()) return -1;
     Image* o = quantize_to_P(im, (int)pal.size(), &pal);
     *im = *o; delete o; return 0;
+}
+
+// Image.getcolors：返回 (count,r,g,b) 列表（按颜色排序），超 maxcolors 返回空
+int img_getcolors(void* p, int maxcolors, char* out, int outlen) {
+    Image* im = (Image*)p; if (!im || !out) return -1;
+    Image* rg = as_rgba(im);
+    std::vector<std::pair<uint32_t, int>> cnt;
+    std::unordered_map<uint32_t, int> idx;
+    for (size_t i = 0; i < npx(rg); ++i) {
+        uint8_t* q = rg->frames[0].data.data() + i * 4;
+        uint32_t k = ((uint32_t)q[0] << 16) | ((uint32_t)q[1] << 8) | q[2];
+        auto it = idx.find(k);
+        if (it == idx.end()) { idx[k] = (int)cnt.size(); cnt.push_back({k, 1}); if ((int)cnt.size() > maxcolors) { if (rg != im) delete rg; out[0] = 0; return 1; } }
+        else cnt[it->second].second++;
+    }
+    if (rg != im) delete rg;
+    std::sort(cnt.begin(), cnt.end(), [](const std::pair<uint32_t, int>& a, const std::pair<uint32_t, int>& b) { return a.first < b.first; });
+    std::string s;
+    for (auto& e : cnt) { char b[48]; snprintf(b, 48, "%d,%d,%d,%d;", e.second, (e.first >> 16) & 0xFF, (e.first >> 8) & 0xFF, e.first & 0xFF); s += b; }
+    if ((int)s.size() >= outlen) s.resize(outlen - 1);
+    strcpy(out, s.c_str()); return 0;
 }
 
 // Image.remap_palette：按 data 重排 P 图索引

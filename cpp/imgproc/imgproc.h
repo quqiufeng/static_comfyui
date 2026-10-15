@@ -73,6 +73,7 @@ void*       img_point(void* im, int channel, const char* lut_csv);          // 2
 void*       img_quantize(void* im, int colors, int method);                 // 0 median,1 maxcov,2 fastoctree
 int         img_putpalette(void* im, const char* rgb_csv);
 void*       img_remap_palette(void* im, const char* data_csv);
+int         img_getcolors(void* im, int maxcolors, char* out_csv, int outlen);
 int         img_getpalette(void* im, char* out_csv, int out_len);
 
 /* ============================ ImageOps ============================ */

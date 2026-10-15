@@ -310,6 +310,22 @@ try:
 except Exception as e:
     results.append(("quantize", "ERR", repr(e)[:60], 999))
 
+# ---- getcolors ----
+try:
+    pil_gc = sorted((c, tuple(col)) for c, col in (img_rgb.getcolors(1 << 20) or []))
+    buf = C.create_string_buffer(65536); P.img_getcolors(h_rgb, 1 << 20, buf, 65536)
+    our_gc = []
+    for part in buf.value.decode().rstrip(";").split(";"):
+        if not part:
+            continue
+        c, r, g, b = [int(x) for x in part.split(",")]
+        our_gc.append((c, (r, g, b)))
+    our_gc = sorted(our_gc)
+    ok = pil_gc == our_gc
+    results.append(("getcolors", "PASS" if ok else "DIFF", f"{len(pil_gc)} vs {len(our_gc)}", 0 if ok else 1))
+except Exception as e:
+    results.append(("getcolors", "ERR", repr(e)[:60], 999))
+
 # 报告
 print(f"{'case':28} {'st':4}  detail")
 fails = 0
