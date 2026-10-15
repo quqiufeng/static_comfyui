@@ -1417,7 +1417,7 @@ index a1012ca..7b5f056 100644
  
          void test() {
 diff --git a/src/name_conversion.cpp b/src/name_conversion.cpp
-index 6f1b598..d76e090 100644
+index 6f1b598..53951b7 100644
 --- a/src/name_conversion.cpp
 +++ b/src/name_conversion.cpp
 @@ -1223,6 +1223,12 @@ std::string convert_sep_to_dot(std::string name) {
@@ -1443,7 +1443,7 @@ index 6f1b598..d76e090 100644
 +    //   down_blocks.0.motion_modules.0...attention_blocks.0.to_q_lora.down.weight
 +    // Detect them explicitly so the suffix/prefix normalization below applies.
 +    bool is_motion_lora = false;
-+    if (!is_lora && contains(name, ".motion_modules.")) {
++    if (contains(name, ".motion_modules.")) {
 +        static const std::vector<std::string> motion_lora_suffix_vec = {
 +            ".lora_down.weight",
 +            ".lora_mid.weight",

@@ -266,7 +266,7 @@ def sd_xxx(pipeline: ptr, a: str, b: float) -> int:
 | FFI 传不了字符串数组 | C 侧收 CSV/换行串并 split；StaticPy 侧传单串 |
 | 适配层帧 buffer 指针失效 | `std::vector<std::vector<uint8_t>>` 先 `reserve()` 再 `push_back`，否则 realloc 使已存的 `sd_image_t::data` 悬空 |
 | sd.cpp 结构体插字段后偏移变化 | 结构体中间插字段会改后续偏移 → 必须连同适配层重编；`*params = {}` 会清零新字段 |
-| 运动 LoRA 不生效 | sd.cpp lora 键约定是 `lora.<模型张量名>.lora_down`；motion 块在模型里嵌于 `model.diffusion_model.motion_module.*`，而 LoRA 键在 UNet 顶层 → 在 `name_conversion.cpp` 识别并重嵌；`convert_sep_to_dot` 保护词需含 `motion_module(s)/attention_blocks/temporal_transformer`，否则 `_` 被拆坏 |
+| 运动 LoRA 不生效 | sd.cpp lora 键约定是 `lora.<模型张量名>.lora_down`；motion 块在模型里嵌于 `model.diffusion_model.motion_module.*`，而 LoRA 键在 UNet 顶层 → 在 `name_conversion.cpp` 识别并重嵌；`convert_sep_to_dot` 保护词需含 `motion_module(s)/attention_blocks/temporal_transformer`，否则 `_` 被拆坏。**注意**：lora 文件经 loader 已加 `lora.` 前缀（`is_lora` 一开始就是 true），运动键检测不能用 `!is_lora` 守卫，否则永远不触发（本次踩过） |
 | 改了 `/opt/sd` 却没重编库 | 见下方重编顺序第 1 步 |
 
 ### 重编顺序（改哪层编哪层）
