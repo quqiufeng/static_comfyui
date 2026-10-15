@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 """difftest.py — 自动化差分测试：Pillow vs libimgproc，逐像素比对。
 
 用法: /data/venv/bin/python imgproc/difftest.py [-v]
@@ -240,6 +241,30 @@ def our_extrema():
         a[0, c * 2] = v[c * 2]; a[0, c * 2 + 1] = v[c * 2 + 1]
     return P.from_np(a)
 case("stat.extrema", pil_extrema, our_extrema, tol=0)
+
+# ---- ImageFont / ImageDraw.text（FreeType；同引擎，判 ink bbox + mean）----
+try:
+    from PIL import ImageFont, ImageDraw
+    FPATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+    if os.path.exists(FPATH):
+        TW, TH = 200, 60
+        pim = Image.new("RGB", (TW, TH), (0, 0, 0))
+        ImageDraw.Draw(pim).text((10, 10), "Hello", font=ImageFont.truetype(FPATH, 20), fill=(255, 255, 255))
+        pa = np.array(pim)[:, :, 0].astype(int)
+        hc = P.img_new(TW, TH); P.img_fill(hc, 0x000000FF)
+        fo = P.img_font_load(FPATH.encode(), 20.0)
+        P.img_draw_text(hc, 10, 10, b"Hello", fo, 0xFFFFFFFF)
+        oa = P.to_np(hc)[:, :, 0].astype(int)
+        def inkbb(a):
+            w = np.argwhere(a > 0)
+            return w.min(0) if len(w) else None
+        bbp, bbo = inkbb(pa), inkbb(oa)
+        bd = int(np.abs(bbp - bbo).max()) if bbp is not None and bbo is not None else 99
+        mean = float(np.abs(pa - oa).mean())
+        ok = bd <= 1 and mean < 2.0
+        results.append(("text.render", "PASS" if ok else "DIFF", f"bboxΔ={bd} mean={mean:.3f}", bd))
+except Exception as e:
+    results.append(("text.render", "ERR", repr(e)[:60], 999))
 
 # 报告
 print(f"{'case':28} {'st':4}  detail")

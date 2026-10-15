@@ -1,7 +1,8 @@
 // draw.cpp — ImageDraw（点/线/矩形/圆角矩形/椭圆/多边形/弧）+ ImageFont（stb_truetype）
 #include "imgproc.h"
 #include "imgproc_internal.h"
-#include "stb_truetype.h"
+#include <ft2build.h>
+#include FT_FREETYPE_H
 
 namespace {
 void ensure_rgba(Image* im) { if (im->frames[0].bpp != 4) { Image* t = to_rgba(im); *im = *t; delete t; } }
@@ -160,59 +161,73 @@ int img_draw_chord(void* p, int x0, int y0, int x1, int y1, float s, float e, in
     return 0;
 }
 
-// ---------------- ImageFont ----------------
+// ---------------- ImageFont（FreeType，运行时链接 libfreetype.so.6，对齐 Pillow）----------------
+#define FT_PIXEL(x) ((((x) + 32) & -64) >> 6)
+static FT_Library g_ft = nullptr;
+static void ft_init() { if (!g_ft) FT_Init_FreeType(&g_ft); }
+
 void* img_font_load(const char* ttf_path, float pxsz) {
-    FILE* fp = fopen(ttf_path, "rb"); if (!fp) return nullptr;
-    fseek(fp, 0, SEEK_END); long sz = ftell(fp); fseek(fp, 0, SEEK_SET);
-    Font* f = new Font(); f->ttf.resize(sz);
-    if (fread(f->ttf.data(), 1, sz, fp) != (size_t)sz) { fclose(fp); delete f; return nullptr; }
-    fclose(fp);
-    stbtt_fontinfo* info = new stbtt_fontinfo();
-    if (!stbtt_InitFont(info, f->ttf.data(), 0)) { delete info; delete f; return nullptr; }
-    f->info = info; f->px = pxsz; f->data = f->ttf.data();
-    f->scale = stbtt_ScaleForPixelHeight(info, pxsz);
-    int a, d, lg; stbtt_GetFontVMetrics(info, &a, &d, &lg);
-    f->ascent = a * f->scale; f->descent = d * f->scale; f->linegap = lg * f->scale;
+    if (!ttf_path) return nullptr;
+    ft_init();
+    FT_Face face;
+    if (FT_New_Face(g_ft, ttf_path, 0, &face)) return nullptr;
+    FT_Size_RequestRec req;
+    req.type = FT_SIZE_REQUEST_TYPE_NOMINAL;
+    req.width = (FT_Long)(pxsz * 64);
+    req.height = (FT_Long)(pxsz * 64);
+    req.horiResolution = 0; req.vertResolution = 0;
+    FT_Request_Size(face, &req);
+    Font* f = new Font();
+    f->info = face;
+    f->px = pxsz;
+    f->ascent = FT_PIXEL(face->size->metrics.ascender);
+    f->descent = FT_PIXEL(face->size->metrics.descender);
     return f;
 }
-int img_font_free(void* fp) { Font* f = (Font*)fp; if (f) { delete (stbtt_fontinfo*)f->info; delete f; } return 0; }
-int img_font_text_height(void* fp) { Font* f = (Font*)fp; return f ? (int)std::round(f->ascent - f->descent) : 0; }
+int img_font_free(void* fp) { Font* f = (Font*)fp; if (f) { FT_Done_Face((FT_Face)f->info); delete f; } return 0; }
+int img_font_text_height(void* fp) { Font* f = (Font*)fp; if (!f) return 0; FT_Face face = (FT_Face)f->info; long a = FT_PIXEL(face->size->metrics.ascender), d = FT_PIXEL(face->size->metrics.descender); return (int)(a - d); }
 
-static int cp_width(Font* f, int cp) { int adv, lsb; stbtt_GetCodepointHMetrics((stbtt_fontinfo*)f->info, cp, &adv, &lsb); return (int)std::round(adv * f->scale); }
 int img_font_text_width(void* fp, const char* s) {
     Font* f = (Font*)fp; if (!f || !s) return 0;
-    int total = 0; int prev = 0;
+    FT_Face face = (FT_Face)f->info;
+    long pos = 0;
     for (const unsigned char* p = (const unsigned char*)s; *p;) {
         int cp = *p; int len = 1;
         if (cp >= 0xF0) { cp = ((p[0] & 7) << 18) | ((p[1] & 63) << 12) | ((p[2] & 63) << 6) | (p[3] & 63); len = 4; }
         else if (cp >= 0xE0) { cp = ((p[0] & 15) << 12) | ((p[1] & 63) << 6) | (p[2] & 63); len = 3; }
         else if (cp >= 0xC0) { cp = ((p[0] & 31) << 6) | (p[1] & 63); len = 2; }
-        if (prev) total += (int)std::round(stbtt_GetCodepointKernAdvance((stbtt_fontinfo*)f->info, prev, cp) * f->scale);
-        total += cp_width(f, cp); prev = cp; p += len;
+        FT_UInt idx = FT_Get_Char_Index(face, cp);
+        if (FT_Load_Glyph(face, idx, FT_LOAD_DEFAULT)) { p += len; continue; }
+        pos += face->glyph->metrics.horiAdvance;
+        p += len;
     }
-    return total;
+    return (int)FT_PIXEL(pos);
 }
 
 int img_draw_text(void* ip, int x, int y, const char* s, void* fp, int rgba) {
     Image* im = (Image*)ip; Font* f = (Font*)fp; if (!im || !f || !s) return -1; ensure_rgba(im);
-    stbtt_fontinfo* info = (stbtt_fontinfo*)f->info;
-    float fx = x; int prev = 0;
+    FT_Face face = (FT_Face)f->info;
+    long ascent = FT_PIXEL(face->size->metrics.ascender);
+    long baseline = y + ascent;   // anchor "la"：ascender 在 y
+    long pos = 0;
     for (const unsigned char* p = (const unsigned char*)s; *p;) {
         int cp = *p; int len = 1;
         if (cp >= 0xF0) { cp = ((p[0] & 7) << 18) | ((p[1] & 63) << 12) | ((p[2] & 63) << 6) | (p[3] & 63); len = 4; }
         else if (cp >= 0xE0) { cp = ((p[0] & 15) << 12) | ((p[1] & 63) << 6) | (p[2] & 63); len = 3; }
         else if (cp >= 0xC0) { cp = ((p[0] & 31) << 6) | (p[1] & 63); len = 2; }
-        if (prev) fx += stbtt_GetCodepointKernAdvance(info, prev, cp) * f->scale;
-        int gx, gy, gw, gh, xo, yo;
-        unsigned char* bmp = stbtt_GetCodepointBitmap(info, 0, f->scale, cp, &gw, &gh, &xo, &yo);
-        for (int by = 0; by < gh; ++by) for (int bx = 0; bx < gw; ++bx) {
-            int cov = bmp[by * gw + bx]; if (!cov) continue;
-            int dxx = (int)fx + xo + bx, dyy = y + yo + by;
-            int col = pack_rgba(CH_R(rgba), CH_G(rgba), CH_B(rgba), CH_A(rgba) * cov / 255);
-            blend_px(im, dxx, dyy, col);
+        FT_UInt idx = FT_Get_Char_Index(face, cp);
+        if (!FT_Load_Glyph(face, idx, FT_LOAD_DEFAULT | FT_LOAD_RENDER)) {
+            int px = (int)FT_PIXEL(pos);
+            FT_Bitmap& bm = face->glyph->bitmap;
+            int left = face->glyph->bitmap_left, top = face->glyph->bitmap_top;
+            for (unsigned by = 0; by < bm.rows; ++by) for (unsigned bx = 0; bx < bm.width; ++bx) {
+                int cov = bm.pixel_mode == FT_PIXEL_MODE_GRAY ? bm.buffer[by * bm.pitch + bx] : (bm.buffer[by * bm.pitch + (bx >> 3)] & (0x80 >> (bx & 7)) ? 255 : 0);
+                if (!cov) continue;
+                blend_px(im, x + px + left + (int)bx, (int)baseline - top + (int)by, pack_rgba(CH_R(rgba), CH_G(rgba), CH_B(rgba), CH_A(rgba) * cov / 255));
+            }
+            pos += face->glyph->advance.x;
         }
-        stbtt_FreeBitmap(bmp, nullptr);
-        fx += cp_width(f, cp); prev = cp; p += len;
+        p += len;
     }
     return 0;
 }

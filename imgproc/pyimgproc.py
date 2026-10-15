@@ -31,6 +31,7 @@ img_height = _sig("img_height", _ci, [_p])
 img_count = _sig("img_count", _ci, [_p])
 img_mode = _sig("img_mode", C.c_char_p, [_p])
 img_save = _sig("img_save", _ci, [_p, _cs])
+img_fill = _sig("img_fill", _ci, [_p, _ci])
 img_set_delay = _sig("img_set_delay", _ci, [_p, _ci, _ci])
 
 img_crop = _sig("img_crop", _p, [_p, _ci, _ci, _ci, _ci])
