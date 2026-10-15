@@ -7,5 +7,6 @@ echo ">>> [1/2] libimgproc.so"
 bash "$ROOT/cpp/imgproc/build_cpp.sh"
 echo ">>> [2/2] mirror_gif (StaticPy)"
 mkdir -p /tmp/staticpy-cache/imgproc
-( cd "$ROOT" && bash staticpy/static_build_comfycli.sh imgproc/mirror_gif.static.py imgproc/mirror_gif imgproc/imgproc_ffi.scm )
+( cd "$ROOT" && bash staticpy/static_build_comfycli.sh imgproc/mirror_gif.static.py imgproc/mirror_gif imgproc/imgproc_ffi.scm \
+      && bash staticpy/static_build_comfycli.sh imgproc/pilcli.static.py imgproc/pilcli imgproc/imgproc_ffi.scm )
 echo "=== build done ==="

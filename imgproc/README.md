@@ -23,6 +23,7 @@ imgproc/
 ├── build.sh                 # 一键：C++ 库 + StaticPy ELF
 ├── imgproc_ffi.scm
 ├── mirror_gif.static.py     # 示例算子：GIF 逐帧镜像（无损，走索引帧）
+├── pilcli.static.py         # StaticPy 版图像处理 CLI（convert/resize/crop/transpose/rotate/invert/...）
 ├── pyimgproc.py             # libimgproc.so 的 ctypes 绑定（差分测试用）
 ├── pil_surface.py           # 自省 Pillow 公开 API → 覆盖面清单
 ├── pil_api.md               # 上面生成的清单
