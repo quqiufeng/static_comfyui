@@ -8,6 +8,8 @@
 #include "stb_image.h"
 #include "stb_image_write.h"
 #include "stb_truetype.h"
+#include <webp/decode.h>
+#include <webp/encode.h>
 
 // ---------------- 模型工具 ----------------
 Image* new_rgba(int w, int h, int n) {
@@ -183,6 +185,22 @@ void* img_open(const char* path) {
     FILE* fp = fopen(path, "rb"); if (!fp) return nullptr;
     unsigned char sig[6] = {0}; size_t rd = fread(sig, 1, 6, fp); fclose(fp);
     if (rd == 6 && (memcmp(sig, "GIF87a", 6) == 0 || memcmp(sig, "GIF89a", 6) == 0)) return decode_gif(path);
+    // WebP（RIFF....WEBP）
+    {
+        FILE* fp2 = fopen(path, "rb"); unsigned char riff[12] = {0};
+        if (fp2) { size_t _r = fread(riff, 1, 12, fp2); (void)_r; fclose(fp2); }
+        if (memcmp(riff, "RIFF", 4) == 0 && memcmp(riff + 8, "WEBP", 4) == 0) {
+            FILE* f3 = fopen(path, "rb"); fseek(f3, 0, SEEK_END); long sz = ftell(f3); fseek(f3, 0, SEEK_SET);
+            std::vector<uint8_t> buf(sz); if (fread(buf.data(), 1, sz, f3) != (size_t)sz) { fclose(f3); return nullptr; } fclose(f3);
+            int w = 0, h = 0;
+            uint8_t* rgba = WebPDecodeRGBA(buf.data(), sz, &w, &h);
+            if (!rgba) return nullptr;
+            Image* im = new_rgba(w, h, 1);
+            memcpy(im->frames[0].data.data(), rgba, (size_t)w * h * 4);
+            WebPFree(rgba);
+            return im;
+        }
+    }
     int w, h, ch; unsigned char* d = stbi_load(path, &w, &h, &ch, 4);
     if (!d) return nullptr;
     Image* im = new_rgba(w, h, 1);
@@ -214,6 +232,10 @@ int img_save(void* p, const char* path) {
     else if (ends_with(path, ".jpg") || ends_with(path, ".jpeg")) ok = stbi_write_jpg(path, rg->w, rg->h, 4, rg->frames[0].data.data(), 95);
     else if (ends_with(path, ".bmp")) ok = stbi_write_bmp(path, rg->w, rg->h, 4, rg->frames[0].data.data());
     else if (ends_with(path, ".tga")) ok = stbi_write_tga(path, rg->w, rg->h, 4, rg->frames[0].data.data());
+    else if (ends_with(path, ".webp")) {
+        uint8_t* out = nullptr; size_t len = WebPEncodeRGBA(rg->frames[0].data.data(), rg->w, rg->h, rg->w * 4, 80.0f, &out);
+        if (len) { FILE* f = fopen(path, "wb"); if (f) { fwrite(out, 1, len, f); fclose(f); ok = 1; } WebPFree(out); }
+    }
     else if (ends_with(path, ".gif")) ok = encode_gif(im, path) == 0;
     else ok = stbi_write_png(path, rg->w, rg->h, 4, rg->frames[0].data.data(), rg->w * 4);
     if (rg != im) delete rg;

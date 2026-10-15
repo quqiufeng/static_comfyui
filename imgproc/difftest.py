@@ -326,6 +326,19 @@ try:
 except Exception as e:
     results.append(("getcolors", "ERR", repr(e)[:60], 999))
 
+# ---- WebP 编解码 ----
+try:
+    wpath = "/tmp/opencode/dt.webp"
+    img_rgb.save(wpath, quality=90)
+    pw = np.array(Image.open(wpath).convert("RGB")).astype(int)
+    ow = P.to_np(P.img_open(wpath.encode()))[:, :, :3].astype(int)
+    d = 0 if pw.shape == ow.shape else 999
+    if d == 0:
+        d = int(np.abs(pw - ow).max())
+    results.append(("webp.decode", "PASS" if d == 0 else "DIFF", f"maxΔ={d}", d))
+except Exception as e:
+    results.append(("webp.decode", "ERR", repr(e)[:60], 999))
+
 # 报告
 print(f"{'case':28} {'st':4}  detail")
 fails = 0
