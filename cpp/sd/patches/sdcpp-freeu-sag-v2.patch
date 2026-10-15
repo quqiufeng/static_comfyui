@@ -1953,7 +1953,7 @@ index f2f8a8c..84e816c 100644
  
      std::vector<float> process_timesteps(const std::vector<float>& timesteps,
 diff --git a/src/pipeline/image.cpp b/src/pipeline/image.cpp
-index 4c90150..0c81e32 100644
+index 4c90150..ab72637 100644
 --- a/src/pipeline/image.cpp
 +++ b/src/pipeline/image.cpp
 @@ -114,6 +114,29 @@ namespace sd::pipeline {
@@ -1986,7 +1986,7 @@ index 4c90150..0c81e32 100644
      static std::optional<ImageGenerationLatents> prepare_image_generation_latents(StableDiffusionGGML* sd,
                                                                                    const sd_img_gen_params_t* sd_img_gen_params,
                                                                                    GenerationRequest* request,
-@@ -193,7 +216,28 @@ namespace sd::pipeline {
+@@ -193,7 +216,34 @@ namespace sd::pipeline {
              mask_image_tensor = sd::ops::round(mask_image_tensor);
          }
  
@@ -2005,7 +2005,13 @@ index 4c90150..0c81e32 100644
 +                shape[3] = n_frames;
 +                sd::Tensor<float> stacked(shape);
 +                for (int f = 0; f < n_frames; ++f) {
-+                    int src = f < n_control_frames ? f : n_control_frames - 1;
++                    // Evenly sample the hint sequence across the whole cycle when
++                    // there are more hint frames than output frames (otherwise the
++                    // first N would only cover part of the motion).
++                    int src = n_control_frames >= n_frames
++                                  ? static_cast<int>(static_cast<long long>(f) * n_control_frames / n_frames)
++                                  : (f < n_control_frames ? f : n_control_frames - 1);
++                    if (src >= n_control_frames) src = n_control_frames - 1;
 +                    auto cf = f == 0 ? first
 +                                     : sd_image_to_tensor(sd_img_gen_params->control_frames[src], request->width, request->height);
 +                    sd::ops::slice_assign(&stacked, 3, f, f + 1, cf);
@@ -2016,7 +2022,7 @@ index 4c90150..0c81e32 100644
              control_image_tensor = sd_image_to_tensor(sd_img_gen_params->control_image, request->width, request->height);
          }
  
-@@ -247,10 +291,18 @@ namespace sd::pipeline {
+@@ -247,10 +297,44 @@ namespace sd::pipeline {
          }
  
          if (!control_image_tensor.empty()) {
@@ -2031,15 +2037,41 @@ index 4c90150..0c81e32 100644
 +                    return std::nullopt;
 +                }
 +            } else {
-+                control_latent = sd->encode_first_stage(control_image_tensor);
-+                if (control_latent.empty()) {
-+                    LOG_ERROR("failed to encode control image");
-+                    return std::nullopt;
++                const bool per_frame_control = sd_img_gen_params->control_frames != nullptr &&
++                                               sd_img_gen_params->control_frames_size > 0 &&
++                                               control_image_tensor.dim() >= 4 &&
++                                               control_image_tensor.shape()[3] > 1;
++                if (per_frame_control) {
++                    // Encode each hint frame separately to bound VAE memory
++                    // (a single N-frame encode OOMs at higher resolutions).
++                    const int n     = static_cast<int>(control_image_tensor.shape()[3]);
++                    const int n_src = sd_img_gen_params->control_frames_size;
++                    for (int f = 0; f < n; ++f) {
++                        int src = n_src >= n
++                                      ? static_cast<int>(static_cast<long long>(f) * n_src / n)
++                                      : (f < n_src ? f : n_src - 1);
++                        if (src >= n_src) src = n_src - 1;
++                        auto frame_pixels = sd_image_to_tensor(sd_img_gen_params->control_frames[src], request->width, request->height);
++                        auto frame_latent = sd->encode_first_stage(frame_pixels);
++                        if (frame_latent.empty()) {
++                            LOG_ERROR("failed to encode control frame %d", f);
++                            return std::nullopt;
++                        }
++                        control_latent = control_latent.empty()
++                                             ? frame_latent
++                                             : sd::ops::concat(control_latent, frame_latent, 3);
++                    }
++                } else {
++                    control_latent = sd->encode_first_stage(control_image_tensor);
++                    if (control_latent.empty()) {
++                        LOG_ERROR("failed to encode control image");
++                        return std::nullopt;
++                    }
 +                }
              }
          }
  
-@@ -523,6 +575,26 @@ namespace sd::pipeline {
+@@ -523,6 +607,26 @@ namespace sd::pipeline {
          int64_t t1 = ggml_time_ms();
          LOG_INFO("get_learned_condition completed, taking %.2fs", (t1 - prepare_start_ms) * 1.0f / 1000);
  
@@ -2066,7 +2098,7 @@ index 4c90150..0c81e32 100644
          ImageGenerationEmbeds embeds;
          embeds.img_uncond = std::move(img_uncond);
          embeds.cond       = std::move(cond);
-@@ -638,6 +710,127 @@ namespace sd::pipeline {
+@@ -638,6 +742,127 @@ namespace sd::pipeline {
          return result_images;
      }
  
@@ -2194,7 +2226,7 @@ index 4c90150..0c81e32 100644
      static sd::Tensor<float> upscale_hires_latent(StableDiffusionGGML* sd,
                                                    const sd::Tensor<float>& latent,
                                                    const GenerationRequest& request,
-@@ -658,6 +851,17 @@ namespace sd::pipeline {
+@@ -658,6 +883,17 @@ namespace sd::pipeline {
              return target_shape;
          };
  
@@ -2212,7 +2244,7 @@ index 4c90150..0c81e32 100644
          if (request.hires.upscaler == SD_HIRES_UPSCALER_LATENT ||
              request.hires.upscaler == SD_HIRES_UPSCALER_LATENT_NEAREST ||
              request.hires.upscaler == SD_HIRES_UPSCALER_LATENT_NEAREST_EXACT ||
-@@ -809,6 +1013,52 @@ namespace sd::pipeline {
+@@ -809,6 +1045,52 @@ namespace sd::pipeline {
              return false;
          sd->apply_circular_axes(sd_img_gen_params->circular_x, sd_img_gen_params->circular_y);
  
@@ -2265,7 +2297,7 @@ index 4c90150..0c81e32 100644
          const RefImageParams ref_image_params = sd->resolve_ref_image_params(sd_img_gen_params->ref_image_args);
  
          ImageVaeAxesGuard axes_guard(sd, sd_img_gen_params, request);
-@@ -979,6 +1229,20 @@ namespace sd::pipeline {
+@@ -979,6 +1261,20 @@ namespace sd::pipeline {
                                                                             sd::ops::InterpolateMode::NearestMax);
                  }
  
@@ -2286,7 +2318,7 @@ index 4c90150..0c81e32 100644
                  int64_t hires_sample_start = ggml_time_ms();
                  sd::Tensor<float> x_0      = sd->sample(sd->diffusion_model,
                                                          true,
-@@ -987,7 +1251,7 @@ namespace sd::pipeline {
+@@ -987,7 +1283,7 @@ namespace sd::pipeline {
                                                          embeds.cond,
                                                          embeds.uncond,
                                                          embeds.img_uncond,
