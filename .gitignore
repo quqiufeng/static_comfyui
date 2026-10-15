@@ -255,3 +255,8 @@ ggml_repo/
 *.ggml
 ggml_repo/
 cpp/face/facecli
+
+# imgproc 图像处理工具（构建产物）
+/imgproc/mirror_gif
+/imgproc/mirror_gif.so
+/cpp/imgproc/build/
