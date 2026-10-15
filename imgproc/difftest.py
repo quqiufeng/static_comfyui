@@ -312,6 +312,11 @@ try:
     om = np.frombuffer(C.string_at(P.img_frame_ptr(hm, 0), W * H), np.uint8).reshape(H, W)
     rm = float((pm.astype(int) == om.astype(int)).mean())
     results.append(("quantize.MAXCOVERAGE", "PASS" if rm > 0.999 else "DIFF", f"match={rm*100:.1f}%", 0 if rm > 0.999 else 1))
+    po = np.array(img_rgb.quantize(16, Image.Quantize.FASTOCTREE))
+    ho = P.img_quantize(h_rgb, 16, 2)
+    oo = np.frombuffer(C.string_at(P.img_frame_ptr(ho, 0), W * H), np.uint8).reshape(H, W)
+    ro = float((po.astype(int) == oo.astype(int)).mean())
+    results.append(("quantize.FASTOCTREE", "PASS" if ro > 0.999 else "DIFF", f"match={ro*100:.1f}%", 0 if ro > 0.999 else 1))
 except Exception as e:
     results.append(("quantize.MEDIANCUT", "ERR", repr(e)[:60], 999))
 

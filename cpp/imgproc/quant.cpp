@@ -152,8 +152,75 @@ static Image* maxcov_quantize(Image* rg, int colors) {
     return o;
 }
 
+
+// ---- Pillow QuantOctree.c 精确移植（FASTOCTREE）----
+struct QBucket { unsigned long long count=0, r=0, g=0, b=0, a=0; };
+struct QCube {
+    int rBits,gBits,bBits,aBits; unsigned rW,gW,bW,aW; unsigned rOff,gOff,bOff,aOff; size_t size;
+    std::vector<QBucket> buckets;
+    long pos(unsigned r,unsigned g,unsigned b,unsigned a) const { return (long)(r<<rOff | g<<gOff | b<<bOff | a<<aOff); }
+    long off(int r,int g,int b,int a) const { return pos(r>>(8-rBits), g>>(8-gBits), b>>(8-bBits), a>>(8-aBits)); }
+};
+static QCube mkCube(int r,int g,int b,int a){
+    QCube c; c.rBits=r<0?0:r; c.gBits=g<0?0:g; c.bBits=b<0?0:b; c.aBits=a<0?0:a;
+    c.rW=1<<c.rBits;c.gW=1<<c.gBits;c.bW=1<<c.bBits;c.aW=1<<c.aBits;
+    c.rOff=c.gBits+c.bBits+c.aBits;c.gOff=c.bBits+c.aBits;c.bOff=c.aBits;c.aOff=0;
+    c.size=(size_t)c.rW*c.gW*c.bW*c.aW; c.buckets.assign(c.size,QBucket());
+    return c;
+}
+static void addColor(QCube& c,int r,int g,int b,int a){ QBucket& bk=c.buckets[c.off(r,g,b,a)]; bk.count++; bk.r+=r; bk.g+=g; bk.b+=b; bk.a+=a; }
+static inline int CLIP8q(long long v){ return v<0?0:(v>255?255:(int)v); }
+static void avgBucket(const QBucket& bk,int&r,int&g,int&b,int&a){ if(bk.count){ r=CLIP8q((long long)(bk.r/bk.count)); g=CLIP8q((long long)(bk.g/bk.count)); b=CLIP8q((long long)(bk.b/bk.count)); a=CLIP8q((long long)(bk.a/bk.count)); } else { r=g=b=a=0; } }
+static unsigned long countUsed(const QCube& c){ unsigned long u=0; for(auto& x:c.buckets) if(x.count>0) u++; return u; }
+static QCube copyCube(const QCube& cube,int rB,int gB,int bB,int aB){
+    QCube res=mkCube(rB,gB,bB,aB);
+    unsigned sr[4]={0},dr[4]={0},width[4];
+    int cb[4]={cube.rBits,cube.gBits,cube.bBits,cube.aBits}, nb[4]={res.rBits,res.gBits,res.bBits,res.aBits};
+    unsigned cw[4]={cube.rW,cube.gW,cube.bW,cube.aW}, nw[4]={res.rW,res.gW,res.bW,res.aW};
+    for(int i=0;i<4;i++){ if(cb[i]>nb[i]){ dr[i]=cb[i]-nb[i]; width[i]=cw[i]; } else { sr[i]=nb[i]-cb[i]; width[i]=nw[i]; } }
+    for(unsigned r=0;r<width[0];r++)for(unsigned g=0;g<width[1];g++)for(unsigned b=0;b<width[2];b++)for(unsigned a=0;a<width[3];a++){
+        long sp=cube.pos(r>>sr[0],g>>sr[1],b>>sr[2],a>>sr[3]);
+        long dp=res.pos(r>>dr[0],g>>dr[1],b>>dr[2],a>>dr[3]);
+        const QBucket& s=cube.buckets[sp]; QBucket& d=res.buckets[dp];
+        d.count+=s.count;d.r+=s.r;d.g+=s.g;d.b+=s.b;d.a+=s.a;
+    }
+    return res;
+}
+static void subtractBuckets(QCube& cube,std::vector<QBucket>& bk,long start,long n){ for(long i=start;i<start+n;i++){ QBucket& s=bk[i]; if(s.count==0) continue; int r,g,b,a; avgBucket(s,r,g,b,a); QBucket& m=cube.buckets[cube.off(r,g,b,a)]; m.count-=s.count;m.r-=s.r;m.g-=s.g;m.b-=s.b;m.a-=s.a; } }
+static std::vector<QBucket> sortedPalette(const QCube& c){ std::vector<QBucket> b=c.buckets; std::stable_sort(b.begin(),b.end(),[](const QBucket&a,const QBucket&b){return a.count>b.count;}); return b; }
+static void addLookup(QCube& cube,std::vector<QBucket>& pal,long nColors,long offset){ for(long i=offset+nColors-1;i>=offset;i--){ int r,g,b,a; avgBucket(pal[i],r,g,b,a); cube.buckets[cube.off(r,g,b,a)].count=(unsigned long long)i; } }
+static std::vector<RGB> paletteArray(std::vector<QBucket>& pal,unsigned len){ std::vector<RGB> o(len); for(unsigned i=0;i<len;i++){int r,g,b,a;avgBucket(pal[i],r,g,b,a);o[i]={(uint8_t)r,(uint8_t)g,(uint8_t)b};} return o; }
+
+static Image* octree_quantize(Image* rg,int colors,int withAlpha){
+    int W=rg->w,H=rg->h; long nPixels=(long)W*H; uint8_t* data=rg->frames[0].data.data();
+    const unsigned int CLV[8]={4,4,4,0,2,2,2,0};
+    const unsigned int CLVA[8]={3,4,3,3,2,2,2,2};
+    const unsigned int* cb=withAlpha?CLVA:CLV;
+    QCube fine=mkCube(cb[0],cb[1],cb[2],cb[3]);
+    for(long i=0;i<nPixels;i++){uint8_t*q=data+i*4; addColor(fine,q[0],q[1],q[2],q[3]);}
+    QCube coarse=copyCube(fine,cb[4],cb[5],cb[6],cb[7]);
+    unsigned long nCoarse=countUsed(coarse); if(nCoarse>(unsigned long)colors) nCoarse=colors;
+    long nFine=colors-(long)nCoarse;
+    std::vector<QBucket> finePal=sortedPalette(fine);
+    subtractBuckets(coarse,finePal,0,nFine);
+    while(nCoarse>countUsed(coarse)){ long nAlready=nFine; nCoarse=countUsed(coarse); nFine=colors-(long)nCoarse; subtractBuckets(coarse, finePal, nAlready, nFine-nAlready); }
+    std::vector<QBucket> coarsePal=sortedPalette(coarse);
+    std::vector<QBucket> pal; pal.reserve(nCoarse+nFine);
+    pal.insert(pal.end(),coarsePal.begin(),coarsePal.begin()+nCoarse);
+    pal.insert(pal.end(),finePal.begin(),finePal.begin()+nFine);
+    QCube coarseLookup=mkCube(cb[4],cb[5],cb[6],cb[7]);
+    addLookup(coarseLookup,pal,(long)nCoarse,0);
+    QCube lookup=copyCube(coarseLookup,cb[0],cb[1],cb[2],cb[3]);
+    addLookup(lookup,pal,nFine,(long)nCoarse);
+    Image* o=new Image();o->w=W;o->h=H;o->n=1;o->mode="P";o->frames.resize(1);
+    Frame& d=o->frames[0];d.bpp=1;d.hasPalette=true;d.palette=paletteArray(pal,colors);d.data.assign(nPixels,0);
+    for(long i=0;i<nPixels;i++){uint8_t*q=data+i*4; d.data[i]=(uint8_t)lookup.buckets[lookup.off(q[0],q[1],q[2],q[3])].count;}
+    return o;
+}
+
 // 对齐 Pillow ImagingQuantize。仅 RGB（忽略 alpha）。
 void* img_quantize(void* p, int colors, int method) {
+    if (method == 2) { Image* im=(Image*)p; if(!im) return nullptr; Image* rg=(im->frames[0].bpp==4)?im:to_rgba(im); Image* o=octree_quantize(rg,colors,0); if(rg!=im) delete rg; return o; }
     if (method == 1) { Image* im=(Image*)p; if(!im) return nullptr; Image* rg=(im->frames[0].bpp==4)?im:to_rgba(im); Image* o=maxcov_quantize(rg, colors); if(rg!=im) delete rg; return o; }
     (void)method;
     Image* im = (Image*)p; if (!im || colors < 1 || colors > 256) return nullptr;
