@@ -181,6 +181,32 @@ case("getbbox", pil_bbox, our_bbox, tol=0)
 case("chops.offset", lambda: ImageChops.offset(img_rgb, 5, -3), lambda: P.img_chop_offset(h_rgb, 5, -3), tol=0)
 case("chops.add_const", lambda: ImageChops.add(img_rgb, Image.new("RGB", (W, H), (20, 20, 20))), lambda: P.img_chop_const(h_rgb, b"add", 20), tol=1)
 
+# ---- chops 变体 / stat / ImageOps.pad ----
+for op in ["add_modulo", "subtract_modulo", "soft_light", "hard_light", "overlay"]:
+    case(f"chops.{op}", lambda op=op: getattr(ImageChops, op)(img_rgb, img2), lambda op=op: P.img_chop(h_rgb, h2, op.encode()), tol=0)
+b1 = img_rgb.convert("1", dither=Image.Dither.NONE)
+b2 = img2.convert("1", dither=Image.Dither.NONE)
+hb1 = P.from_np(np.array(b1.convert("RGB")))
+hb2 = P.from_np(np.array(b2.convert("RGB")))
+for op in ["logical_and", "logical_or", "logical_xor"]:
+    case(f"chops.{op}", lambda op=op: getattr(ImageChops, op)(b1, b2).convert("RGB"), lambda op=op: P.img_chop(hb1, hb2, op.encode()), tol=0)
+
+def pil_stat(what):
+    st = ImageStat.Stat(img_rgb)
+    v = getattr(st, what)[0]
+    if isinstance(v, (tuple, list)):
+        v = v[0]
+    c = min(255, int(round(v))); return Image.new("RGB", (2, 2), (c, c, c))
+for what in ["mean", "median", "stddev", "sum"]:
+    def our_stat(what=what):
+        buf = C.create_string_buffer(256)
+        P.img_stat(h_rgb, what.encode(), buf, 256)
+        v = int(float(buf.value.decode().split(",")[0]))
+        return P.from_np(np.full((2, 2, 3), v if v < 256 else 255, np.uint8))
+    case(f"stat.{what}", lambda what=what: pil_stat(what), our_stat, tol=1)
+
+case("ops.pad", lambda: ImageOps.pad(img_rgb, (60, 60), Image.Resampling.LANCZOS, (10, 20, 30)), lambda: P.img_ops_pad(h_rgb, 60, 60, b"lanczos", 0x0A141EFF, 0.5, 0.5), tol=1)
+
 # 报告
 print(f"{'case':28} {'st':4}  detail")
 fails = 0

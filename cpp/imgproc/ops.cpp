@@ -97,6 +97,7 @@ void* img_chop(void* ap, void* bp, const char* op) {
     std::string o = op;
     Image* ra = to_rgba(a); Image* rb = to_rgba(b);
     Image* out = dup_img(ra);
+    bool logical = (o == "logical_and" || o == "logical_or" || o == "logical_xor");
     for (int f = 0; f < out->n; ++f) {
         uint8_t* pa = out->frames[f].data.data(); uint8_t* pb = rb->frames[f].data.data(); uint8_t* oa = ra->frames[f].data.data();
         for (size_t i = 0; i < npx(a); ++i) for (int c = 0; c < 3; ++c) {
@@ -109,13 +110,19 @@ void* img_chop(void* ap, void* bp, const char* op) {
             else if (o == "darker") v = std::min(x, y);
             else if (o == "lighter") v = std::max(x, y);
             else if (o == "blend") v = (x + y) / 2;
-            else if (o == "logical_and") v = x & y;
-            else if (o == "logical_or") v = x | y;
-            else if (o == "logical_xor") v = x ^ y;
+            else if (o == "soft_light") v = ((255 - x) * (x * y)) / 65536 + (x * (255 - ((255 - x) * (255 - y) / 255))) / 255;
+            else if (o == "hard_light") v = (y < 128) ? (x * y / 127) : (255 - ((255 - y) * (255 - x)) / 127);
+            else if (o == "overlay") v = (x < 128) ? (x * y / 127) : (255 - ((255 - x) * (255 - y)) / 127);
+            else if (o == "add_modulo") { pa[i * 4 + c] = (uint8_t)((x + y) & 0xFF); continue; }
+            else if (o == "subtract_modulo") { pa[i * 4 + c] = (uint8_t)((x - y) & 0xFF); continue; }
+            else if (o == "logical_and") { pa[i * 4 + c] = (x && y) ? 255 : 0; continue; }
+            else if (o == "logical_or") { pa[i * 4 + c] = (x || y) ? 255 : 0; continue; }
+            else if (o == "logical_xor") { pa[i * 4 + c] = ((x != 0) ^ (y != 0)) ? 255 : 0; continue; }
             else v = x;
             pa[i * 4 + c] = (uint8_t)clampi(v, 0, 255);
         }
     }
+    (void)logical;
     delete ra; delete rb; return out;
 }
 
@@ -161,6 +168,22 @@ void* img_enhance(void* p, const char* kind, float factor) {
         delete sm;
     }
     return out;
+}
+
+// ImageOps.pad：等比缩放到放进 (w,h)，再按 centering 贴到 (w,h) 的纯色底上
+void* img_ops_pad(void* p, int w, int h, const char* resample, int color_rgba, float cx, float cy) {
+    Image* im = (Image*)p; if (!im || w <= 0 || h <= 0) return nullptr;
+    float scale = std::min((float)w / im->w, (float)h / im->h);
+    int nw = std::max(1, (int)round(im->w * scale)), nh = std::max(1, (int)round(im->h * scale));
+    Image* r = (Image*)img_resize(im, nw, nh, resample);
+    Image* o = new_rgba(w, h, im->n); o->loop = im->loop;
+    img_fill(o, color_rgba);
+    int ox = (int)((w - nw) * cx), oy = (int)((h - nh) * cy);
+    if (o->frames[0].bpp != 4) { Image* t = to_rgba(o); *o = *t; delete t; }
+    Image* rr = (r->frames[0].bpp == 4) ? r : to_rgba(r);
+    for (int f = 0; f < o->n; ++f) { uint8_t* dp = o->frames[f].data.data(); uint8_t* sp = rr->frames[f].data.data();
+        for (int y = 0; y < nh; ++y) for (int x = 0; x < nw; ++x) { int bx = ox + x, by = oy + y; if (bx < 0 || bx >= w || by < 0 || by >= h) continue; memcpy(dp + ((size_t)by * w + bx) * 4, sp + ((size_t)y * nw + x) * 4, 4); } }
+    if (rr != r) delete rr; delete r; return o;
 }
 
 }  // extern "C"

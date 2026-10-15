@@ -115,6 +115,7 @@ void*       img_getchannel(void* im, int ch);                                // 
 void*       img_alpha_composite_at(void* base, void* over, int x, int y);    // 就地
 void*       img_fit(void* im, int w, int h, const char* resample, float cx, float cy, int fill_rgba);
 void*       img_contain(void* im, int w, int h, const char* resample, int fill_rgba);
+void*       img_ops_pad(void* im, int w, int h, const char* resample, int color_rgba, float cx, float cy);
 int         img_color_getrgb(const char* color, char* out_csv, int outlen);  // ImageColor.getrgb
 int         img_draw_chord(void* im, int x0, int y0, int x1, int y1, float s, float e, int rgba, int fill_rgba);
 int         img_draw_pieslice(void* im, int x0, int y0, int x1, int y1, float s, float e, int rgba, int fill_rgba);
