@@ -1,5 +1,5 @@
 diff --git a/include/stable-diffusion.h b/include/stable-diffusion.h
-index 9173240..46a25bc 100644
+index 9173240..b303fed 100644
 --- a/include/stable-diffusion.h
 +++ b/include/stable-diffusion.h
 @@ -212,6 +212,7 @@ typedef struct {
@@ -78,7 +78,19 @@ index 9173240..46a25bc 100644
  typedef struct {
      const sd_lora_t* loras;
      uint32_t lora_count;
-@@ -407,6 +462,16 @@ typedef struct {
+@@ -400,6 +455,11 @@ typedef struct {
+     int batch_count;
+     sd_image_t control_image;
+     float control_strength;
++    // Optional per-frame ControlNet hint frames (used by AnimateDiff / video
++    // models). When set, each frame is encoded and conditioned independently
++    // instead of broadcasting the single control_image across all frames.
++    const sd_image_t* control_frames;
++    int control_frames_size;
+     sd_image_t ip_adapter_image;
+     float ip_adapter_strength;
+     sd_pm_params_t pm_params;
+@@ -407,6 +467,16 @@ typedef struct {
      sd_tiling_params_t vae_tiling_params;
      sd_cache_params_t cache;
      sd_hires_params_t hires;
@@ -95,7 +107,15 @@ index 9173240..46a25bc 100644
      int qwen_image_layers;
      bool circular_x;
      bool circular_y;
-@@ -513,6 +578,12 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
+@@ -428,6 +498,7 @@ typedef struct {
+     int ref_audios_count;
+     sd_image_t* control_frames;
+     int control_frames_size;
++    float control_strength;
+     int width;
+     int height;
+     sd_sample_params_t sample_params;
+@@ -513,6 +584,12 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
                             sd_image_t** images_out,
                             int* num_images_out);
  
@@ -1396,6 +1416,78 @@ index a1012ca..7b5f056 100644
          }
  
          void test() {
+diff --git a/src/name_conversion.cpp b/src/name_conversion.cpp
+index 6f1b598..d76e090 100644
+--- a/src/name_conversion.cpp
++++ b/src/name_conversion.cpp
+@@ -1223,6 +1223,12 @@ std::string convert_sep_to_dot(std::string name) {
+         "transformer_blocks",
+         "single_transformer_blocks",
+         "single_blocks",
++        "motion_module",
++        "motion_modules",
++        "temporal_transformer",
++        "attention_blocks",
++        "pos_encoder",
++        "ff_norm",
+         "diffusion_model",
+         "cond_stage_model",
+         "first_stage_model",
+@@ -1466,6 +1472,36 @@ std::string convert_tensor_name(std::string name, SDVersion version) {
+             break;
+         }
+     }
++    // AnimateDiff motion-module LoRAs are not wrapped in the standard
++    // "lora."/"lora_unet_" prefixes; their keys look like
++    //   unet.down_blocks.0.motion_modules.0...attention_blocks.0.to_q_lora.down.weight
++    //   down_blocks.0.motion_modules.0...attention_blocks.0.to_q_lora.down.weight
++    // Detect them explicitly so the suffix/prefix normalization below applies.
++    bool is_motion_lora = false;
++    if (!is_lora && contains(name, ".motion_modules.")) {
++        static const std::vector<std::string> motion_lora_suffix_vec = {
++            ".lora_down.weight",
++            ".lora_mid.weight",
++            ".lora_up.weight",
++            ".lora.down.weight",
++            ".lora.mid.weight",
++            ".lora.up.weight",
++            "_lora.down.weight",
++            "_lora.mid.weight",
++            "_lora.up.weight",
++            ".lora_A.weight",
++            ".lora_B.weight",
++            ".lora_A.default.weight",
++            ".lora_B.default.weight",
++        };
++        for (const auto& suffix : motion_lora_suffix_vec) {
++            if (ends_with(name, suffix)) {
++                is_lora        = true;
++                is_motion_lora = true;
++                break;
++            }
++        }
++    }
+     // preprocess lora tensor name
+     if (is_lora) {
+         std::map<std::string, std::string> lora_suffix_map = {
+@@ -1600,6 +1636,17 @@ std::string convert_tensor_name(std::string name, SDVersion version) {
+         }
+     }
+ 
++    // AnimateDiff motion-module tensors live in a nested "motion_module" block of
++    // the UNet, but the LoRA keys address them at the UNet top level
++    // (down_blocks/up_blocks/mid_block). Re-nest them so they match the model.
++    if (is_motion_lora && starts_with(name, "model.diffusion_model.")) {
++        const std::string diffusion_prefix = "model.diffusion_model.";
++        const std::string rest             = name.substr(diffusion_prefix.size());
++        if (!starts_with(rest, "motion_module.")) {
++            name = diffusion_prefix + "motion_module." + rest;
++        }
++    }
++
+     // cond_stage_model
+     {
+         for (const auto& prefix : cond_stage_model_prefix_vec) {
 diff --git a/src/pipeline/diffusion_engine.cpp b/src/pipeline/diffusion_engine.cpp
 index e020a2d..70588d4 100644
 --- a/src/pipeline/diffusion_engine.cpp
@@ -1861,7 +1953,7 @@ index f2f8a8c..84e816c 100644
  
      std::vector<float> process_timesteps(const std::vector<float>& timesteps,
 diff --git a/src/pipeline/image.cpp b/src/pipeline/image.cpp
-index 4c90150..a41313b 100644
+index 4c90150..0c81e32 100644
 --- a/src/pipeline/image.cpp
 +++ b/src/pipeline/image.cpp
 @@ -114,6 +114,29 @@ namespace sd::pipeline {
@@ -1894,7 +1986,37 @@ index 4c90150..a41313b 100644
      static std::optional<ImageGenerationLatents> prepare_image_generation_latents(StableDiffusionGGML* sd,
                                                                                    const sd_img_gen_params_t* sd_img_gen_params,
                                                                                    GenerationRequest* request,
-@@ -247,10 +270,18 @@ namespace sd::pipeline {
+@@ -193,7 +216,28 @@ namespace sd::pipeline {
+             mask_image_tensor = sd::ops::round(mask_image_tensor);
+         }
+ 
+-        if (sd_img_gen_params->control_image.data != nullptr) {
++        if (sd_img_gen_params->control_frames != nullptr && sd_img_gen_params->control_frames_size > 0) {
++            // Per-frame ControlNet hints (AnimateDiff). Stack each hint frame along
++            // the batch dimension so the control branch conditions every frame
++            // independently while matching the temporal batch of the latents.
++            const int n_control_frames = sd_img_gen_params->control_frames_size;
++            int n_frames               = sd->animatediff_num_frames > 1 ? sd->animatediff_num_frames : n_control_frames;
++            if (n_frames <= 1) {
++                control_image_tensor = sd_image_to_tensor(sd_img_gen_params->control_frames[0], request->width, request->height);
++            } else {
++                auto first = sd_image_to_tensor(sd_img_gen_params->control_frames[0], request->width, request->height);
++                std::vector<int64_t> shape(first.shape().begin(), first.shape().end());
++                shape[3] = n_frames;
++                sd::Tensor<float> stacked(shape);
++                for (int f = 0; f < n_frames; ++f) {
++                    int src = f < n_control_frames ? f : n_control_frames - 1;
++                    auto cf = f == 0 ? first
++                                     : sd_image_to_tensor(sd_img_gen_params->control_frames[src], request->width, request->height);
++                    sd::ops::slice_assign(&stacked, 3, f, f + 1, cf);
++                }
++                control_image_tensor = std::move(stacked);
++            }
++        } else if (sd_img_gen_params->control_image.data != nullptr) {
+             control_image_tensor = sd_image_to_tensor(sd_img_gen_params->control_image, request->width, request->height);
+         }
+ 
+@@ -247,10 +291,18 @@ namespace sd::pipeline {
          }
  
          if (!control_image_tensor.empty()) {
@@ -1917,7 +2039,7 @@ index 4c90150..a41313b 100644
              }
          }
  
-@@ -523,6 +554,26 @@ namespace sd::pipeline {
+@@ -523,6 +575,26 @@ namespace sd::pipeline {
          int64_t t1 = ggml_time_ms();
          LOG_INFO("get_learned_condition completed, taking %.2fs", (t1 - prepare_start_ms) * 1.0f / 1000);
  
@@ -1944,7 +2066,7 @@ index 4c90150..a41313b 100644
          ImageGenerationEmbeds embeds;
          embeds.img_uncond = std::move(img_uncond);
          embeds.cond       = std::move(cond);
-@@ -638,6 +689,127 @@ namespace sd::pipeline {
+@@ -638,6 +710,127 @@ namespace sd::pipeline {
          return result_images;
      }
  
@@ -2072,7 +2194,7 @@ index 4c90150..a41313b 100644
      static sd::Tensor<float> upscale_hires_latent(StableDiffusionGGML* sd,
                                                    const sd::Tensor<float>& latent,
                                                    const GenerationRequest& request,
-@@ -658,6 +830,17 @@ namespace sd::pipeline {
+@@ -658,6 +851,17 @@ namespace sd::pipeline {
              return target_shape;
          };
  
@@ -2090,7 +2212,7 @@ index 4c90150..a41313b 100644
          if (request.hires.upscaler == SD_HIRES_UPSCALER_LATENT ||
              request.hires.upscaler == SD_HIRES_UPSCALER_LATENT_NEAREST ||
              request.hires.upscaler == SD_HIRES_UPSCALER_LATENT_NEAREST_EXACT ||
-@@ -809,6 +992,52 @@ namespace sd::pipeline {
+@@ -809,6 +1013,52 @@ namespace sd::pipeline {
              return false;
          sd->apply_circular_axes(sd_img_gen_params->circular_x, sd_img_gen_params->circular_y);
  
@@ -2143,7 +2265,7 @@ index 4c90150..a41313b 100644
          const RefImageParams ref_image_params = sd->resolve_ref_image_params(sd_img_gen_params->ref_image_args);
  
          ImageVaeAxesGuard axes_guard(sd, sd_img_gen_params, request);
-@@ -979,6 +1208,20 @@ namespace sd::pipeline {
+@@ -979,6 +1229,20 @@ namespace sd::pipeline {
                                                                             sd::ops::InterpolateMode::NearestMax);
                  }
  
@@ -2164,7 +2286,7 @@ index 4c90150..a41313b 100644
                  int64_t hires_sample_start = ggml_time_ms();
                  sd::Tensor<float> x_0      = sd->sample(sd->diffusion_model,
                                                          true,
-@@ -987,7 +1230,7 @@ namespace sd::pipeline {
+@@ -987,7 +1251,7 @@ namespace sd::pipeline {
                                                          embeds.cond,
                                                          embeds.uncond,
                                                          embeds.img_uncond,
@@ -2189,6 +2311,21 @@ index 626bdfe..5dc2cee 100644
          if (!ensure_backend_pair(ctx.backends, SDBackendModule::CONTROL_NET)) {
              return false;
          }
+diff --git a/src/pipeline/video.cpp b/src/pipeline/video.cpp
+index 503afa5..c077643 100644
+--- a/src/pipeline/video.cpp
++++ b/src/pipeline/video.cpp
+@@ -1511,7 +1511,9 @@ namespace sd::pipeline {
+         img_gen_params.init_image        = sd_vid_gen_params->init_image;
+         img_gen_params.seed              = sd_vid_gen_params->seed;
+         img_gen_params.batch_count       = 1;
+-        img_gen_params.control_strength  = 1.0f;
++        img_gen_params.control_strength  = sd_vid_gen_params->control_strength > 0.f ? sd_vid_gen_params->control_strength : 1.0f;
++        img_gen_params.control_frames      = sd_vid_gen_params->control_frames;
++        img_gen_params.control_frames_size = sd_vid_gen_params->control_frames_size;
+         img_gen_params.vae_tiling_params = sd_vid_gen_params->vae_tiling_params;
+         img_gen_params.cache             = sd_vid_gen_params->cache;
+         img_gen_params.hires             = sd_vid_gen_params->hires;
 diff --git a/src/runtime/denoiser.hpp b/src/runtime/denoiser.hpp
 index 416859e..062e912 100644
 --- a/src/runtime/denoiser.hpp
@@ -2483,7 +2620,7 @@ index 3de3370..1d0f008 100644
          GuiderOutput forward(const GuidanceInput& input,
                               GuiderOutput previous,
 diff --git a/src/stable-diffusion.cpp b/src/stable-diffusion.cpp
-index c533f2c..5dcd696 100644
+index c533f2c..ace626f 100644
 --- a/src/stable-diffusion.cpp
 +++ b/src/stable-diffusion.cpp
 @@ -245,6 +245,7 @@ const char* hires_upscaler_to_str[] = {
@@ -2511,7 +2648,15 @@ index c533f2c..5dcd696 100644
      sd_cache_params_init(&sd_img_gen_params->cache);
      sd_hires_params_init(&sd_img_gen_params->hires);
  }
-@@ -745,6 +750,20 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
+@@ -610,6 +615,7 @@ void sd_vid_gen_params_init(sd_vid_gen_params_t* sd_vid_gen_params) {
+     sd_vid_gen_params->fps                                   = 16;
+     sd_vid_gen_params->moe_boundary                          = 0.875f;
+     sd_vid_gen_params->vace_strength                         = 1.f;
++    sd_vid_gen_params->control_strength                      = 1.f;
+     sd_vid_gen_params->vae_tiling_params                     = {false, false, 0, 0, 0.5f, 0.0f, 0.0f, nullptr};
+     sd_vid_gen_params->hires.enabled                         = false;
+     sd_vid_gen_params->hires.upscaler                        = SD_HIRES_UPSCALER_LATENT;
+@@ -745,6 +751,20 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
      return execution.ready && sd::pipeline::generate_image(sd_ctx->sd, params, images_out, num_images_out);
  }
  

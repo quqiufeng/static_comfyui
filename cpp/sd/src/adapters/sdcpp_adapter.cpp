@@ -47,6 +47,11 @@ public:
     bool has_control_image = false;
     float control_strength = 1.0f;
 
+    // Per-frame ControlNet hints for video/AnimateDiff (owns the RGB buffers)
+    std::vector<std::vector<uint8_t>> control_frames_data;
+    std::vector<sd_image_t> control_frames;
+    float control_frames_strength = 1.0f;
+
     // Inpainting mask (grayscale)
     std::vector<uint8_t> mask_image_data;
     sd_image_t mask_image{};
@@ -167,6 +172,9 @@ bool SDPipeline::load(const ModelConfig& config) {
     if (!config.diffusion_model_path.empty()) {
         params.diffusion_model_path = config.diffusion_model_path.c_str();
     }
+    if (!config.motion_module_path.empty()) {
+        params.motion_module_path = config.motion_module_path.c_str();
+    }
     if (!config.llm_path.empty()) {
         params.llm_path = config.llm_path.c_str();
     }
@@ -271,6 +279,17 @@ void SDPipeline::set_ipadapter_enabled(bool enabled, float weight) {
     if (enabled && weight > 0.0f) {
         impl_->ip_adapter_strength = weight;
     }
+}
+
+void SDPipeline::set_motion_module(const std::string& path) {
+    if (!impl_) return;
+    if (impl_->config.motion_module_path == path && impl_->ctx) {
+        return;  // unchanged
+    }
+    impl_->config.motion_module_path = path;
+    std::fprintf(stderr, "[C++ gen] set_motion_module: reloading ctx with motion_module=%s\n",
+                 path.empty() ? "(none)" : path.c_str());
+    load(impl_->config);
 }
 
 std::string SDPipeline::get_model_version_name() const {
@@ -382,6 +401,35 @@ void SDPipeline::set_control_image(const std::string& image_path, float strength
     impl_->control_strength      = strength;
     std::fprintf(stderr, "[C++ gen] set_control_image: %s (%dx%d) strength=%.2f\n",
                  image_path.c_str(), rgb.cols, rgb.rows, strength);
+}
+
+void SDPipeline::set_control_frames(const std::vector<std::string>& image_paths, float strength) {
+    if (!impl_) return;
+    impl_->control_frames_data.clear();
+    impl_->control_frames.clear();
+    impl_->control_frames_strength = strength;
+    // reserve() keeps the per-frame buffers from moving as we append, so the
+    // sd_image_t::data pointers stay valid.
+    impl_->control_frames_data.reserve(image_paths.size());
+    impl_->control_frames.reserve(image_paths.size());
+    for (const auto& path : image_paths) {
+        cv::Mat img = cv::imread(path, cv::IMREAD_COLOR);
+        if (img.empty()) {
+            std::fprintf(stderr, "[C++ gen] set_control_frames: failed to read %s\n", path.c_str());
+            continue;
+        }
+        cv::Mat rgb;
+        cv::cvtColor(img, rgb, cv::COLOR_BGR2RGB);
+        impl_->control_frames_data.emplace_back(rgb.data, rgb.data + rgb.total() * rgb.channels());
+        sd_image_t frame{};
+        frame.width   = rgb.cols;
+        frame.height  = rgb.rows;
+        frame.channel = rgb.channels();
+        frame.data    = impl_->control_frames_data.back().data();
+        impl_->control_frames.push_back(frame);
+    }
+    std::fprintf(stderr, "[C++ gen] set_control_frames: loaded %zu/%zu strength=%.2f\n",
+                 impl_->control_frames.size(), image_paths.size(), strength);
 }
 
 void SDPipeline::set_mask(const std::string& mask_path) {
@@ -589,6 +637,70 @@ static std::string alias_scheduler(const std::string& name) {
     if (name == "uniform") return "discrete";
     if (name == "linear") return "discrete";
     return name;
+}
+
+std::vector<Image> SDPipeline::generate_video(const ImageGenerationParams& params, int video_frames, int fps) {
+    std::vector<Image> results;
+    if (!impl_ || !impl_->ctx) return results;
+    if (video_frames < 1) video_frames = 16;
+
+    sd_vid_gen_params_t vp;
+    sd_vid_gen_params_init(&vp);
+    vp.prompt          = params.prompt.c_str();
+    vp.negative_prompt = params.negative_prompt.c_str();
+    vp.clip_skip       = impl_->clip_skip >= 0 ? impl_->clip_skip : params.clip_skip;
+    vp.width           = params.width  > 0 ? params.width  : 512;
+    vp.height          = params.height > 0 ? params.height : 512;
+    vp.seed            = params.seed;
+    vp.video_frames    = video_frames;
+    vp.fps             = fps > 0 ? fps : 8;
+
+    vp.sample_params.sample_steps     = params.steps;
+    vp.sample_params.guidance.txt_cfg = params.cfg_scale;
+    std::string sm = alias_sample_method(params.sample_method);
+    std::string sc = alias_scheduler(params.scheduler);
+    vp.sample_params.sample_method = str_to_sample_method(sm.c_str());
+    vp.sample_params.scheduler     = str_to_scheduler(sc.c_str());
+    if (vp.sample_params.sample_method == SAMPLE_METHOD_COUNT) vp.sample_params.sample_method = EULER_A_SAMPLE_METHOD;
+    if (vp.sample_params.scheduler == SCHEDULER_COUNT) vp.sample_params.scheduler = DISCRETE_SCHEDULER;
+    if (impl_->flow_shift > 0.0f) vp.sample_params.flow_shift = impl_->flow_shift;
+
+    if (!impl_->lora_entries.empty()) {
+        vp.loras      = impl_->lora_entries.data();
+        vp.lora_count = static_cast<uint32_t>(impl_->lora_entries.size());
+    }
+    if (!impl_->control_frames.empty()) {
+        vp.control_frames      = impl_->control_frames.data();
+        vp.control_frames_size = static_cast<int>(impl_->control_frames.size());
+        vp.control_strength    = impl_->control_frames_strength;
+    }
+    if (impl_->has_init_image) {
+        vp.init_image = impl_->init_image;
+        vp.strength   = impl_->init_strength;
+    }
+
+    sd_image_t* frames = nullptr;
+    int num = 0;
+    sd_audio_t* audio = nullptr;
+    int got_fps = vp.fps;
+    std::fprintf(stderr, "[C++ gen] calling generate_video (%d frames, %dx%d)...\n",
+                 video_frames, vp.width, vp.height);
+    bool ok = ::generate_video(impl_->ctx, &vp, &frames, &num, &audio, &got_fps);
+    std::fprintf(stderr, "[C++ gen] generate_video ok=%d frames=%d\n", ok, num);
+    if (!ok || !frames || num == 0) return results;
+    for (int i = 0; i < num; i++) {
+        Image img;
+        img.width    = static_cast<int>(frames[i].width);
+        img.height   = static_cast<int>(frames[i].height);
+        img.channels = static_cast<int>(frames[i].channel);
+        const size_t bytes = static_cast<size_t>(img.width) * img.height * img.channels;
+        if (frames[i].data != nullptr && bytes > 0) {
+            img.data.assign(frames[i].data, frames[i].data + bytes);
+        }
+        results.push_back(std::move(img));
+    }
+    free_sd_images(frames, num);
+    return results;
 }
 
 std::vector<Image> SDPipeline::generate(const ImageGenerationParams& params) {
@@ -1415,6 +1527,66 @@ int sd_pipeline_set_ipadapter_enabled(sd_pipeline_t pipeline,
     return 0;
 }
 
+int sd_pipeline_set_motion_module(sd_pipeline_t pipeline, const char* path) {
+    if (!pipeline) return -1;
+    sd::SDPipeline* p = static_cast<sd::SDPipeline*>(pipeline);
+    if (!p->is_loaded()) return -2;
+    std::fprintf(stderr, "[C API] sd_pipeline_set_motion_module: path=%s\n",
+                 path ? path : "(null)");
+    p->set_motion_module(path ? path : "");
+    return 0;
+}
+
+int sd_pipeline_generate_animatediff(sd_pipeline_t pipeline,
+                                     const char* prompt,
+                                     const char* negative_prompt,
+                                     int width, int height,
+                                     int steps, float cfg,
+                                     const char* sample_method,
+                                     const char* scheduler,
+                                     int64_t seed,
+                                     int video_frames, int fps,
+                                     const char* output_pattern) {
+    if (!pipeline || !output_pattern) return -1;
+    sd::SDPipeline* p = static_cast<sd::SDPipeline*>(pipeline);
+    if (!p->is_loaded()) return -3;
+
+    sd::ImageGenerationParams params;
+    params.prompt          = prompt ? prompt : "";
+    params.negative_prompt = negative_prompt ? negative_prompt : "";
+    params.width           = width;
+    params.height          = height;
+    params.steps           = steps > 0 ? steps : 20;
+    params.cfg_scale       = cfg > 0.0f ? cfg : 7.0f;
+    params.sample_method   = sample_method ? sample_method : "euler_a";
+    params.scheduler       = scheduler ? scheduler : "discrete";
+    params.seed            = seed;
+
+    std::fprintf(stderr, "[C API] sd_pipeline_generate_animatediff: %d frames @ %dx%d\n",
+                 video_frames, width, height);
+    std::vector<sd::Image> frames = p->generate_video(params, video_frames, fps);
+    if (frames.empty()) {
+        std::fprintf(stderr, "[C API] animatediff: no frames produced\n");
+        return -4;
+    }
+    const bool has_pct = std::strchr(output_pattern, '%') != nullptr;
+    for (size_t i = 0; i < frames.size(); i++) {
+        if (frames[i].data.empty()) continue;
+        char path[4096];
+        if (has_pct) {
+            std::snprintf(path, sizeof(path), output_pattern, static_cast<int>(i + 1));
+        } else {
+            std::snprintf(path, sizeof(path), "%s/frame_%03d.png", output_pattern, static_cast<int>(i + 1));
+        }
+        if (!save_png(path, frames[i].data.data(), frames[i].width, frames[i].height, frames[i].channels)) {
+            std::fprintf(stderr, "[C API] animatediff: save_png failed for %s\n", path);
+            return -6;
+        }
+    }
+    std::fprintf(stderr, "[C API] animatediff: wrote %zu frames\n", frames.size());
+    return 0;
+}
+
 int sd_pipeline_set_init_image(sd_pipeline_t pipeline,
                                const char* image_path,
                                float strength) {
@@ -1441,6 +1613,55 @@ int sd_pipeline_set_control_image(sd_pipeline_t pipeline,
     std::fprintf(stderr, "[C API] sd_pipeline_set_control_image: path=%s strength=%.2f\n",
                  image_path ? image_path : "(null)", strength);
     p->set_control_image(image_path ? image_path : "", strength);
+    return 0;
+}
+
+int sd_pipeline_set_control_frames(sd_pipeline_t pipeline,
+                                   const char** paths,
+                                   int count,
+                                   float strength) {
+    if (!pipeline) return -1;
+    sd::SDPipeline* p = static_cast<sd::SDPipeline*>(pipeline);
+    std::vector<std::string> frames;
+    if (paths != nullptr && count > 0) {
+        frames.reserve(static_cast<size_t>(count));
+        for (int i = 0; i < count; ++i) {
+            if (paths[i] != nullptr && paths[i][0] != '\0') {
+                frames.emplace_back(paths[i]);
+            }
+        }
+    }
+    std::fprintf(stderr, "[C API] sd_pipeline_set_control_frames: %zu frames strength=%.2f\n",
+                 frames.size(), strength);
+    p->set_control_frames(frames, strength);
+    return 0;
+}
+
+int sd_pipeline_set_control_frames_csv(sd_pipeline_t pipeline,
+                                       const char* paths_csv,
+                                       float strength) {
+    if (!pipeline) return -1;
+    sd::SDPipeline* p = static_cast<sd::SDPipeline*>(pipeline);
+    std::vector<std::string> frames;
+    if (paths_csv != nullptr) {
+        std::string csv(paths_csv);
+        size_t start = 0;
+        while (start < csv.size()) {
+            size_t end = csv.find_first_of("\n,", start);
+            if (end == std::string::npos) end = csv.size();
+            std::string item = csv.substr(start, end - start);
+            // trim whitespace
+            size_t b = item.find_first_not_of(" \t\r");
+            size_t e = item.find_last_not_of(" \t\r");
+            if (b != std::string::npos) {
+                frames.push_back(item.substr(b, e - b + 1));
+            }
+            start = end + 1;
+        }
+    }
+    std::fprintf(stderr, "[C API] sd_pipeline_set_control_frames_csv: %zu frames strength=%.2f\n",
+                 frames.size(), strength);
+    p->set_control_frames(frames, strength);
     return 0;
 }
 

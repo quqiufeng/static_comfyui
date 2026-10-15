@@ -1,4 +1,4 @@
-from sd_backend import sd_create, sd_free, sd_load, sd_load_ex, sd_load_lora, sd_generate_full, sd_ensure_directory, sd_set_ipadapter, sd_set_ipadapter_enabled, sd_set_init_image, sd_load_control_net, sd_set_control_image, sd_set_area_conds, sd_set_noise_scale, sd_set_prediction, sd_set_hires_upscaler, sd_set_cache, SD_WTYPE_AUTO
+from sd_backend import sd_create, sd_free, sd_load, sd_load_ex, sd_load_lora, sd_generate_full, sd_ensure_directory, sd_set_ipadapter, sd_set_ipadapter_enabled, sd_set_init_image, sd_load_control_net, sd_set_control_image, sd_set_control_frames_csv, sd_set_area_conds, sd_set_noise_scale, sd_set_prediction, sd_set_hires_upscaler, sd_set_cache, sd_set_motion_module, sd_generate_animatediff, SD_WTYPE_AUTO
 
 
 NODE_CLASS_MAPPINGS: dict = make_dict()
@@ -302,15 +302,19 @@ def checkpoint_loader_simple(inputs):
         clip_g_path = ""
     else:
         clip_g_path = resolve_model_path(clip_g_name)
+    vae_name = dict_get(inputs, "vae_name")
+    vae_path = ""
+    if vae_name is not None:
+        vae_path = resolve_model_path(vae_name)
 
     pipeline = sd_create()
-    rc = sd_load(pipeline, ckpt_path, clip_l_path, clip_g_path, "", SD_WTYPE_AUTO, 8, 0)
+    rc = sd_load(pipeline, ckpt_path, clip_l_path, clip_g_path, vae_path, SD_WTYPE_AUTO, 8, 0)
     if rc != 0:
         print("SD checkpoint load failed, rc=" + string_of_int(rc))
         return (None, None, None)
 
     print("Checkpoint loaded, model version: " + sd_get_model_version_name(pipeline))
-    handle = make_sd_pipeline_handle(pipeline, ckpt_path, clip_l_path, clip_g_path, "")
+    handle = make_sd_pipeline_handle(pipeline, ckpt_path, clip_l_path, clip_g_path, vae_path)
     return (handle, handle, handle)
 
 
@@ -349,6 +353,170 @@ def unet_loader(inputs):
 
 register_node("UNETLoader", "Load UNET",
               "unet_loader", ("MODEL",), False)
+
+
+# ===== AnimateDiff（sd.cpp motion module + 视频生成）=====
+def setup_animatediff_extras(model: SDPipelineHandle, inputs):
+    # Motion LoRA (AnimateDiff motion module LoRA): name or absolute path.
+    lora = get_str(inputs, "lora", "")
+    if lora == "":
+        lora = get_str(inputs, "motion_lora", "")
+    if lora != "" and model is not None:
+        strength = get_float(inputs, "lora_strength", 1.0)
+        path = resolve_model_path(lora)
+        rc = sd_load_lora(model.pipeline, path, strength)
+        print("AnimateDiff: lora " + path + " rc=" + string_of_int(rc))
+    # ControlNet model (openpose etc.)
+    control_net = get_str(inputs, "control_net", "")
+    if control_net != "" and model is not None:
+        rc = sd_load_control_net(model.pipeline, resolve_model_path(control_net))
+        print("AnimateDiff: control_net rc=" + string_of_int(rc))
+    # Per-frame control hints: newline/comma separated image paths, in frame order.
+    control_frames = get_str(inputs, "control_frames", "")
+    if control_frames == "":
+        control_frames = get_str(inputs, "control_dir", "")
+    if control_frames != "" and model is not None:
+        cf_strength = get_float(inputs, "control_strength", 1.0)
+        rc = sd_set_control_frames_csv(model.pipeline, control_frames, cf_strength)
+        print("AnimateDiff: control_frames rc=" + string_of_int(rc))
+    return model
+
+
+def animatediff_loader(inputs):
+    model: SDPipelineHandle = dict_get(inputs, "model")
+    if model is None:
+        print("AnimateDiffLoader: model is required")
+        return (None,)
+    name = get_str(inputs, "motion_module", "")
+    if name == "":
+        print("AnimateDiffLoader: no motion_module provided")
+        return (model,)
+    path = resolve_model_path(name)
+    rc = sd_set_motion_module(model.pipeline, path)
+    print("AnimateDiffLoader: " + path + " rc=" + string_of_int(rc))
+    return (model,)
+
+
+register_node("AnimateDiffLoader", "AnimateDiff Loader",
+              "animatediff_loader", ("MODEL",), False)
+
+
+def animatediff_video(inputs):
+    model: SDPipelineHandle = dict_get(inputs, "model")
+    if model is None:
+        print("AnimateDiffVideo: model is required")
+        return (None,)
+    output_dir = get_str(inputs, "output_dir", "/tmp/comfy_output")
+    prompt = get_str(inputs, "positive", "")
+    negative = get_str(inputs, "negative", "")
+    width = get_int(inputs, "width", 512)
+    height = get_int(inputs, "height", 512)
+    steps = get_int(inputs, "steps", 20)
+    cfg = get_float(inputs, "cfg", 8.0)
+    seed = get_int(inputs, "seed", 42)
+    frames = get_int(inputs, "frames", 16)
+    fps = get_int(inputs, "fps", 8)
+    sample_method = get_str(inputs, "sample_method", "euler")
+    scheduler = get_str(inputs, "scheduler", "discrete")
+    setup_animatediff_extras(model, inputs)
+    rc = sd_ensure_directory(output_dir)
+    rc = sd_generate_animatediff(model.pipeline, prompt, negative, width, height,
+                                 steps, cfg, sample_method, scheduler, seed,
+                                 frames, fps, output_dir)
+    print("AnimateDiffVideo: rc=" + string_of_int(rc) + " frames_dir=" + output_dir)
+    return (output_dir,)
+
+
+register_node("AnimateDiffVideo", "AnimateDiff Video",
+              "animatediff_video", ("IMAGE",), True)
+
+
+# ===== AnimateDiff-Evolved 兼容节点（同样走 sd.cpp motion module）=====
+# 说明：sd.cpp 直接整段生成视频（无独立 latent 采样），故这里把 Evolved 的
+# Loader/Context/Sampler/Combine 映射为等价节点。Sampler 支持运动 LoRA（`lora`）
+# 与逐帧 ControlNet（`control_net` + `control_frames`）。
+def ade_context_options(inputs):
+    ctx = make_dict()
+    dict_set(ctx, "context_length", get_int(inputs, "context_length", 16))
+    dict_set(ctx, "context_stride", get_int(inputs, "context_stride", 1))
+    dict_set(ctx, "context_overlap", get_int(inputs, "context_overlap", 4))
+    dict_set(ctx, "fuse_method", get_str(inputs, "fuse_method", "flat"))
+    return (ctx,)
+
+
+register_node("ADE_AnimateDiffUniformContextOptions",
+              "AnimateDiff-Evolved: Uniform Context Options",
+              "ade_context_options", ("CONTEXT_OPTIONS",), False)
+register_node("ADE_AnimateDiffContextOptions",
+              "AnimateDiff-Evolved: Context Options",
+              "ade_context_options", ("CONTEXT_OPTIONS",), False)
+
+
+def ade_loader(inputs):
+    model: SDPipelineHandle = dict_get(inputs, "model")
+    if model is None:
+        print("AnimateDiff-Evolved: model is required")
+        return (None, None)
+    name = get_str(inputs, "motion_model", "")
+    if name == "":
+        name = get_str(inputs, "motion_module", "")
+    if name != "":
+        path = resolve_model_path(name)
+        rc = sd_set_motion_module(model.pipeline, path)
+        print("AnimateDiff-Evolved loader: " + path + " rc=" + string_of_int(rc))
+    ctx = dict_get(inputs, "context_options")
+    return (model, ctx)
+
+
+register_node("ADE_AnimateDiffLoaderWithContext", "AnimateDiff-Evolved: Loader", "ade_loader", ("MODEL", "CONTEXT_OPTIONS"), False)
+register_node("ADE_AnimateDiffLoaderGen1", "AnimateDiff-Evolved: Loader", "ade_loader", ("MODEL", "CONTEXT_OPTIONS"), False)
+register_node("ADE_AnimateDiffLoaderV1Advanced", "AnimateDiff-Evolved: Loader", "ade_loader", ("MODEL", "CONTEXT_OPTIONS"), False)
+register_node("ADE_LoadAnimateDiffModel", "AnimateDiff-Evolved: Loader", "ade_loader", ("MODEL", "CONTEXT_OPTIONS"), False)
+register_node("ADE_AnimateDiffModelSettingsAdvanced", "AnimateDiff-Evolved: Loader", "ade_loader", ("MODEL", "CONTEXT_OPTIONS"), False)
+register_node("ADE_AnimateDiffLoaderV1", "AnimateDiff-Evolved: Loader", "ade_loader", ("MODEL", "CONTEXT_OPTIONS"), False)
+
+
+def ade_sampler(inputs):
+    model: SDPipelineHandle = dict_get(inputs, "model")
+    if model is None:
+        print("AnimateDiff-Evolved Sampler: model is required")
+        return (None,)
+    output_dir = get_str(inputs, "output_dir", "/tmp/comfy_output")
+    output_dir = get_str(inputs, "filename_prefix", output_dir)
+    prompt = get_str(inputs, "positive", "")
+    negative = get_str(inputs, "negative", "")
+    width = get_int(inputs, "width", 512)
+    height = get_int(inputs, "height", 512)
+    steps = get_int(inputs, "steps", 20)
+    cfg = get_float(inputs, "cfg", 8.0)
+    seed = get_int(inputs, "seed", 42)
+    frames = get_int(inputs, "frames", 16)
+    fps = get_int(inputs, "fps", 8)
+    sm = get_str(inputs, "sampler_name", "euler")
+    sch = get_str(inputs, "scheduler", "discrete")
+    setup_animatediff_extras(model, inputs)
+    rc = sd_ensure_directory(output_dir)
+    rc = sd_generate_animatediff(model.pipeline, prompt, negative, width, height,
+                                 steps, cfg, sm, sch, seed, frames, fps, output_dir)
+    print("AnimateDiff-Evolved Sampler: rc=" + string_of_int(rc) + " -> " + output_dir)
+    return (output_dir,)
+
+
+register_node("ADE_AnimateDiffSampler", "AnimateDiff-Evolved: Sampler",
+              "ade_sampler", ("IMAGE",), True)
+register_node("ADE_AnimateDiffVideo", "AnimateDiff-Evolved: Video",
+              "ade_sampler", ("IMAGE",), True)
+
+
+def ade_combine(inputs):
+    images = dict_get(inputs, "images")
+    if images is None:
+        images = dict_get(inputs, "frames")
+    return (images,)
+
+
+register_node("ADE_AnimateDiffCombine", "AnimateDiff-Evolved: Combine",
+              "ade_combine", ("IMAGE",), True)
 
 
 def vae_loader(inputs):
@@ -2195,6 +2363,12 @@ def register_group(types: list, group: int):
         i = i + 1
 
 register_group(py_list("DualCLIPLoader", "CLIPTextEncode", "CLIPSetLastLayer", "ConditioningCombine", "ConditioningConcat", "ConditioningAverage"), 1)
+register_group(py_list("AnimateDiffLoader", "AnimateDiffVideo",
+                       "ADE_AnimateDiffUniformContextOptions", "ADE_AnimateDiffContextOptions",
+                       "ADE_AnimateDiffLoaderWithContext", "ADE_AnimateDiffLoaderGen1",
+                       "ADE_AnimateDiffLoaderV1Advanced", "ADE_LoadAnimateDiffModel",
+                       "ADE_AnimateDiffModelSettingsAdvanced", "ADE_AnimateDiffLoaderV1",
+                       "ADE_AnimateDiffSampler", "ADE_AnimateDiffVideo", "ADE_AnimateDiffCombine"), 2)
 register_group(py_list("CheckpointLoaderSimple", "KSampler", "KSamplerAdvanced", "LORALoader", "DiffusionModelLoader", "HiResFix", "ADetailer", "IPAdapterApply", "CLIPVisionLoader", "IPAdapterModelLoader", "CheckpointLoader", "UNETLoader", "VAELoader", "CLIPLoader", "LoraLoader", "LoraLoaderModelOnly", "LoraLoaderBypass", "LoraLoaderBypassModelOnly", "CLIPMergeSimple", "CLIPMergeAdd", "CLIPMergeSubtract", "ModelSamplingFlux", "ModelSamplingSD3", "ModelSamplingAuraFlow", "ModelComputeDtype", "ModelAttentionBackend", "RescaleCFG", "FreSca", "ModelSamplingContinuousEDM", "ModelSamplingContinuousV", "ModelNoiseScale", "ModelSamplingDiscrete", "ModelSamplingStableCascade", "CheckpointSave", "VAESave", "CLIPSave", "ModelSave", "ModelMergeSimple", "ModelMergeAdd", "ModelMergeSubtract", "DiffusersLoader", "unCLIPCheckpointLoader", "ImageOnlyCheckpointLoader", "ImageOnlyCheckpointSave", "ModelPatchLoader", "VideoLinearCFGGuidance", "VideoTriangleCFGGuidance"), 2)
 register_group(py_list("EmptyLatentImage", "LatentUpscale", "LatentCrop", "SaveLatent", "LoadLatent", "LatentUpscaleBy", "LatentRotate", "LatentFlip", "LatentComposite", "LatentBlend", "RepeatLatentBatch", "LatentFromBatch", "SetLatentNoiseMask"), 3)
 register_group(py_list("VAEDecode", "VAEEncode", "VAEEncodeTiled", "LoadImageMask", "VAEEncodeForInpaint", "LoadImage", "ImageScale", "ImageScaleBy", "ImageInvert", "EmptyImage", "ImagePadForOutpaint", "ImageBlur", "ImageBatch", "ImageCompositeMasked", "ImageCrop", "ImageToMask", "MaskToImage", "CLIPVisionEncode", "LoadImageOutput", "PreviewImage", "Reroute", "SaveImage", "WebcamCapture", "VAEDecodeTiled", "Florence2Captioner", "ImageRemoveBackground", "ImageOCR"), 4)
@@ -2239,6 +2413,18 @@ def dispatch_model(class_type: str, inputs):
         return checkpoint_loader_simple(inputs)
     elif class_type == "UNETLoader":
         return unet_loader(inputs)
+    elif class_type == "AnimateDiffLoader":
+        return animatediff_loader(inputs)
+    elif class_type == "AnimateDiffVideo":
+        return animatediff_video(inputs)
+    elif class_type == "ADE_AnimateDiffUniformContextOptions" or class_type == "ADE_AnimateDiffContextOptions":
+        return ade_context_options(inputs)
+    elif class_type == "ADE_AnimateDiffLoaderWithContext" or class_type == "ADE_AnimateDiffLoaderGen1" or class_type == "ADE_AnimateDiffLoaderV1Advanced" or class_type == "ADE_LoadAnimateDiffModel" or class_type == "ADE_AnimateDiffModelSettingsAdvanced" or class_type == "ADE_AnimateDiffLoaderV1":
+        return ade_loader(inputs)
+    elif class_type == "ADE_AnimateDiffSampler" or class_type == "ADE_AnimateDiffVideo":
+        return ade_sampler(inputs)
+    elif class_type == "ADE_AnimateDiffCombine":
+        return ade_combine(inputs)
     elif class_type == "VAELoader":
         return vae_loader(inputs)
     elif class_type == "CLIPLoader":

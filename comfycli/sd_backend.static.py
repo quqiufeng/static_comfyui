@@ -15,6 +15,7 @@ extern fn sd_pipeline_set_ipadapter_enabled(pipeline: ptr, enabled: int, weight:
 extern fn sd_pipeline_set_init_image(pipeline: ptr, image_path: str, strength: float) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_load_control_net(pipeline: ptr, path: str) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_control_image(pipeline: ptr, image_path: str, strength: float) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_set_control_frames_csv(pipeline: ptr, paths_csv: str, strength: float) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_mask(pipeline: ptr, mask_path: str) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_batch_count(pipeline: ptr, n: int) -> int from "sdcpp_adapter"
 extern fn sd_resize_image(input_path: str, output_path: str, width: int, height: int) -> int from "sdcpp_adapter"
@@ -31,6 +32,8 @@ extern fn sd_pipeline_set_noise_scale(pipeline: ptr, noise_scale: float) -> int 
 extern fn sd_pipeline_set_hires_upscaler(pipeline: ptr, upscaler: str, model_path: str) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_prediction(pipeline: ptr, pred: int) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_video_cfg(pipeline: ptr, enabled: int, mode: int, min_cfg: float) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_set_motion_module(pipeline: ptr, path: str) -> int from "sdcpp_adapter"
+extern fn sd_pipeline_generate_animatediff(pipeline: ptr, prompt: str, negative_prompt: str, width: int, height: int, steps: int, cfg: float, sample_method: str, scheduler: str, seed: int, video_frames: int, fps: int, output_pattern: str) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_sigma_range(pipeline: ptr, enabled: int, sigma_min: float, sigma_max: float) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_fresca(pipeline: ptr, enabled: int, scale_low: float, scale_high: float, freq_cutoff: int) -> int from "sdcpp_adapter"
 extern fn sd_pipeline_set_cache(pipeline: ptr, mode: str, reuse_threshold: float, start_percent: float, end_percent: float) -> int from "sdcpp_adapter"
@@ -51,7 +54,7 @@ extern fn sd_copy_file(src: str, dst: str) -> int from "sdcpp_adapter"
 # SD weight type constants (matching stable-diffusion.h sd_type_t)
 SD_WTYPE_F32: int = 0
 SD_WTYPE_F16: int = 1
-SD_WTYPE_AUTO: int = 42  # SD_TYPE_COUNT
+SD_WTYPE_AUTO: int = 45  # SD_TYPE_COUNT
 
 
 def sd_create() -> ptr:
@@ -147,6 +150,10 @@ def sd_set_control_image(pipeline: ptr, image_path: str, strength: float) -> int
     return sd_pipeline_set_control_image(pipeline, image_path, strength)
 
 
+def sd_set_control_frames_csv(pipeline: ptr, paths_csv: str, strength: float) -> int:
+    return sd_pipeline_set_control_frames_csv(pipeline, paths_csv, strength)
+
+
 def sd_set_mask(pipeline: ptr, mask_path: str) -> int:
     return sd_pipeline_set_mask(pipeline, mask_path)
 
@@ -199,6 +206,20 @@ def sd_set_prediction(pipeline: ptr, pred: int) -> int:
 
 def sd_set_video_cfg(pipeline: ptr, mode: int, min_cfg: float) -> int:
     return sd_pipeline_set_video_cfg(pipeline, 1, mode, min_cfg)
+
+
+def sd_set_motion_module(pipeline: ptr, path: str) -> int:
+    return sd_pipeline_set_motion_module(pipeline, path)
+
+
+def sd_generate_animatediff(pipeline: ptr, prompt: str, negative_prompt: str,
+                            width: int, height: int, steps: int, cfg: float,
+                            sample_method: str, scheduler: str, seed: int,
+                            frames: int, fps: int, output_dir: str) -> int:
+    return sd_pipeline_generate_animatediff(pipeline, prompt, negative_prompt,
+                                            width, height, steps, cfg,
+                                            sample_method, scheduler, seed,
+                                            frames, fps, output_dir)
 
 
 def sd_set_fresca(pipeline: ptr, scale_low: float, scale_high: float, freq_cutoff: int) -> int:

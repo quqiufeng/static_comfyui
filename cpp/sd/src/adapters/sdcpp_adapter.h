@@ -46,6 +46,7 @@ struct ModelConfig {
     std::string llm_path;              // LLM text encoder for DiT models
     std::string llm_vision_path;       // LLM vision projector (mmproj) for Qwen ref-image
     std::string ip_adapter_path;       // native IP-Adapter weights (sd.cpp format)
+    std::string motion_module_path;    // AnimateDiff motion module (sd.cpp --motion-module)
     int n_threads = 8;
     bool keep_vae_on_cpu = false;
     bool keep_clip_on_cpu = false;
@@ -161,6 +162,9 @@ public:
 
     std::vector<Image> generate(const ImageGenerationParams& params);
 
+    // AnimateDiff / video: N frames from the loaded motion module.
+    std::vector<Image> generate_video(const ImageGenerationParams& params, int video_frames, int fps);
+
     // LoRA management (persistent, applied at runtime during generate)
     void set_lora(const std::string& path, float multiplier);
     void clear_loras();
@@ -171,6 +175,9 @@ public:
                        const std::string& image_path,
                        float weight);
     void set_ipadapter_enabled(bool enabled, float weight);
+
+    // AnimateDiff: load a motion module (reloads the context). Empty clears it.
+    void set_motion_module(const std::string& path);
 
     // Native model version name (e.g. "SDXL") exposed by sd.cpp
     std::string get_model_version_name() const;
@@ -192,6 +199,10 @@ public:
     // ControlNet: hot-swap the control net and set the per-generation control image.
     bool load_control_net(const std::string& path);
     void set_control_image(const std::string& image_path, float strength);
+
+    // ControlNet for video (AnimateDiff): one hint image per frame, consumed in
+    // order and/or cycled. Pass an empty list to clear.
+    void set_control_frames(const std::vector<std::string>& image_paths, float strength);
 
     // Inpainting: set the mask image (used together with set_init_image).
     void set_mask(const std::string& mask_path);
@@ -420,6 +431,22 @@ int sd_pipeline_set_ipadapter(sd_pipeline_t pipeline,
  * Enable/disable the loaded IPAdapter for subsequent generate() calls.
  * Set weight <= 0 to disable.
  */
+/* Load an AnimateDiff motion module (reloads ctx). path == "" clears it. */
+int sd_pipeline_set_motion_module(sd_pipeline_t pipeline, const char* path);
+
+/* AnimateDiff: generate `video_frames` frames and write them as PNG.
+ * output_pattern: a directory (-> <dir>/frame_%03d.png) or a printf-style path with one %d. */
+int sd_pipeline_generate_animatediff(sd_pipeline_t pipeline,
+                                     const char* prompt,
+                                     const char* negative_prompt,
+                                     int width, int height,
+                                     int steps, float cfg,
+                                     const char* sample_method,
+                                     const char* scheduler,
+                                     int64_t seed,
+                                     int video_frames, int fps,
+                                     const char* output_pattern);
+
 int sd_pipeline_set_ipadapter_enabled(sd_pipeline_t pipeline,
                                        int enabled,
                                        float weight);
@@ -446,6 +473,24 @@ int sd_pipeline_load_control_net(sd_pipeline_t pipeline, const char* path);
 int sd_pipeline_set_control_image(sd_pipeline_t pipeline,
                                   const char* image_path,
                                   float strength);
+
+/**
+ * Set per-frame ControlNet hint images for video (AnimateDiff).
+ * `paths` is an array of `count` image paths, consumed in frame order.
+ * Pass count <= 0 (or nullptr) to clear. Returns 0 on success.
+ */
+int sd_pipeline_set_control_frames(sd_pipeline_t pipeline,
+                                   const char** paths,
+                                   int count,
+                                   float strength);
+
+/**
+ * CSV/newline-separated convenience variant of sd_pipeline_set_control_frames
+ * (used by the static FFI which cannot pass arrays of strings).
+ */
+int sd_pipeline_set_control_frames_csv(sd_pipeline_t pipeline,
+                                       const char* paths_csv,
+                                       float strength);
 
 /**
  * Set the inpainting mask image (grayscale). Used with sd_pipeline_set_init_image.
