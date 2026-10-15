@@ -76,7 +76,7 @@ LD_LIBRARY_PATH=$PWD/cpp/imgproc/build ./imgproc/mirror_gif IN.gif OUT.gif
 - **ImageStat**：mean/median/extrema/stddev/sum。
 - **ImageDraw**：point/line/rectangle/rounded_rectangle/ellipse/polygon/arc。**ImageFont**：**FreeType**（运行时链接 `libfreetype.so.6`，与 Pillow 同引擎）+ `getbbox`/`multiline_text`。另有 `putalpha`。
 
-**近似项**（未逐位对齐，已在差异测试放宽容差）：`thumbnail`（Pillow 的 `reducing_gap` 路径）、`draw.rounded_rect`/`draw.chord`（栅格化细节）。`BoxBlur`/`GaussianBlur` 已按 `BoxBlur.c`（分数半径滑窗）精确对齐。
+**近似项**（未逐位对齐，已在差异测试放宽容差）：`draw.rounded_rect`/`draw.chord`（栅格化细节）。`thumbnail`（`reducing_gap` 两步）、`BoxBlur`/`GaussianBlur` 均已精确对齐。
 
 差分测试当前 **97 项全部通过**（像素项 max=0；文字项 bboxΔ=0；Floyd–Steinberg 逐像素 99.2%）——含 `resize.{nearest,bilinear,lanczos}`（已按 Pillow
 `Resample.c` 定点算法精确对齐）、全部 transpose / Ops / Chops / Enhance / Filter。GIF 镜像与源逐像素 **maxdiff=0**。

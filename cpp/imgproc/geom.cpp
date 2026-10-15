@@ -139,11 +139,65 @@ void* img_resize(void* p, int nw, int nh, const char* resample) {
     return img_resize_ex(p, nw, nh, resample, 0, 0, 0, 0);
 }
 
-void* img_thumbnail(void* p, int w, int h) {
+static Image* reduce_box(Image* im, int fx, int fy, int b0, int b1, int b2, int b3) {
+    Image* rg = (im->frames[0].bpp == 4) ? im : to_rgba(im);
+    int bw = b2 - b0, bh = b3 - b1;
+    int ow = (bw + fx - 1) / fx, oh = (bh + fy - 1) / fy;
+    Image* o = new_rgba(ow, oh, rg->n); o->loop = rg->loop;
+    for (int f = 0; f < rg->n; ++f) {
+        uint8_t* s = rg->frames[f].data.data(); uint8_t* d = o->frames[f].data.data();
+        for (int y = 0; y < oh; ++y) for (int x = 0; x < ow; ++x) {
+            long sr = 0, sg = 0, sb = 0, sa = 0, cnt = 0;
+            for (int j = 0; j < fy; ++j) for (int i = 0; i < fx; ++i) {
+                int sy = b1 + y * fy + j, sx = b0 + x * fx + i;
+                if (sx < 0 || sx >= rg->w || sy < 0 || sy >= rg->h) continue;
+                uint8_t* q = s + ((size_t)sy * rg->w + sx) * 4; sr += q[0]; sg += q[1]; sb += q[2]; sa += q[3]; cnt++;
+            }
+            uint8_t* dd = d + ((size_t)y * ow + x) * 4;
+            if (cnt) { dd[0] = (uint8_t)(sr / cnt); dd[1] = (uint8_t)(sg / cnt); dd[2] = (uint8_t)(sb / cnt); dd[3] = (uint8_t)(sa / cnt); }
+        }
+    }
+    if (rg != im) delete rg;
+    return o;
+}
+
+// 对齐 Pillow Image.thumbnail（含 reducing_gap 两步优化 + round_aspect + _get_safe_box）
+void* img_thumbnail(void* p, int sw, int sh) {
     Image* im = (Image*)p; if (!im) return nullptr;
-    float s = std::min((float)w / im->w, (float)h / im->h); if (s > 1) s = 1;
-    int nw = std::max(1, (int)(im->w * s)), nh = std::max(1, (int)(im->h * s));
-    Image* r = (Image*)img_resize(im, nw, nh, "lanczos");
+    int W = im->w, H = im->h;
+    int px = sw, py = sh;
+    if (px >= W && py >= H) return im;
+    double aspect = (double)W / H;
+    if ((double)px / py >= aspect) {
+        double num = py * aspect; int nf = (int)floor(num), nc = (int)ceil(num);
+        double kf = fabs(aspect - nf / (double)py), kc = fabs(aspect - nc / (double)py);
+        px = std::max(kf <= kc ? nf : nc, 1);
+    } else {
+        double num = px / aspect; int nf = (int)floor(num), nc = (int)ceil(num);
+        auto ky = [&](int n) { return n == 0 ? 0.0 : fabs(aspect - px / (double)n); };
+        py = std::max(ky(nf) <= ky(nc) ? nf : nc, 1);
+    }
+    int finalW = px, finalH = py;
+    const double support = 2.0;  // BICUBIC
+    double scale_x = (double)W / finalW, scale_y = (double)H / finalH;
+    double sup_x = (support - 0.5) * scale_x, sup_y = (support - 0.5) * scale_y;
+    int fx = (int)((double)W / finalW / 2.0) ? (int)((double)W / finalW / 2.0) : 1;
+    int fy = (int)((double)H / finalH / 2.0) ? (int)((double)H / finalH / 2.0) : 1;
+    Image* base = im; Image* tmp = nullptr;
+    double bx0 = 0, by0 = 0, bx1 = W, by1 = H;
+    if (fx > 1 || fy > 1) {
+        int rb0 = std::max(0, (int)(0 - sup_x));
+        int rb1 = std::max(0, (int)(0 - sup_y));
+        int rb2 = std::min(W, (int)ceil(W + sup_x));
+        int rb3 = std::min(H, (int)ceil(H + sup_y));
+        tmp = reduce_box(im, fx, fy, rb0, rb1, rb2, rb3);
+        bx0 = (0 - (double)rb0) / fx; by0 = (0 - (double)rb1) / fy;
+        bx1 = ((double)W - rb0) / fx; by1 = ((double)H - rb1) / fy;
+        base = tmp;
+    }
+    Image* r = (Image*)img_resize_ex(base, finalW, finalH, "bicubic", (float)bx0, (float)by0, (float)bx1, (float)by1);
+    if (tmp) delete tmp;
+    // 就地替换
     *im = *r; delete r; return im;
 }
 

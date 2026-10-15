@@ -369,7 +369,7 @@ case("blend", lambda: Image.blend(img_rgb, img2, 0.35), lambda: P.img_blend(h_rg
 case("ops.colorize", lambda: ImageOps.colorize(img_rgb.convert("L"), (0, 0, 0), (255, 255, 255), (255, 0, 0)), lambda: P.img_colorize(h_rgb, 0x000000FF, 0xFFFFFFFF, b"255,0,0,128"), tol=2)
 case("ops.expand", lambda: ImageOps.expand(img_rgb, 6, (10, 20, 30)), lambda: P.img_expand(h_rgb, 6, 0x0A141EFF), tol=0)
 case("ops.scale", lambda: ImageOps.scale(img_rgb, 2.5, Image.Resampling.NEAREST), lambda: P.img_scale(h_rgb, 2.5, 2.5, b"nearest"), tol=0)
-case("thumbnail", lambda: (lambda i: (i.thumbnail((20, 20)), i)[1])(img_rgb.copy()), lambda: P.img_thumbnail(P.img_copy(h_rgb), 20, 20), tol=12)
+case("thumbnail", lambda: (lambda i: (i.thumbnail((20, 20)), i)[1])(img_rgb.copy()), lambda: P.img_thumbnail(P.img_copy(h_rgb), 20, 20), tol=0)
 case("point.lut", lambda: img_rgb.point(lambda v: v // 2), lambda: P.img_point(h_rgb, -1, ",".join(str(v // 2) for v in range(256)).encode()), tol=1)
 case("split.merge", lambda: Image.merge("RGB", img_rgb.split()[::-1]), lambda: P.img_merge_rgb(P.img_split(h_rgb, 2), P.img_split(h_rgb, 1), P.img_split(h_rgb, 0)), tol=0)
 case("getpixel", lambda: Image.new("RGB", (1, 1), img_rgb.getpixel((3, 4))), lambda: P.from_np(np.full((1, 1, 3), [P.img_getpixel(h_rgb, 3, 4) >> 24 & 255, P.img_getpixel(h_rgb, 3, 4) >> 16 & 255, P.img_getpixel(h_rgb, 3, 4) >> 8 & 255], np.uint8)), tol=0)
