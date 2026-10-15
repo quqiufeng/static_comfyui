@@ -282,6 +282,8 @@ _pfa = np.array(_pf); _ofa = P.to_np(_of)[:, :, 0]
 _ratio = float((_pfa == _ofa).mean())
 results.append(("convert.P (floyd)", "PASS" if _ratio > 0.98 else "DIFF", f"match={_ratio*100:.1f}%", 0 if _ratio > 0.98 else 1))
 
+case("effect.mandelbrot", lambda: Image.effect_mandelbrot((60, 50), (-2.0, -1.5, 1.0, 1.5), 32), lambda: P.img_effect_mandelbrot(60, 50, -2.0, -1.5, 1.0, 1.5, 32), tol=0)
+
 # 报告
 print(f"{'case':28} {'st':4}  detail")
 fails = 0

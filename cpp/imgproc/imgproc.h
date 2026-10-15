@@ -123,6 +123,9 @@ void*       img_fit(void* im, int w, int h, const char* resample, float cx, floa
 void*       img_contain(void* im, int w, int h, const char* resample, int fill_rgba);
 void*       img_ops_pad(void* im, int w, int h, const char* resample, int color_rgba, float cx, float cy);
 int         img_color_getrgb(const char* color, char* out_csv, int outlen);  // ImageColor.getrgb
+void*       img_effect_mandelbrot(int w, int h, float x0, float y0, float x1, float y1, int quality);
+void*       img_effect_noise(int w, int h, float sigma);
+void*       img_linear_gradient(void);
 int         img_draw_chord(void* im, int x0, int y0, int x1, int y1, float s, float e, int rgba, int fill_rgba);
 int         img_draw_pieslice(void* im, int x0, int y0, int x1, int y1, float s, float e, int rgba, int fill_rgba);
 
