@@ -129,6 +129,7 @@ void*       img_effect_mandelbrot(int w, int h, float x0, float y0, float x1, fl
 void*       img_effect_noise(int w, int h, float sigma);
 void*       img_linear_gradient(void);
 void*       img_radial_gradient(void);
+void*       img_lut3d(void* im, const char* table_csv, int channels, int s1, int s2, int s3);
 int         img_draw_chord(void* im, int x0, int y0, int x1, int y1, float s, float e, int rgba, int fill_rgba);
 int         img_draw_pieslice(void* im, int x0, int y0, int x1, int y1, float s, float e, int rgba, int fill_rgba);
 

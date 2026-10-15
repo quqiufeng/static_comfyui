@@ -411,6 +411,18 @@ def our_rrect():
     h = P.img_copy(h_rgb); P.img_draw_rounded_rect(h, 5, 5, 35, 30, 8, 0, 0xC82828FF); return h
 case("draw.rounded_rect", pil_rrect, our_rrect, tol=220)
 
+# ---- Color3DLUT ----
+try:
+    N = 5
+    tab = np.random.default_rng(9).random(N * N * N * 3).tolist()
+    pl = np.array(img_rgb.filter(ImageFilter.Color3DLUT(N, tab)))
+    csv = ",".join(repr(x) for x in tab)
+    ol = P.to_np(P.img_lut3d(h_rgb, csv.encode(), 3, N, N, N))[:, :, :3]
+    d = int(np.abs(pl.astype(int) - ol.astype(int)).max())
+    results.append(("Color3DLUT", "PASS" if d == 0 else "DIFF", f"maxΔ={d}", d))
+except Exception as e:
+    results.append(("Color3DLUT", "ERR", repr(e)[:60], 999))
+
 # 报告
 print(f"{'case':28} {'st':4}  detail")
 fails = 0

@@ -45,7 +45,7 @@ MAP = {
     ("ImageFilter", "UnsharpMask"): "img_filter", ("ImageFilter", "MedianFilter"): "img_filter",
     ("ImageFilter", "MinFilter"): "img_filter", ("ImageFilter", "MaxFilter"): "img_filter",
     ("ImageFilter", "ModeFilter"): "img_filter", ("ImageFilter", "RankFilter"): "img_filter",
-    ("ImageFilter", "Color3DLUT"): None, ("ImageFilter", "GaussianBlur"): "img_filter",
+    ("ImageFilter", "Color3DLUT"): "img_lut3d", ("ImageFilter", "GaussianBlur"): "img_filter",
     ("ImageEnhance", "Color"): "img_enhance", ("ImageEnhance", "Contrast"): "img_enhance",
     ("ImageEnhance", "Brightness"): "img_enhance", ("ImageEnhance", "Sharpness"): "img_enhance",
     ("ImageStat", "Stat"): "img_stat",

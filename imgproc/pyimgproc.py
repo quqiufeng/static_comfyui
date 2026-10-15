@@ -141,3 +141,4 @@ def open_np(path):
 img_thumbnail = _sig("img_thumbnail", _p, [_p, _ci, _ci])
 img_getpixel = _sig("img_getpixel", _ci, [_p, _ci, _ci])
 img_putpixel = _sig("img_putpixel", _ci, [_p, _ci, _ci, _ci])
+img_lut3d = _sig("img_lut3d", _p, [_p, _cs, _ci, _ci, _ci, _ci])
