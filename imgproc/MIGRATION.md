@@ -74,3 +74,53 @@ Python 的自省（`inspect` / `dir()` / 签名）能**机器枚举出全部接�
 
 把 `pil_surface.py` 的模块列表一换（numpy/cv2/…）、`difftest.py` 的用例一换即可。
 C ABI 是稳定面，**多前端可绑**：StaticPy ELF、LuaJIT FFI、Python ctypes 调同一份 `.so`。
+
+---
+
+# 经验（本轮实战总结）
+
+## A. 三条"补齐运行时"的路径
+
+1. **有现成的 C 库** → 运行时挂 `.so`（`load-shared-object` / `DT_NEEDED`）。
+   本轮：`libgif.so.7`、`libwebp.so.7`、`libtiff.so.6`、`libfreetype.so.6`。
+2. **没有现成的** → 自己写 **C++ helper** 集成（`libimgproc.so` 就是这一层）。
+3. **语法不够兼容 Python** → **直接改编译器**，让翻译器产出正确的 **Scheme IR**。
+   本轮：给 `static_translate.py` 加 **lambda 表达式 + 一等函数**（赋值/传参/调用不加
+   `static_` 前缀），据此把 `Image.eval`（要回调）做成了，且与 Pillow 逐像素一致。
+
+> 判据只有一条：**产出的 Scheme IR 对不对**。IR 对了，后端 Chez 负责其余。
+
+## B. 精确对齐的唯一方法：照抄 C 源的数值路径
+
+**凭直觉写一定对不上。** 必须逐行移植 Pillow 的 C 实现——包括数据结构、运算顺序、
+整数/浮点行为、边界处理、定点舍入。本轮遇到的"坑"：
+
+| 模块 | 关键细节（照抄才对） | 源码 |
+|---|---|---|
+| 卷积 | 浮点累加 + `offset+0.5` 截断；边界**复制原值**（非 clamp）；**3×3 的垂直方向与 5×5 相反** | `Filter.c` |
+| 重采样 | 定点系数 `PRECISION_BITS=22`、两趟 separable；**nearest 用 double 增量累积** `xo+=a0`（float 会在边界差 1px） | `Resample.c` |
+| 盒/高斯模糊 | **分数半径**滑窗（`ww/fw` 定点权重），高斯=3 趟盒 | `BoxBlur.c` |
+| 调色板 `convert("P")` | browser 调色板（10 空 + 6×6×6）+ Floyd–Steinberg + **Heckbert 盒搜索缓存**（按 `>>2` 桶） | `Palette.c` / `Convert.c` |
+| 量化 | MEDIANCUT：哈希聚合 + **三轴链表** + **按 pixelCount 的最大堆**；MAXCOVERAGE：**最远点采样**；FASTOCTREE：细/粗/查找立方 | `Quant.c` / `QuantOctree.c` |
+| Chops / composite | 整数公式；`Image.composite` 是 `(a*m+b*(255-m)+127)/255`（mask=255 取 image1） | `Chops.c` / `Image.py` |
+| thumbnail | `round_aspect` + `_get_safe_box` + `reduce`（盒平均）两步 | `Image.py` |
+
+**结论**：难啃的（quantize 的 median-cut / octree）只要照搬数据结构和数值顺序，也能 1:1。
+
+## C. 自动化的价值
+
+- **自省**给"接口面"（`inspect`/`dir`/签名）→ 清单、铺桩；
+- **差分测试**给"语义"判据（同输入 → PIL vs 我们 → 逐像素 max/mean）→ **对不齐由机器报**；
+- 人（或 agent）只做两件事：**读 C 源对齐** + **改实现**，然后重跑差分直到全绿。
+
+## D. 架构经验
+
+- **C ABI 是稳定面**：一份 `libimgproc.so` 被 StaticPy ELF / LuaJIT FFI / Python ctypes 共用；
+  依赖塌成一层，无 import 解析、无 venv、无版本求解。
+- **前端可集成**：`pil_lib`（纯库）+ `concat`（自举工具，也是 StaticPy 写的）+ `build_app.sh`。
+- **产物即部署**：AOT 成独立 ELF/SO，拷文件即可跑。
+
+## E. 尚未对齐（真·长尾）
+
+`ImageOps.deform`（需网格变换回调）、`ImageFilter.Color3DLUT`（.cube/三线性）、
+`ImageDraw` 圆角/弦的逐像素栅格化。均已记录，非阻塞。

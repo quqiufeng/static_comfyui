@@ -81,6 +81,12 @@ LD_LIBRARY_PATH=$PWD/cpp/imgproc/build ./imgproc/mirror_gif IN.gif OUT.gif
 差分测试当前 **97 项全部通过**（像素项 max=0；文字项 bboxΔ=0；Floyd–Steinberg 逐像素 99.2%）——含 `resize.{nearest,bilinear,lanczos}`（已按 Pillow
 `Resample.c` 定点算法精确对齐）、全部 transpose / Ops / Chops / Enhance / Filter。GIF 镜像与源逐像素 **maxdiff=0**。
 
+## 经验（见 MIGRATION.md 详述）
+
+三条补齐路径：**运行时挂 `.so`** / **自写 C++ helper** / **改编译器对齐 Scheme IR**（本轮加 lambda/一等函数 → `Image.eval`）。
+精确对齐只能**照抄 Pillow 的 C 源数值路径**（Filter/Resample/BoxBlur/Palette/Quant*），
+配合**自省 + 差分测试**自动化闭环。工具（concat）用 StaticPy 自举。
+
 ## 覆盖面（自省核对）
 
 `frontend_coverage.py` 用 PIL 自省清单核对我们的实现：**覆盖 97/100**（仅 `Image.eval`（需回调）、`ImageOps.deform`、`ImageFilter.Color3DLUT` 待做）。
