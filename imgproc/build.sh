@@ -8,5 +8,7 @@ bash "$ROOT/cpp/imgproc/build_cpp.sh"
 echo ">>> [2/2] mirror_gif (StaticPy)"
 mkdir -p /tmp/staticpy-cache/imgproc
 ( cd "$ROOT" && bash staticpy/static_build_comfycli.sh imgproc/mirror_gif.static.py imgproc/mirror_gif imgproc/imgproc_ffi.scm \
-      && bash staticpy/static_build_comfycli.sh imgproc/pilcli.static.py imgproc/pilcli imgproc/imgproc_ffi.scm )
+      && bash staticpy/static_build_comfycli.sh imgproc/pilcli.static.py imgproc/pilcli imgproc/imgproc_ffi.scm \
+      && python3 imgproc/concat.py imgproc/pil_lib.static.py imgproc/pil_cli.static.py > /tmp/staticpy-cache/pil.bundle.static.py \
+      && bash staticpy/static_build_comfycli.sh /tmp/staticpy-cache/pil.bundle.static.py imgproc/pil imgproc/imgproc_ffi.scm )
 echo "=== build done ==="

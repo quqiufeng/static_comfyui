@@ -260,3 +260,5 @@ cpp/face/facecli
 /imgproc/mirror_gif
 /imgproc/mirror_gif.so
 /cpp/imgproc/build/
+/make_banner
+/make_banner.so

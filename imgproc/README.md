@@ -23,7 +23,12 @@ imgproc/
 ├── build.sh                 # 一键：C++ 库 + StaticPy ELF
 ├── imgproc_ffi.scm
 ├── mirror_gif.static.py     # 示例算子：GIF 逐帧镜像（无损，走索引帧）
-├── pilcli.static.py         # StaticPy 版图像处理 CLI（convert/resize/crop/transpose/rotate/invert/...）
+├── pil_lib.static.py        # ★ StaticPy 版 Pillow 库（纯函数，无 main，可被集成）
+├── pil_cli.static.py        # pil 的 CLI 分发（import pil_lib + main）
+├── concat.py                # 把 pil_lib 与任意用户程序拼成 bundle
+├── build_app.sh             # 用本库构建用户程序：build_app.sh USER.static.py OUT
+├── examples/                # 集成示例（make_banner：用库而非 CLI）
+├── pilcli.static.py         # 早期 CLI（convert/resize/crop/...）
 ├── pyimgproc.py             # libimgproc.so 的 ctypes 绑定（差分测试用）
 ├── pil_surface.py           # 自省 Pillow 公开 API → 覆盖面清单
 ├── pil_api.md               # 上面生成的清单
@@ -73,6 +78,30 @@ LD_LIBRARY_PATH=$PWD/cpp/imgproc/build ./imgproc/mirror_gif IN.gif OUT.gif
 
 差分测试当前 **76 项全部通过**（像素项 max=0；文字项 bboxΔ=0；Floyd–Steinberg 逐像素 99.2%）——含 `resize.{nearest,bilinear,lanczos}`（已按 Pillow
 `Resample.c` 定点算法精确对齐）、全部 transpose / Ops / Chops / Enhance / Filter。GIF 镜像与源逐像素 **maxdiff=0**。
+
+## 作为库被集成
+
+`pil_lib.static.py` 是**纯库**（只有 `extern fn` 声明 + 包装函数，没有 `main`），任何 StaticPy 程序都能用它：
+
+```python
+# my_app.static.py
+from pil_lib import img_open, img_save, img_grayscale, img_resize, img_pad, img_draw_line
+
+def main():
+    im = img_open("in.png")
+    g = img_grayscale(im)
+    r = img_resize(g, 120, 90, "lanczos")
+    p = img_pad(r, 8, 8, 8, 8, 0xFFFFFFFF)
+    img_draw_line(p, 8, 8, 128, 98, 0xFF0000FF, 2)
+    img_save(p, "out.png")
+
+# 构建（concat 把库拼进来 → 一个独立 ELF）：
+#   bash imgproc/build_app.sh my_app.static.py my_app
+#   LD_LIBRARY_PATH=cpp/imgproc/build ./my_app
+```
+
+`concat.py` 去掉 `import` 行并把库与用户代码合到一个作用域；`build_app.sh` 封装了「concat + AOT 编译 + 链接」。
+C ABI（`libimgproc.so`）本身也是稳定面，LuaJIT/ctypes 等无需 StaticPy 即可直接调用。
 
 ## 写新算子
 
