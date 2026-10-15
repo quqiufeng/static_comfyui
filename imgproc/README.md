@@ -70,7 +70,7 @@ LD_LIBRARY_PATH=$PWD/cpp/imgproc/build ./imgproc/mirror_gif IN.gif OUT.gif
 - **几何**：crop · resize（+带 box）· thumbnail · rotate · transpose(7) · pad · scale · paste · paste(mask) · composite · alpha_composite(带位置) · blend · fit · contain。
 - **ImageOps**：invert · grayscale · posterize · solarize · autocontrast · equalize · colorize · mirror · expand · fit · contain · pad。
 - **ImageChops**：add/subtract/difference/multiply/screen/darker/lighter/blend · **add_modulo/subtract_modulo** · **soft_light/hard_light/overlay** · logical_and/or/xor · const · offset · **composite(a,b,mask)**。**ImageColor**：getrgb。**ImageStat**：getextrema。
-- **调色板/量化**：`convert("P")` = Pillow browser 调色板（10 空 + 6×6×6）+ **Floyd–Steinberg 抖动**，最近色用 **Heckbert 盒搜索缓存**（`Palette.c` 精确移植，无抖动逐像素一致）。
+- **调色板/量化**：`convert("P")` = browser 调色板 + Floyd–Steinberg + Heckbert 缓存（`Palette.c`）；`quantize()` MEDIANCUT 为 `Quant.c` 精确移植（哈希聚合+3链表排序+最大堆 median-cut+逐盒平均），**索引/调色板与 Pillow 一致**。
 - **ImageEnhance**：brightness/contrast/color/sharpness。
 - **ImageFilter**：BLUR·SMOOTH(S)·SHARPEN·DETAIL·EDGE_ENHANCE(MORE)·FIND_EDGES·CONTOUR·EMBOSS·UNSHARP·BoxBlur·GaussianBlur·Median/Min/Max/Mode/Rank —— **卷积已按 Pillow `Filter.c` 精确对齐（含浮点/边界/3×3 翻转）**。
 - **ImageStat**：mean/median/extrema/stddev/sum。

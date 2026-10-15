@@ -302,13 +302,13 @@ except Exception as e:
 
 # ---- quantize / remap_palette（功能校验）----
 try:
+    pq = np.array(img_rgb.quantize(16, Image.Quantize.MEDIANCUT))
     hq = P.img_quantize(h_rgb, 16, 0)
-    buf = C.create_string_buffer(8192); P.img_getpalette(hq, buf, 8192)
-    ncol = len([x for x in buf.value.decode().rstrip(",").split(",") if x]) // 3
-    ok = 1 <= ncol <= 16
-    results.append(("quantize", "PASS" if ok else "DIFF", f"colors={ncol}", 0 if ok else 1))
+    oi = np.frombuffer(C.string_at(P.img_frame_ptr(hq, 0), W * H), np.uint8).reshape(H, W)
+    ratio = float((pq.astype(int) == oi.astype(int)).mean())
+    results.append(("quantize.MEDIANCUT", "PASS" if ratio > 0.999 else "DIFF", f"match={ratio*100:.1f}%", 0 if ratio > 0.999 else 1))
 except Exception as e:
-    results.append(("quantize", "ERR", repr(e)[:60], 999))
+    results.append(("quantize.MEDIANCUT", "ERR", repr(e)[:60], 999))
 
 # ---- getcolors ----
 try:

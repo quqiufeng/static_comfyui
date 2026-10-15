@@ -233,11 +233,6 @@ void* img_point(void* p, int channel, const char* lut_csv) {
     return o;
 }
 
-void* img_quantize(void* p, int colors, int method) {
-    (void)method;
-    Image* im = (Image*)p; if (!im || colors < 1) return nullptr;
-    return quantize_to_P(im, clampi(colors, 1, 256), nullptr);
-}
 
 int img_putpalette(void* p, const char* rgb_csv) {
     Image* im = (Image*)p; if (!im || !rgb_csv) return -1;

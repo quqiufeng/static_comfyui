@@ -57,7 +57,7 @@ MAP = {
     ("Image.Image", "convert"): "img_convert", ("Image.Image", "resize"): "img_resize",
     ("Image.Image", "crop"): "img_crop", ("Image.Image", "rotate"): "img_rotate",
     ("Image.Image", "transpose"): "img_transpose", ("Image.Image", "paste"): "img_paste",
-    ("Image.Image", "thumbnail"): "img_thumbnail", ("Image.Image", "quantize"): "img_quantize",
+    ("Image.Image", "thumbnail"): "img_thumbnail", ("Image.Image", "quantize"): "img_quantize(Quant.c 精确)",
     ("Image.Image", "getpixel"): "img_getpixel", ("Image.Image", "putpixel"): "img_putpixel",
     ("Image.Image", "split"): "img_split", ("Image.Image", "getbbox"): "img_getbbox4",
     ("Image.Image", "getcolors"): "img_getcolors", ("Image.Image", "getchannel"): "img_getchannel",
