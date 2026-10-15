@@ -74,6 +74,114 @@ Image* quantize_to_P(Image* im, int colors, const std::vector<RGB>* forced) {
 
 extern "C" {
 
+// Pillow 的 "browser" 调色板：索引 0..9 黑，10..225 = 6x6x6 立方（b/g/r 步长 51）
+static std::vector<RGB> browser_palette() {
+    std::vector<RGB> pal(226, RGB{0, 0, 0});
+    int i = 10;
+    for (int b = 0; b < 256; b += 51) for (int g = 0; g < 256; g += 51) for (int r = 0; r < 256; r += 51) pal[i++] = {(uint8_t)r, (uint8_t)g, (uint8_t)b};
+    return pal;
+}
+static inline int nearest_sq(const std::vector<RGB>& pal, int r, int g, int b) {
+    int best = 0; long bd = 1L << 30;
+    for (size_t i = 0; i < pal.size(); ++i) { int dr = r - pal[i].r, dg = g - pal[i].g, db = b - pal[i].b; long d = (long)dr * dr + (long)dg * dg + (long)db * db; if (d < bd) { bd = d; best = (int)i; } }
+    return best;
+}
+// Pillow ImagingPaletteCacheUpdate 的精确移植（Heckbert 盒搜索）：
+// 按 (r>>2,g>>2,b>>2) 桶，首次用当时精确 RGB 填满所在 8x8x8 盒
+static inline int DIST(int a, int b, int s) { int d = a - b; return d * d * s; }
+static void cache_update(const std::vector<RGB>& pal, std::vector<int>& cache, int r, int g, int b) {
+    int r0 = r & 0xe0, r1 = r0 + 0x1f, rc = (r0 + r1) / 2;
+    int g0 = g & 0xe0, g1 = g0 + 0x1f, gc = (g0 + g1) / 2;
+    int b0 = b & 0xe0, b1 = b0 + 0x1f, bc = (b0 + b1) / 2;
+    std::vector<unsigned int> dmin(pal.size());
+    unsigned int dmax = ~0u;
+    for (size_t i = 0; i < pal.size(); ++i) {
+        int pr = pal[i].r, pg = pal[i].g, pb = pal[i].b;
+        unsigned int tmin = (pr < r0) ? DIST(pr, r0, 1) : (pr > r1) ? DIST(pr, r1, 1) : 0;
+        unsigned int tmax = (pr <= rc) ? DIST(pr, r1, 1) : DIST(pr, r0, 1);
+        tmin += (pg < g0) ? DIST(pg, g0, 1) : (pg > g1) ? DIST(pg, g1, 1) : 0;
+        tmax += (pg <= gc) ? DIST(pg, g1, 1) : DIST(pg, g0, 1);
+        tmin += (pb < b0) ? DIST(pb, b0, 1) : (pb > b1) ? DIST(pb, b1, 1) : 0;
+        tmax += (pb <= bc) ? DIST(pb, b1, 1) : DIST(pb, b0, 1);
+        dmin[i] = tmin;
+        if (tmax < dmax) dmax = tmax;
+    }
+    const int BOX = 8, VOL = 512, RSTEP = 4, GSTEP = 4, BSTEP = 4;
+    std::vector<unsigned int> d(VOL, ~0u);
+    std::vector<unsigned char> c(VOL, 0);
+    for (size_t i = 0; i < pal.size(); ++i) {
+        if (dmin[i] <= dmax) {
+            int ri = (r0 - pal[i].r), gi = (g0 - pal[i].g), bi = (b0 - pal[i].b);
+            int rd = ri * ri + gi * gi + bi * bi;
+            ri = ri * (2 * RSTEP) + RSTEP * RSTEP; gi = gi * (2 * GSTEP) + GSTEP * GSTEP; bi = bi * (2 * BSTEP) + BSTEP * BSTEP;
+            int rx = ri, j = 0;
+            for (int rr = 0; rr < BOX; ++rr) {
+                int gd = rd, gx = gi;
+                for (int gg = 0; gg < BOX; ++gg) {
+                    int bd = gd, bx = bi;
+                    for (int bb = 0; bb < BOX; ++bb) {
+                        if ((unsigned)bd < d[j]) { d[j] = (unsigned)bd; c[j] = (unsigned char)i; }
+                        bd += bx; bx += 2 * BSTEP * BSTEP; j++;
+                    }
+                    gd += gx; gx += 2 * GSTEP * GSTEP;
+                }
+                rd += rx; rx += 2 * RSTEP * RSTEP;
+            }
+        }
+    }
+    int j = 0;
+    for (int rr = r0; rr < r1; rr += 4) for (int gg = g0; gg < g1; gg += 4) for (int bb = b0; bb < b1; bb += 4)
+        cache[(rr >> 2) + (gg >> 2) * 64 + (bb >> 2) * 64 * 64] = c[j++];
+}
+static inline int nearest_cached(const std::vector<RGB>& pal, std::vector<int>& cache, int r, int g, int b) {
+    int bkt = (r >> 2) + (g >> 2) * 64 + (b >> 2) * 64 * 64;
+    if (cache[bkt] == 0x100) cache_update(pal, cache, r, g, b);
+    return cache[bkt];
+}
+static inline int clip8c(int v) { return v < 0 ? 0 : (v > 255 ? 255 : v); }
+
+// 对齐 Pillow Convert.c 的 topalette：默认 browser 调色板 + 可选 Floyd-Steinberg 抖动
+void* img_convert_p(void* p, int dither) {
+    Image* im = (Image*)p; if (!im) return nullptr;
+    Image* rg = as_rgba(im);
+    std::vector<RGB> pal = browser_palette();
+    Image* o = new Image(); o->w = rg->w; o->h = rg->h; o->n = rg->n; o->loop = rg->loop; o->mode = "P";
+    o->frames.resize(rg->n);
+    int W = rg->w, H = rg->h;
+    for (int f = 0; f < rg->n; ++f) {
+        Frame& d = o->frames[f]; d.bpp = 1; d.hasPalette = true; d.palette = pal; d.delay = rg->frames[f].delay;
+        d.data.assign((size_t)W * H, 0);
+        uint8_t* in = rg->frames[f].data.data(); uint8_t* out = d.data.data();
+        std::vector<int> cache(64 * 64 * 64, 0x100);
+        if (!dither) {
+            for (int i = 0; i < W * H; ++i) out[i] = (uint8_t)nearest_cached(pal, cache, in[i * 4], in[i * 4 + 1], in[i * 4 + 2]);
+        } else {
+            std::vector<int> errors((W + 1) * 3, 0);
+            for (int y = 0; y < H; ++y) {
+                int* e = errors.data();
+                int r, r0 = 0, r1 = 0, g, g0 = 0, g1 = 0, b, b0 = 0, b1 = 0, b2 = 0;
+                r = 0; g = 0; b = 0;
+                uint8_t* row = in + (size_t)y * W * 4;
+                for (int x = 0; x < W; ++x, row += 4) {
+                    r = clip8c(row[0] + (r + e[3 + 0]) / 16);
+                    g = clip8c(row[1] + (g + e[3 + 1]) / 16);
+                    b = clip8c(row[2] + (b + e[3 + 2]) / 16);
+                    int idx = nearest_cached(pal, cache, r, g, b);
+                    out[(size_t)y * W + x] = (uint8_t)idx;
+                    r -= pal[idx].r; g -= pal[idx].g; b -= pal[idx].b;
+                    { int r2 = r, d2 = r + r; r += d2; e[0] = r + r0; r += d2; r0 = r + r1; r1 = r2; r += d2; }
+                    { int g2 = g, d2 = g + g; g += d2; e[1] = g + g0; g += d2; g0 = g + g1; g1 = g2; g += d2; }
+                    { int b2 = b, d2 = b + b; b += d2; e[2] = b + b0; b += d2; b0 = b + b1; b1 = b2; b += d2; }
+                    e += 3;
+                }
+                e[0] = b0; e[1] = b1; e[2] = b2;
+            }
+        }
+    }
+    if (rg != im) delete rg;
+    return o;
+}
+
 void* img_convert(void* p, const char* mode) {
     Image* im = (Image*)p; if (!im || !mode) return nullptr;
     std::string m = mode;
@@ -89,7 +197,7 @@ void* img_convert(void* p, const char* mode) {
         for (int f = 0; f < rg->n; ++f) { Frame& d = o->frames[f]; d.bpp = 4; d.delay = rg->frames[f].delay; d.data.resize(npx(rg) * 4); uint8_t* s = rg->frames[f].data.data(); for (size_t i = 0; i < npx(rg); ++i) { uint8_t l = lum(s[i * 4], s[i * 4 + 1], s[i * 4 + 2]); d.data[i * 4] = d.data[i * 4 + 1] = d.data[i * 4 + 2] = l; d.data[i * 4 + 3] = (m == "LA") ? s[i * 4 + 3] : 255; } }
         if (rg != im) delete rg; return o;
     }
-    if (m == "P") { Image* o = quantize_to_P(rg, 256, nullptr); if (rg != im) delete rg; return o; }
+    if (m == "P") { if (rg != im) delete rg; return img_convert_p(im, 0); }
     if (rg == im) return dup_img(im);
     return rg;
 }

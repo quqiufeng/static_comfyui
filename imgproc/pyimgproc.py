@@ -46,6 +46,7 @@ img_blend = _sig("img_blend", _p, [_p, _p, _cf])
 img_getbbox4 = _sig("img_getbbox4", _ci, [_p, _ci, C.c_char_p, _ci])
 
 img_convert = _sig("img_convert", _p, [_p, _cs])
+img_convert_p = _sig("img_convert_p", _p, [_p, _ci])
 img_split = _sig("img_split", _p, [_p, _ci])
 img_merge_rgb = _sig("img_merge_rgb", _p, [_p, _p, _p])
 img_point = _sig("img_point", _p, [_p, _ci, _cs])

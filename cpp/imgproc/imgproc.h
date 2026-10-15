@@ -66,6 +66,7 @@ int         img_getbbox4(void* im, int rgba, char* out_csv, int out_len);   // "
 
 /* ============================ 颜色 / 模式 / 调色板 ============================ */
 void*       img_convert(void* im, const char* mode);
+void*       img_convert_p(void* im, int dither);
 void*       img_split(void* im, int channel);                               // -> L
 void*       img_merge_rgb(void* r, void* g, void* b);
 void*       img_point(void* im, int channel, const char* lut_csv);          // 256 项 LUT

@@ -266,6 +266,22 @@ try:
 except Exception as e:
     results.append(("text.render", "ERR", repr(e)[:60], 999))
 
+# ---- convert("P")：browser 调色板 + Floyd-Steinberg ----
+def pil_p(dither):
+    idx = np.array(img_rgb.convert("P", dither=dither)).astype(np.uint8)
+    return Image.fromarray(idx, "L")
+def our_p(dither):
+    h = P.img_convert_p(h_rgb, 0 if dither == Image.Dither.NONE else 1)
+    ptr = P.img_frame_ptr(h, 0)
+    idx = np.frombuffer(C.string_at(ptr, W * H), np.uint8).reshape(H, W)
+    return P.img_frombytes(b"L", W, H, C.cast(C.create_string_buffer(idx.tobytes()), C.c_void_p), W * H)
+case("convert.P (none)", lambda: pil_p(Image.Dither.NONE), lambda: our_p(Image.Dither.NONE), tol=0)
+_pn = pil_p(Image.Dither.NONE); _po = our_p(Image.Dither.NONE)
+_pf = pil_p(Image.Dither.FLOYDSTEINBERG); _of = our_p(Image.Dither.FLOYDSTEINBERG)
+_pfa = np.array(_pf); _ofa = P.to_np(_of)[:, :, 0]
+_ratio = float((_pfa == _ofa).mean())
+results.append(("convert.P (floyd)", "PASS" if _ratio > 0.98 else "DIFF", f"match={_ratio*100:.1f}%", 0 if _ratio > 0.98 else 1))
+
 # 报告
 print(f"{'case':28} {'st':4}  detail")
 fails = 0

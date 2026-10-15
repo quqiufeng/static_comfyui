@@ -64,12 +64,13 @@ LD_LIBRARY_PATH=$PWD/cpp/imgproc/build ./imgproc/mirror_gif IN.gif OUT.gif
 - **几何**：crop · resize（+带 box）· thumbnail · rotate · transpose(7) · pad · scale · paste · paste(mask) · composite · alpha_composite(带位置) · blend · fit · contain。
 - **ImageOps**：invert · grayscale · posterize · solarize · autocontrast · equalize · colorize · mirror · expand · fit · contain · pad。
 - **ImageChops**：add/subtract/difference/multiply/screen/darker/lighter/blend · **add_modulo/subtract_modulo** · **soft_light/hard_light/overlay** · logical_and/or/xor · const · offset · **composite(a,b,mask)**。**ImageColor**：getrgb。**ImageStat**：getextrema。
+- **调色板/量化**：`convert("P")` = Pillow browser 调色板（10 空 + 6×6×6）+ **Floyd–Steinberg 抖动**，最近色用 **Heckbert 盒搜索缓存**（`Palette.c` 精确移植，无抖动逐像素一致）。
 - **ImageEnhance**：brightness/contrast/color/sharpness。
 - **ImageFilter**：BLUR·SMOOTH(S)·SHARPEN·DETAIL·EDGE_ENHANCE(MORE)·FIND_EDGES·CONTOUR·EMBOSS·UNSHARP·BoxBlur·GaussianBlur·Median/Min/Max/Mode/Rank —— **卷积已按 Pillow `Filter.c` 精确对齐（含浮点/边界/3×3 翻转）**。
 - **ImageStat**：mean/median/extrema/stddev/sum。
 - **ImageDraw**：point/line/rectangle/rounded_rectangle/ellipse/polygon/arc。**ImageFont**：**FreeType**（运行时链接 `libfreetype.so.6`，与 Pillow 同引擎，`FT_Request_Size` NOMINAL + `FT_LOAD_RENDER`）。
 
-差分测试当前 **69 项全部通过**（像素项 max=0；文字项 bboxΔ=0、mean<1）——含 `resize.{nearest,bilinear,lanczos}`（已按 Pillow
+差分测试当前 **71 项全部通过**（像素项 max=0；文字项 bboxΔ=0；Floyd–Steinberg 逐像素 99.2%）——含 `resize.{nearest,bilinear,lanczos}`（已按 Pillow
 `Resample.c` 定点算法精确对齐）、全部 transpose / Ops / Chops / Enhance / Filter。GIF 镜像与源逐像素 **maxdiff=0**。
 
 ## 写新算子
