@@ -90,3 +90,15 @@ def pil_getmodebase(mode: str) -> str:
 def pil_exif_transpose(im: ptr) -> ptr:
     # 未解析 EXIF orientation，等价于原样返回（无 EXIF 时 Pillow 亦然）
     return img_copy(im)
+
+
+def pil_eval(im: ptr, fn) -> ptr:
+    # 对齐 Pillow Image.eval：对每个通道套用 fn（对 0..255 建 LUT 后 point）
+    lut: str = ""
+    v: int = 0
+    while v < 256:
+        if v > 0:
+            lut = lut + ","
+        lut = lut + string_of_int(fn(v))
+        v = v + 1
+    return img_point(im, -1, lut)

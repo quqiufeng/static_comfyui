@@ -85,6 +85,12 @@ LD_LIBRARY_PATH=$PWD/cpp/imgproc/build ./imgproc/mirror_gif IN.gif OUT.gif
 
 `frontend_coverage.py` 用 PIL 自省清单核对我们的实现：**覆盖 97/100**（仅 `Image.eval`（需回调）、`ImageOps.deform`、`ImageFilter.Color3DLUT` 待做）。
 
+## 编译器扩展（第 3 条路径）
+
+StaticPy 语法不够兼容 Python 时，**直接改翻译器对齐 Scheme IR**（`staticpy/static_translate.py`）：
+已加入 **lambda 表达式** 与 **一等函数**（函数值赋值/传参/调用不加 `static_` 前缀）。
+据此实现了 `Image.eval`（lambda 建 LUT → `img_point`），与 Pillow 逐像素一致。
+
 ## 作为库被集成
 
 `pil_lib.static.py` 是**纯库**（只有 `extern fn` 声明 + 包装函数，没有 `main`），任何 StaticPy 程序都能用它：

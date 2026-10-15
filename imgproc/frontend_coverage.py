@@ -16,7 +16,7 @@ MAP = {
     ("Image", "frombytes"): "img_frombytes", ("Image", "merge"): "img_merge_rgb",
     ("Image", "effect_mandelbrot"): "img_effect_mandelbrot", ("Image", "effect_noise"): "img_effect_noise",
     ("Image", "linear_gradient"): "img_linear_gradient",
-    ("Image", "eval"): None, ("Image", "frombuffer"): "img_frombytes", ("Image", "radial_gradient"): "img_radial_gradient",
+    ("Image", "eval"): "pil_eval(需编译器 lambda 支持)", ("Image", "frombuffer"): "img_frombytes", ("Image", "radial_gradient"): "img_radial_gradient",
     ("Image", "effect_spread"): None, ("Image", "getmodebands"): "pil_getmodebands", ("Image", "getmodebase"): "pil_getmodebase",
     ("ImageOps", "autocontrast"): "img_autocontrast", ("ImageOps", "colorize"): "img_colorize",
     ("ImageOps", "contain"): "img_contain", ("ImageOps", "equalize"): "img_equalize",

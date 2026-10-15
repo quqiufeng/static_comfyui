@@ -872,6 +872,7 @@ def resolve_imported_name(name):
 
 # ====== 全局类型环境 ======
 TYPE_ENV = {}
+CURRENT_PARAMS = set()   # 当前作用域的参数名（调用时不加 static_ 前缀）
 
 def parse_type_annotation(node):
     """从 ast.AnnAssign / ast.arg 解析 Python 类型字符串"""
@@ -2287,6 +2288,16 @@ def translate_expr(node):
         if scheme_fn:
             return scheme_fn
         return mangle_name(node.id)
+    elif isinstance(node, ast.Lambda):
+        global CURRENT_PARAMS
+        ps = [a.arg for a in node.args.args]
+        saved_p = CURRENT_PARAMS
+        CURRENT_PARAMS = CURRENT_PARAMS | set(ps)
+        body = translate_expr(node.body)
+        CURRENT_PARAMS = saved_p
+        return f"(lambda ({' '.join(mangle_name(x) for x in ps)}) {body})"
+    elif isinstance(node, ast.IfExp):
+        return f"(if {translate_expr(node.test)} {translate_expr(node.body)} {translate_expr(node.orelse)})"
     elif isinstance(node, ast.UnaryOp):
         if isinstance(node.op, ast.Not):
             return f"(not {translate_expr(node.operand)})"
@@ -2389,6 +2400,9 @@ def translate_expr(node):
                 return f"({mangle_name(name)} {' '.join(args)})"
             # 局部变量可能是函数值（高阶函数），不加 static_ 前缀
             if name in TYPE_ENV:
+                return f"({mangle_name(name)} {' '.join(args)})"
+            # 当前作用域的参数也可能是函数值
+            if name in CURRENT_PARAMS:
                 return f"({mangle_name(name)} {' '.join(args)})"
             # 用户自定义函数加 static_ 前缀
             return f"(static_{name} {' '.join(args)})"
@@ -2825,6 +2839,9 @@ def translate_function(node, source_file=""):
     global CURRENT_TENSOR_VARS
     saved_tensor_vars = CURRENT_TENSOR_VARS
     CURRENT_TENSOR_VARS = scan_tensor_vars(node.body)
+    global CURRENT_PARAMS
+    saved_params = CURRENT_PARAMS
+    CURRENT_PARAMS = CURRENT_PARAMS | {arg.arg for arg in node.args.args}
 
     name = f"static_{node.name}"
     args = [mangle_name(arg.arg) for arg in node.args.args]
@@ -2892,6 +2909,8 @@ def translate_function(node, source_file=""):
                 inferred = infer_expr_type(stmt.value)
                 if inferred:
                     TYPE_ENV[mangle_name(target)] = inferred
+                if isinstance(stmt.value, ast.Lambda):
+                    TYPE_ENV[mangle_name(target)] = "fn"
                 # 根据目标变量类型选择数组创建方式
                 target_type = TYPE_ENV.get(mangle_name(target))
                 if target_type == "list[float]" and isinstance(stmt.value, ast.Call):
@@ -3041,6 +3060,7 @@ def translate_function(node, source_file=""):
     # 恢复外层类型环境
     TYPE_ENV = saved_env
     CURRENT_TENSOR_VARS = saved_tensor_vars
+    CURRENT_PARAMS = saved_params
     func_ann = debug_annotation(node, source_file)
     header = f"{func_ann}\n" if func_ann else ""
     return f"{header}(define ({name} {' '.join(args)})\n{body})"
