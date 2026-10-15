@@ -262,3 +262,5 @@ cpp/face/facecli
 /cpp/imgproc/build/
 /make_banner
 /make_banner.so
+/concat
+/concat.so

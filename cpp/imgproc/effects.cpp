@@ -63,3 +63,16 @@ void* img_linear_gradient(void) {
 }
 
 }  // extern "C"
+
+extern "C" {
+// Image.radial_gradient：256x256，中心黑到边缘白
+void* img_radial_gradient(void) {
+    Image* im = new_L(256, 256);
+    for (int y = 0; y < 256; ++y) for (int x = 0; x < 256; ++x) {
+        int dx = x - 128, dy = y - 128;
+        int d = (int)sqrt((double)(dx * dx + dy * dy) * 2.0);
+        setL(im, x, y, d >= 255 ? 255 : d);
+    }
+    return im;
+}
+}

@@ -64,3 +64,29 @@ def a(args, i: str) -> str:
 def ai(args, i: str) -> int:
     return string_to_int(py_list_ref(args, string_to_int(i)))
 
+
+
+# ---- Pillow 模块级辅助（纯函数）----
+def pil_getmodebands(mode: str) -> int:
+    if mode == "1" or mode == "L" or mode == "P" or mode == "I" or mode == "F":
+        return 1
+    if mode == "LA" or mode == "PA":
+        return 2
+    if mode == "RGB" or mode == "YCbCr" or mode == "HSV" or mode == "CMYK":
+        return 3
+    if mode == "RGBA" or mode == "RGBX" or mode == "CMYK;I":
+        return 4
+    return 0
+
+
+def pil_getmodebase(mode: str) -> str:
+    if mode == "1" or mode == "L" or mode == "P" or mode == "I" or mode == "F" or mode == "LA" or mode == "PA":
+        return "L"
+    if mode == "RGB" or mode == "RGBA" or mode == "RGBX" or mode == "YCbCr" or mode == "HSV":
+        return "RGB"
+    return ""
+
+
+def pil_exif_transpose(im: ptr) -> ptr:
+    # 未解析 EXIF orientation，等价于原样返回（无 EXIF 时 Pillow 亦然）
+    return img_copy(im)

@@ -339,6 +339,8 @@ try:
 except Exception as e:
     results.append(("webp.decode", "ERR", repr(e)[:60], 999))
 
+case("generators.radial", lambda: Image.radial_gradient("L"), lambda: P.img_radial_gradient(), tol=0)
+
 # 报告
 print(f"{'case':28} {'st':4}  detail")
 fails = 0

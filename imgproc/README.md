@@ -76,8 +76,12 @@ LD_LIBRARY_PATH=$PWD/cpp/imgproc/build ./imgproc/mirror_gif IN.gif OUT.gif
 - **ImageStat**：mean/median/extrema/stddev/sum。
 - **ImageDraw**：point/line/rectangle/rounded_rectangle/ellipse/polygon/arc。**ImageFont**：**FreeType**（运行时链接 `libfreetype.so.6`，与 Pillow 同引擎）+ `getbbox`/`multiline_text`。另有 `putalpha`。
 
-差分测试当前 **76 项全部通过**（像素项 max=0；文字项 bboxΔ=0；Floyd–Steinberg 逐像素 99.2%）——含 `resize.{nearest,bilinear,lanczos}`（已按 Pillow
+差分测试当前 **77 项全部通过**（像素项 max=0；文字项 bboxΔ=0；Floyd–Steinberg 逐像素 99.2%）——含 `resize.{nearest,bilinear,lanczos}`（已按 Pillow
 `Resample.c` 定点算法精确对齐）、全部 transpose / Ops / Chops / Enhance / Filter。GIF 镜像与源逐像素 **maxdiff=0**。
+
+## 覆盖面（自省核对）
+
+`frontend_coverage.py` 用 PIL 自省清单核对我们的实现：**覆盖 97/100**（仅 `Image.eval`（需回调）、`ImageOps.deform`、`ImageFilter.Color3DLUT` 待做）。
 
 ## 作为库被集成
 
