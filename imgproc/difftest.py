@@ -341,6 +341,18 @@ except Exception as e:
 
 case("generators.radial", lambda: Image.radial_gradient("L"), lambda: P.img_radial_gradient(), tol=0)
 
+# ---- TIFF ----
+try:
+    tpath = "/tmp/opencode/dt.tiff"; img_rgb.save(tpath)
+    pt = np.array(Image.open(tpath).convert("RGB")).astype(int)
+    ot = P.to_np(P.img_open(tpath.encode()))[:, :, :3].astype(int)
+    d = 0 if pt.shape == ot.shape else 999
+    if d == 0:
+        d = int(np.abs(pt - ot).max())
+    results.append(("tiff.decode", "PASS" if d == 0 else "DIFF", f"maxΔ={d}", d))
+except Exception as e:
+    results.append(("tiff.decode", "ERR", repr(e)[:60], 999))
+
 # 报告
 print(f"{'case':28} {'st':4}  detail")
 fails = 0

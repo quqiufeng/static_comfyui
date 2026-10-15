@@ -10,6 +10,7 @@
 #include "stb_truetype.h"
 #include <webp/decode.h>
 #include <webp/encode.h>
+#include <tiffio.h>
 
 // ---------------- 模型工具 ----------------
 Image* new_rgba(int w, int h, int n) {
@@ -201,6 +202,25 @@ void* img_open(const char* path) {
             return im;
         }
     }
+    // TIFF（II*\0 / MM\0*）
+    if ((sig[0] == 0x49 && sig[1] == 0x49 && sig[2] == 42) || (sig[0] == 0x4D && sig[1] == 0x4D && sig[2] == 0)) {
+        TIFF* tif = TIFFOpen(path, "r");
+        if (!tif) return nullptr;
+        uint32_t tw = 0, th = 0;
+        TIFFGetField(tif, TIFFTAG_IMAGEWIDTH, &tw);
+        TIFFGetField(tif, TIFFTAG_IMAGELENGTH, &th);
+        if (tw == 0 || th == 0) { TIFFClose(tif); return nullptr; }
+        std::vector<uint32_t> raster((size_t)tw * th);
+        if (!TIFFReadRGBAImageOriented(tif, tw, th, raster.data(), ORIENTATION_TOPLEFT, 0)) { TIFFClose(tif); return nullptr; }
+        TIFFClose(tif);
+        Image* im = new_rgba(tw, th, 1);
+        uint8_t* o = im->frames[0].data.data();
+        for (size_t i = 0; i < (size_t)tw * th; ++i) {
+            uint32_t v = raster[i];
+            o[i * 4] = TIFFGetR(v); o[i * 4 + 1] = TIFFGetG(v); o[i * 4 + 2] = TIFFGetB(v); o[i * 4 + 3] = TIFFGetA(v);
+        }
+        return im;
+    }
     int w, h, ch; unsigned char* d = stbi_load(path, &w, &h, &ch, 4);
     if (!d) return nullptr;
     Image* im = new_rgba(w, h, 1);
@@ -232,6 +252,24 @@ int img_save(void* p, const char* path) {
     else if (ends_with(path, ".jpg") || ends_with(path, ".jpeg")) ok = stbi_write_jpg(path, rg->w, rg->h, 4, rg->frames[0].data.data(), 95);
     else if (ends_with(path, ".bmp")) ok = stbi_write_bmp(path, rg->w, rg->h, 4, rg->frames[0].data.data());
     else if (ends_with(path, ".tga")) ok = stbi_write_tga(path, rg->w, rg->h, 4, rg->frames[0].data.data());
+    else if (ends_with(path, ".tif") || ends_with(path, ".tiff")) {
+        TIFF* tif = TIFFOpen(path, "w");
+        if (tif) {
+            TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, rg->w);
+            TIFFSetField(tif, TIFFTAG_IMAGELENGTH, rg->h);
+            TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 4);
+            TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 8);
+            TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
+            TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
+            TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_RGB);
+            uint16 es = EXTRASAMPLE_ASSOCALPHA;
+            TIFFSetField(tif, TIFFTAG_EXTRASAMPLES, 1, &es);
+            TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, TIFFDefaultStripSize(tif, rg->w * 4));
+            ok = 1;
+            for (int y = 0; y < rg->h; ++y) if (TIFFWriteScanline(tif, rg->frames[0].data.data() + (size_t)y * rg->w * 4, y, 0) < 0) { ok = 0; break; }
+            TIFFClose(tif);
+        }
+    }
     else if (ends_with(path, ".webp")) {
         uint8_t* out = nullptr; size_t len = WebPEncodeRGBA(rg->frames[0].data.data(), rg->w, rg->h, rg->w * 4, 80.0f, &out);
         if (len) { FILE* f = fopen(path, "wb"); if (f) { fwrite(out, 1, len, f); fclose(f); ok = 1; } WebPFree(out); }

@@ -65,7 +65,7 @@ LD_LIBRARY_PATH=$PWD/cpp/imgproc/build ./imgproc/mirror_gif IN.gif OUT.gif
 
 ## 当前覆盖 / 状态
 
-- **编解码**：GIF（多帧，保留索引+调色板，无损）、PNG/JPEG/BMP/TGA（stb）、**WebP（运行时 libwebp.so.7，解码逐像素一致）**。
+- **编解码**：GIF（多帧，保留索引+调色板，无损）、PNG/JPEG/BMP/TGA（stb）、**WebP（libwebp.so.7）**、**TIFF（libtiff.so.6）**（解码均逐像素一致）。
 - **Image 核心**：open/save/new/copy/convert(RGB·RGBA·L·LA·P)/split/merge/getchannel/getbbox/frombytes/to_bytes/**多帧取用(img_frame/set_frame/append_frame)**。
 - **几何**：crop · resize（+带 box）· thumbnail · rotate · transpose(7) · pad · scale · paste · paste(mask) · composite · alpha_composite(带位置) · blend · fit · contain。
 - **ImageOps**：invert · grayscale · posterize · solarize · autocontrast · equalize · colorize · mirror · expand · fit · contain · pad。
@@ -76,7 +76,7 @@ LD_LIBRARY_PATH=$PWD/cpp/imgproc/build ./imgproc/mirror_gif IN.gif OUT.gif
 - **ImageStat**：mean/median/extrema/stddev/sum。
 - **ImageDraw**：point/line/rectangle/rounded_rectangle/ellipse/polygon/arc。**ImageFont**：**FreeType**（运行时链接 `libfreetype.so.6`，与 Pillow 同引擎）+ `getbbox`/`multiline_text`。另有 `putalpha`。
 
-差分测试当前 **77 项全部通过**（像素项 max=0；文字项 bboxΔ=0；Floyd–Steinberg 逐像素 99.2%）——含 `resize.{nearest,bilinear,lanczos}`（已按 Pillow
+差分测试当前 **78 项全部通过**（像素项 max=0；文字项 bboxΔ=0；Floyd–Steinberg 逐像素 99.2%）——含 `resize.{nearest,bilinear,lanczos}`（已按 Pillow
 `Resample.c` 定点算法精确对齐）、全部 transpose / Ops / Chops / Enhance / Filter。GIF 镜像与源逐像素 **maxdiff=0**。
 
 ## 覆盖面（自省核对）
