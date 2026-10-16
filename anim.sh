@@ -19,6 +19,7 @@ LORA_STRENGTH="${LORA_STRENGTH:-1.0}"
 CONTROL_NET="${CONTROL_NET:-}"
 CONTROL_DIR="${CONTROL_DIR:-}"
 CONTROL_STRENGTH="${CONTROL_STRENGTH:-1.0}"
+DTYPE="${DTYPE:-}"
 
 PROMPT="${1:-a cute cartoon knight walking to the right, side view, plain white background, full body}"
 OUTD="${2:-$HOME/iso_gen/anim_out}"
@@ -49,11 +50,17 @@ WF="$(mktemp)"
   echo '{'
   echo "  \"1\": {\"class_type\":\"CheckpointLoaderSimple\",\"inputs\":{\"ckpt_name\":\"$MODEL\",\"vae_name\":\"$VAE\"}},"
   [ -n "$CTXOPT" ] && echo "$CTXOPT"
+  if [ -n "$DTYPE" ]; then
+    echo "  \"8\": {\"class_type\":\"ModelComputeDtype\",\"inputs\":{\"model\":[\"1\",0],\"dtype\":\"$DTYPE\"}},"
+    BASE_REF='["8",0]'
+  else
+    BASE_REF='["1",0]'
+  fi
   if [ -n "$CTXOPT" ]; then
-    echo "  \"2\": {\"class_type\":\"$LOADER\",\"inputs\":{\"model\":[\"1\",0],\"motion_model\":\"$MOTION\",\"context_options\":[\"9\",0]}},"
+    echo "  \"2\": {\"class_type\":\"$LOADER\",\"inputs\":{\"model\":$BASE_REF,\"motion_model\":\"$MOTION\",\"context_options\":[\"9\",0]}},"
     MODELREF='["2",0]'
   else
-    echo "  \"2\": {\"class_type\":\"$LOADER\",\"inputs\":{\"model\":[\"1\",0],\"motion_module\":\"$MOTION\"}},"
+    echo "  \"2\": {\"class_type\":\"$LOADER\",\"inputs\":{\"model\":$BASE_REF,\"motion_module\":\"$MOTION\"}},"
     MODELREF='["2",0]'
   fi
   echo "  \"3\": {\"class_type\":\"$SAMPLER\",\"inputs\":{\"model\":$MODELREF,\"positive\":\"$PROMPT\",\"negative\":\"$NEG\",\"width\":$W,\"height\":$H,\"steps\":$STEPS,\"cfg\":$CFG,\"seed\":$SEED,\"frames\":$FRAMES,\"fps\":$FPS,\"sampler_name\":\"euler\",\"scheduler\":\"discrete\",\"output_dir\":\"$OUTD\"$EXTRA}}"

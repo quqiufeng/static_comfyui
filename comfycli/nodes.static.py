@@ -1911,6 +1911,22 @@ def model_compute_dtype(inputs):
         wtype = 1
     elif dtype == "bf16":
         wtype = 30
+    elif dtype == "q4_0":
+        wtype = 2
+    elif dtype == "q4_1":
+        wtype = 3
+    elif dtype == "q5_0":
+        wtype = 6
+    elif dtype == "q5_1":
+        wtype = 7
+    elif dtype == "q8_0":
+        wtype = 8
+    elif dtype == "q4_k":
+        wtype = 12
+    elif dtype == "q5_k":
+        wtype = 13
+    elif dtype == "q6_k":
+        wtype = 14
     if wtype >= 0:
         sd_set_wtype(m.pipeline, wtype)
     return (m,)
