@@ -3,6 +3,30 @@
 > 目标：用几十张同风格图片训一个 **Z-Image LoRA**。以后出图直接
 > `backup.sh ... --lora my_style.safetensors:0.7` 就带该风格，**不用再手写风格提示词**。
 
+## 训练任务（只有两类，2026-10-25 明确）
+
+| 任务 | 数据 | 图片尺寸 | 产出 |
+|---|---|---|---|
+| **风格 LoRA（1 个）** | **所有图片合并**（各明星子目录全部汇总） | **1536**（长边，保持原比例，不裁脸） | 一个 style LoRA，学整体画风/质感 |
+| **人脸 LoRA（每个明星 1 个）** | **各自的明星子目录**，扣脸 | **512×512**（5 点对齐脸） | 每个明星一个 identity LoRA |
+
+- **两套尺寸不要混**：风格集用 1536，人脸集用 512；分别生成各自的 `images/` 与 `dataset.toml`。
+- 风格集要混入所有人 → 风格向量与人脸解耦；出图按需叠加：
+  `--lora style:0.6 --lora face:0.7`。
+- 不做“风格+人脸联合训练”，也不按明星重复训风格。
+
+## 工具策略（2026-10-25：告别 Python 脚本）
+
+图像 / 数据准备一律用 **StaticPy 二进制工具**（`/opt/StaticPy`），不再新增或沿用 Python 脚本：
+
+1. **缺工具 → 先用 StaticPy 封装**：C ABI（`.so`）+ FFI + 薄 CLI → 独立 ELF；
+   优先复用已有的 `imgproc` / `face` / `birefnet` / `florence2` / `hashlib` 等库。
+2. **管线用 shell 编排**（检测 → 筛 → 裁 → 打标 → 写 `dataset.toml`），产物零 Python/pip。
+3. **允许 Python 的仅两处**：musubi 训练本体（`musubi_train.sh` 内部调用）、
+   以及 `difftest/coverage` 这类“测量对照”（不进产物）。
+4. 现存 Python 脚本逐步迁到 StaticPy：`curate_dataset.py`、`prepare_dataset.py`
+   （迁移清单见 §4.2）；`convert_lora.py` 正常流程不再需要。
+
 ## 当前推荐配方（2026-10 实测定稿）
 
 | 项 | 值 |
@@ -15,8 +39,8 @@
 | 网络 | lora_zimage，`rank=alpha=16` |
 | 步数 | **总步数 = 图片数 × repeats × epochs ÷ batch_size**（例：200 张×1×8 = 1600 步；8 epochs 是常见值）。**每 1~2 个 epoch 存 checkpoint，训完出图盲测选最优**——最优往往**不是**最后一步 |
 | 显存 | 20G：`--blocks_to_swap 12`（见 §16；显存被占时需更大，或先释放占显存的服务） |
-| 实测 | 11.4s/步，~1h25m；LoRA ~140MB |
-| 出图 | `backup.sh ... --lora <lora_sdcpp.safetensors>:0.7` |
+| 实测 | 11.4s/步（未解锁）；本机 3080 已解锁，训练约 **+30% → ~8.8s/步**；LoRA ~140MB |
+| 出图 | `backup.sh ... --lora <OUT_NAME>.safetensors:0.7`（或 `.gguf`） |
 
 **关键结论**：Base 模型训练 → 保细节（发丝/皮肤纹理）；turbo+adapter+fp8 会磨皮。
 详见 §9。
@@ -41,7 +65,7 @@
 
 | 项 | 值 |
 |----|----|
-| GPU | RTX 3080 **20GB** |
+| GPU | RTX 3080 **20GB**（已解锁，训练约 +30%） |
 | 训练 venv | **`/data/venv-musubi`**（`python3 -m venv --system-site-packages`） |
 | torch | 2.6.0+cu126（软链自 `/data/venv`；musubi venv 自带被 `~/.local` CPU 版抢先，故软链 CUDA 版） |
 | 库版本 | transformers **4.57.6** / diffusers **0.38.0** / huggingface_hub **0.36.2**（降到与 torch 2.6 匹配） |
@@ -63,7 +87,25 @@
 
 ## 4. 数据集
 
+> **原始图片位置（2026-10-25 记录）**：`dav://192.168.1.53:5005/sata11-18072858035/weibo`
+> WebDAV 共享；Dolphin/文件管理器可直接打开，命令行挂载可改用
+> `http://192.168.1.53:5005/sata11-18072858035/weibo`（davfs2 / rclone / curl 均可）。
+> 训练前先**拷到本地目录**（如 `/data/datasets/<name>_src`），再用 `curate_dataset.py` 处理；
+> 不要直接对网络目录跑批量检测/打标，避免 IO 抖动和半途断连。
+>
+> **测试目录（2026-10-25 指定）**：`dav://192.168.1.53:5005/sata11-18072858035/weibo/佟丽娅`
+> （145 张，约 937M），用于流水线 / 小规模训练测试；正式训练仍用全量图源。
+>
+> ```bash
+> # 示例：挂载后拷贝（凭据按实际填写）
+> sudo mount -t davfs http://192.168.1.53:5005/sata11-18072858035/weibo /mnt/weibo
+> cp -r /mnt/weibo/<子目录> /data/datasets/<name>_src
+> ```
+
 `train_lora/prepare_dataset.py`：风格图目录 → 预缩（长边 ≤1536）+ Florence 自动打标。
+
+> **两套数据集分开产出**：风格集 `<name>1536/`（1536，全部图合并）；
+> 人脸集 `<name>_face/`（512×512 对齐脸，按明星分目录分别训练）。
 
 产物 `/data/datasets/mystyle1536/`：
 ```
@@ -89,6 +131,148 @@ num_repeats = 1
 
 > caption 解耦（进阶）：把"磨皮/柔光"等特征**写进 caption**（如 `smooth skin, studio soft lighting`），
 > 推理时只给触发词，风格就不会强行附带磨皮。见 §9。
+
+### 4.1 图像预处理工具（全部来自 `/opt/StaticPy` 的 StaticPy 二进制）
+
+**下面所有工具都是 `/opt/StaticPy` 用 StaticPy 编译出的独立 ELF**（Python 子集 → Scheme → AOT），
+不是 Python 脚本/外部命令。统一模式：C ABI（`.so`）+ StaticPy FFI，运行时按需挂 C 库或
+ONNX Runtime；产物零 Python/pip。完整能力清单见 `/opt/StaticPy/CAPABILITIES.md`。
+
+```bash
+# StaticPy + ONNX Runtime 工具：用自带包装（内部已设好各 C 库路径）
+bash /opt/StaticPy/tools/run.sh caption in.jpg '<CAPTION>' 1
+
+# 根目录 / imgproc / upscale 工具：需带 .so 路径
+export LD_LIBRARY_PATH=/opt/StaticPy/cpp/imgproc/build:/opt/StaticPy/cpp/sr/build
+/opt/StaticPy/imgproc/pil resize in.png out.png 1024 1536 lanczos
+```
+
+| 命令 | 能力 | 数据集场景 |
+|---|---|---|
+| `tools detect IN` | 人脸检测（JSON） | 筛单脸 / 脸占比（curate 内用 facecli） |
+| `tools crop IN OUT [size]` | 最大脸对齐裁剪 | 人脸 LoRA 512 数据集 |
+| `tools parse IN OUT [color\|face\|skin\|hair]` | 人脸解析分割 | 换背景 / 局部处理 |
+| `tools remove IN OUT [mode] [color]` | BiRefNet 抠图 | 去背景 / 合成 |
+| `tools caption IN [task] [beams]` | Florence-2 反推描述 | 自动打标（curate 内用 img2prompt） |
+| `tools ocr IN` | PP-OCRv4 | 剔除截图 / 带字图 |
+| `tools sr IN OUT` | Real-ESRGAN 4x | 低清图放大后再训 |
+| `tools restore IN OUT [w]` | CodeFormer 人脸修复 | 糊脸修复（会改变身份，慎用） |
+| `tools pose / depth / edge / yolo` | 骨架 / 深度 / 软边缘 / 检测 | ControlNet 训练与验证素材 |
+| `imgproc/pil <op> IN OUT ...` | Pillow 对标 CLI（convert/resize/crop/transpose/filter/quantize…） | 批量缩放 / 转码 / 裁剪 |
+| `upscale/up 2x\|4x\|esrgan IN OUT` | 像素 / 模型放大 | 低清素材增强 |
+| `flip IN OUT`、`hstack OUT GAP ...`、`concat OUT IN1 IN2` | 翻转 / 横拼 / 纵向拼接 | 对照图、拼图 |
+| `split_grid IN OUTDIR COLS ROWS`、`anim/split_sheet OUTDIR COLS SHEET.png` | 网格 / 精灵表切分 | 视频帧、精灵图转单图 |
+| `align_head OUTDIR CW CH PIVOT_X PIVOT_Y ...` | 按头部枢轴对齐一批图 | 大头像 / 表情数据对齐 |
+| `flatten IN OUT BG_RGBA`、`cutout IN OUTDIR [TH]` | 压平 alpha / 批量抠图 | 统一背景 / 透明素材 |
+| `anim/frames_to_gif OUT.gif FPS ...`、`anim/pack_sprites ...` | 帧转 GIF / 打包精灵图 | 动画数据集预览 |
+| `cvops/cv erode/dilate/open/close/otsu/sobel`、`atlas`、`font/font`、`warp3d/w3d` | 形态学 / 图集 / 字形 / 伪 3D | 素材增强、图集制作 |
+
+`imgproc/pil` 对标 Pillow：覆盖面与差分测试均 100/100，可替代 Python PIL 做确定性预处理。
+
+注意：
+- `seg`（MobileSAM）当前缺 `libmobilesam.so`，不可用；
+- 根目录工具（`flip` / `hstack` / `align_head` 等）需先设 `LD_LIBRARY_PATH`（见上），`tools/run.sh` 自带；
+- 这一层只做**数据准备**，训练仍走 `musubi_train.sh`。
+
+### 4.2 Python → StaticPy 迁移清单
+
+新增需求先查 `/opt/StaticPy/CAPABILITIES.md`；没有的能力**先封装 StaticPy 工具**，不要新写 Python。
+
+| 现有脚本 | 当前依赖 | StaticPy 替代 | 状态 |
+|---|---|---|---|
+| `prepare_dataset.py` | PIL + Florence | `imgproc/pil` + `tools caption` + shell 写 `.txt` | 可直接迁 |
+| `curate_dataset.py` | PIL/numpy + facecli/img2prompt | `tools detect/crop/caption` + `imgproc/pil` | 缺批量筛图/打分/写 `report.csv` 的 CLI，需封装 `curate` |
+| `convert_lora.py` | safetensors + torch | **不需要替代**：sd.cpp 原生解析 `lora_unet_*` / `lora_A/B` / `lora_down/up`，safetensors/GGUF 直接加载 | 先直接加载原始 LoRA；仅遇到未识别前缀（如 `base_model.model.`）再处理 |
+| `make_face_dataset.sh` | shell + facecli | 已是 StaticPy 工具链 | 保留 |
+| `musubi_train.sh` | Python（musubi-tuner） | — | 允许例外（训练本体） |
+| `train_lora.sh` / `run_train.sh` | diffusers/torch | — | 旧路线，删除/不再维护 |
+
+封装约定：C ABI（`.so`）+ `extern fn` + `main()` 薄 CLI + `build.sh`；多值参数走 CSV 字符串；
+产物独立 ELF，放 `/opt/StaticPy/<tool>/`，并在 `CAPABILITIES.md` 登记。
+
+### 4.3 图片处理流水线（按步骤）
+
+> **已封装为脚本**：`train_lora/image_pipeline.sh <src> <name> [style_trigger] [face_trigger]`
+> 流程：cp → **人物门禁（非人物先删）** → 缩放 → 自动筛 → 手工筛 → 扣脸/`cp` style → 打标 → 校验 → `dataset.toml`。
+> 无人脸/非人物在门禁阶段直接删除，**不进入 resize、扣脸和打标**。
+> `SKIP_MANUAL=1` 跳过手工暂停；`BASE=/data/dataset`、`MAX=1536`、`FACE_SIZE=512` 可覆盖。
+
+1. **拷贝子目录到 `/data/dataset/<子目录>`**：
+
+   ```bash
+   cp -r <图源>/<子目录> /data/dataset/<子目录>
+   ```
+
+   `<子目录>` 为单个明星目录（如 `佟丽娅`）。
+
+2. **遍历图片，超过尺寸上限的按比例缩放**（只缩不放、不裁切）：
+
+   ```bash
+   MAX=1536   # 风格集长边上限；人脸集在后续步骤按 512 对齐裁剪
+   # 逐张读取 w/h；若 max(w,h) > MAX：
+   #   scale = MAX / max(w,h)
+   #   nw = round(w*scale)，nh = round(h*scale)
+   /opt/StaticPy/imgproc/pil resize IN.png OUT.png "$nw" "$nh" lanczos
+   ```
+
+   要求：长边 ≤ `MAX`，宽高比不变，不放大，不裁切。
+
+3. **识别图片内容，剔除不合格图**（复用现有工具，不新开发）：
+
+   - **内容识别 / 反推**：`tools caption IN '<CAPTION>' 1`（Florence-2）
+     → 命中 `anime/illustration/screenshot/poster/logo/...` 或无人 → 剔除
+   - **人脸检测**：`tools detect IN`（JSON：人脸框 + 分数），或 `facecli detect --batch`
+   - **剔除规则**：
+     - 人脸数 = 0 → 无人脸
+     - 人脸数 > 1 → 多人脸
+     - 最高人脸分数 < `0.60` → 脸不可靠
+   - **质量不高**：结合反推描述（blurry / low quality / 模糊等）+ 人脸分数剔除，不新增质量工具
+
+4. **分流保存（直接 cp 到 dataset，不移动）**：
+
+   - **过滤后的整图 → `/data/dataset/style/images/`**（第 2 步已缩到长边 ≤1536）
+   - **扣人脸 → `/data/dataset/face/<子目录>/images/`**（512×512 五点对齐脸）：
+     ```bash
+     facecli crop IN.png /data/dataset/face/<子目录>/images/OUT.png 512
+     # 批量：facecli crop --batch  （每行 "IN\tOUT 512"）
+     # 或单张：tools crop IN.png /data/dataset/face/<子目录>/images/OUT.png 512
+     ```
+   - 两套 `images/` 一一对应；第 3 步已剔除无人脸，正常不会缺脸
+
+5. **不合格的删除**：
+
+   - 自动筛选时，不合格的 style 副本直接删除；扣脸失败也删
+   - 处理完成后，清理 `/data/dataset/<子目录>` **原始拷贝**：只保留进入 `style/images` 的合格图，其余删除
+   - `image_pipeline.sh` 第 8 步会自动做原始拷贝清理
+
+6. **手工筛选**（自动规则之后，补一刀）：
+
+   - 直接浏览 `/data/dataset/style/images/`、`/data/dataset/face/<子目录>/images/`
+   - 不要的**在当前目录手动删掉**（`rm`），不建 rejected/、不移到别处
+   - 删除：糊 / 重复 / 脸不对 / 非目标人物 / 构图不可用 / 自动反推漏检的
+   - **先筛完再打标**，避免打完再删、浪费语料
+
+7. **分别反推打标，生成训练语料**（输入目录固定）：
+
+   - **style**：读 `/data/dataset/style/images/` → `img2prompt --task '<DETAILED_CAPTION>'`（或 `<CAPTION>` 更快）
+   - **face**：读 `/data/dataset/face/<子目录>/images/` → `img2prompt --task '<CAPTION>'`
+   - 批量：`img2prompt --batch`，stdin 为该固定目录下的图片列表，stdout 每行一条描述
+   - 图片在第 4 步已 **cp** 到 `dataset/*/images/`；**就地打标**，不移动
+   - 每张图写同名 `.txt`：`<触发词>, <反推描述>`
+   - 分别生成 `dataset.toml`：style `resolution=[1536,1536]`，face `resolution=[512,512]`
+   - 最终结构：
+     ```
+     /data/dataset/style/{images/*, *.txt, dataset.toml}
+     /data/dataset/face/<子目录>/{images/*, *.txt, dataset.toml}
+     ```
+   - 训练直接以这两个目录的 `dataset.toml` 为输入
+
+8. **训练前校验（图片 ↔ `.txt`）**：
+
+   - **有图无 `.txt`** → 用 `img2prompt` 重新给这张图打标
+   - **有 `.txt` 无图**（手工删过图）→ 删掉对应 `.txt`
+   - 脚本：`bash train_lora/check_labels.sh <images_dir> <trigger>`
+   - `image_pipeline.sh` 结束会**自动**对 style/face 各跑一次
 
 ---
 
@@ -134,24 +318,36 @@ bash train_lora/musubi_train.sh
 
 脚本内固定：`--sdpa --mixed_precision bf16 --timestep_sampling shift --weighting_scheme none
 --discrete_flow_shift 2.0 --optimizer_type adamw8bit --gradient_checkpointing
---network_module networks.lora_zimage`，训练后自动 `convert_lora.py --target other`。
+--network_module networks.lora_zimage`；训练后保留原始 `out.safetensors`，并自动转出 `.gguf`（f16）。
+
+> **脚本已内置优化，无需再手调**：VRAM 自检 → 按分辨率自动 `--blocks_to_swap`；
+> block swap 默认 `pinned + H2D-only + ring_size 2`（`SWAP_MODE=plain|pinned` 可切）；
+> `--gradient_checkpointing`、`adamw8bit`、`--sdpa`、bf16、persistent data loader；
+> 每 epoch 自动存 checkpoint。1536 档在解锁 3080 上约 **8.8s/步**，直接按此配方跑即可。
 
 ---
 
 ## 7. 转换 + 出图
 
-musubi 输出是 sd-scripts 命名（`lora_unet_...`），sd.cpp 要 **diffusers/PEFT**（`diffusion_model.*.lora_A/B`），脚本已自动转换：
+musubi 输出是 sd-scripts 命名（`lora_unet_*`）。**sd.cpp 已原生兼容**（`src/name_conversion.cpp`：
+`lora_unet_*` / `lora_A/B` / `lora_down/up` 都会映射到 `model.diffusion_model.*`），
+`safetensors` 与 `GGUF` 都能按扩展名自动加载，**不需要先转命名**：
 
 ```bash
-$PY/python $M/convert_lora.py --input OUT/mystyle.safetensors \
-  --output OUT/mystyle_sdcpp.safetensors --target other
+./cpp/sd/backup.sh 2560 1440 \
+  --lora /data/lora/<name>/<OUT_NAME>.safetensors:0.7
 ```
+
+`musubi_train.sh` 产出**原始权重** `<OUT_NAME>.safetensors`，并自动转出 `<OUT_NAME>.gguf`（f16）；
+两者都能直接加载。把 LoRA 转 GGUF 只是换容器/量化，**不会改 key**，sd.cpp 同样能读。
+只有遇到 sd.cpp 不认识的额外前缀（如 diffusers `base_model.model.`）时才需转换。
 
 出图（**触发词自动注入**，无需手写）：
 ```bash
 # backup.sh 会按 /data/lora/lora_triggers.conf 自动把触发词前置到默认提示词
+# 原始 musubi 输出、*.safetensors、转出的 .gguf 三种都可直接加载
 ./cpp/sd/backup.sh 2560 1440 \
-  --lora /data/lora/mystyle_base/mystyle_sdcpp.safetensors:0.7
+  --lora /data/lora/mystyle_base/mystyle.safetensors:0.7
 # 输出: ✓ LoRA 触发词注入: mystyle
 #       Prompt: mystyle, solo,single woman,half body portrait...
 # sd.cpp: (420 / 420) LoRA tensors have been applied
@@ -161,7 +357,7 @@ $PY/python $M/convert_lora.py --input OUT/mystyle.safetensors \
 `train_lora/lora_triggers.conf.example`）：
 ```
 <lora 文件名> = <触发词>
-mystyle_sdcpp.safetensors = mystyle
+mystyle.safetensors = mystyle
 ```
 
 ---
@@ -170,10 +366,12 @@ mystyle_sdcpp.safetensors = mystyle
 
 | 文件 | 作用 |
 |------|------|
-| `musubi_train.sh` | **musubi 训练封装**（当前主用，支持 Base/turbo、fp8 开关、blocks_to_swap）+ 自动转名 |
+| `image_pipeline.sh` | **图片流水线**：cp → 缩放 → 自动筛 → 扣脸 → 手工筛 → 打标 → 校验 → `dataset.toml`（shell + 现有二进制） |
+| `check_labels.sh` | **图片↔标注校验**：有图无 txt 补打标；有 txt 无图删 txt |
+| `musubi_train.sh` | **musubi 训练封装**（当前主用，支持 Base/turbo、fp8、blocks_to_swap）+ 保留原始权重 + 转 GGUF |
 | `prepare_dataset.py` | 风格图 → 预缩 + Florence 批量打标（`--batch`）+ `metadata.jsonl`/`.txt` |
 | `run_train.sh` / `train_dreambooth_lora_z_image.py` / `qnbit4.json` | diffusers 路线（备选，已适配 0.38） |
-| `convert_lora.py` | 通用 LoRA 命名转换（musubi 官方 `--target format other` 已够用） |
+| `convert_lora.py` | 可选：仅处理 sd.cpp 未识别的额外前缀（正常训练/出图不再需要） |
 
 ---
 
@@ -212,18 +410,21 @@ cp -r /data/datasets/<name> /data/datasets/<name>1536  # 或直接改 dataset.to
 
 # 3) 预缓存 latent + TE（§5；TE 可复用）
 
-# 4) 训练 + 自动转换（§6）
+# 4) 训练 + 转 GGUF（§6）
 DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002.safetensors \
 FP8=0 BLOCKS=12 DIM=16 EPOCHS=8 DATA=/data/datasets/<name>1536 OUT=/data/lora/<name> \
 bash train_lora/musubi_train.sh
 
 # 5) 出图（§7）
-./cpp/sd/backup.sh 2560 1440 --lora /data/lora/<name>/mystyle_sdcpp.safetensors:0.7
+./cpp/sd/backup.sh 2560 1440 --lora /data/lora/<name>/mystyle.safetensors:0.7
 ```
 
 ---
 
 ## 11. 指定人脸 + 风格：双 LoRA 方案（需求与实现思路）
+
+> 以下 §11/§13/§14 是早期展开的细节。**当前只按文首“训练任务”两档执行**：
+> 风格 LoRA 用全部图；人脸 LoRA 按明星子目录分别训练；不做联合模型。
 
 ### 11.1 需求
 想要**高清大图 + 指定某个人的脸 + 指定风格**。
@@ -249,8 +450,8 @@ bash train_lora/musubi_train.sh
 ### 11.4 出图叠加 + 触发词注入
 ```bash
 ./cpp/sd/backup.sh 2560 1440 \
-  --lora /data/lora/celeba_base/mystyle_sdcpp.safetensors:0.7 \
-  --lora /data/lora/mystyle_base/mystyle_sdcpp.safetensors:0.6
+  --lora /data/lora/celeba_base/mystyle.safetensors:0.7 \
+  --lora /data/lora/mystyle_base/mystyle.safetensors:0.6
 ```
 - 两个 LoRA 权重**别都拉满**（0.5~0.7 起调），过高会在同区块互相打架出伪影。
 - 触发词映射扩展为多行注入（`celebA` + 风格词），`backup.sh` 逐个 `--lora` 查找并前置。
@@ -272,7 +473,7 @@ bash train_lora/musubi_train.sh
 
 - **高清大图** = `backup.sh` HiRes 管线（Base + bf16 + 1536 + 不过拟合的 LoRA）。
 - **指定人脸** = 该人的**人物 LoRA**（DiT 无人脸 adapter，LoRA 即正路）。
-- **风格 + 人脸** = 两套图训两个 LoRA，出图叠加（多 `--lora`）。
+- **风格 + 人脸** = 1 个风格 LoRA（全部图）+ 每个明星各自的 face LoRA，出图叠加（多 `--lora`）。
 
 ---
 
@@ -313,18 +514,18 @@ $PY/python $M/zimage_cache_text_encoder_outputs.py --dataset_config $D/dataset.t
 DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002.safetensors \
   FP8=0 BLOCKS=0 DIM=32 EPOCHS=10 DATA=$D OUT=/data/lora/celebA OUT_NAME=celebA \
   bash train_lora/musubi_train.sh
-# → /data/lora/celebA/celebA_sdcpp.safetensors
+# → /data/lora/celebA/celebA.safetensors
 ```
 
 ### 13.4 出图（触发词自动注入）
-在 `/data/lora/lora_triggers.conf` 加一行 `mystyle_sdcpp.safetensors = celebA`（或把训练输出的
-LoRA 重命名为 `<触发词>_sdcpp.safetensors`），然后：
+在 `/data/lora/lora_triggers.conf` 加一行 `celebA.safetensors = celebA`（或把训练输出的
+LoRA 重命名为 `<触发词>.safetensors`），然后：
 ```bash
-./cpp/sd/backup.sh 2560 1440 --lora /data/lora/celebA/mystyle_sdcpp.safetensors:0.7
+./cpp/sd/backup.sh 2560 1440 --lora /data/lora/celebA/celebA.safetensors:0.7
 ```
 
 > 说明：`musubi_train.sh` 的 LoRA 名由 `OUT_NAME`（默认 `mystyle`）决定；建议设成触发词，
-> 如 `OUT_NAME=celebA`，输出 `celebA_sdcpp.safetensors`，映射一目了然。
+> 如 `OUT_NAME=celebA`，输出 `celebA.safetensors`，映射一目了然。
 
 ---
 
@@ -366,7 +567,7 @@ $PY/python $M/zimage_cache_text_encoder_outputs.py --dataset_config $D/dataset.t
 DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002.safetensors \
   FP8=0 BLOCKS=0 DIM=32 EPOCHS=12 OUT_NAME=celebA DATA=$D OUT=/data/lora/celebA \
   bash train_lora/musubi_train.sh
-# → /data/lora/celebA/celebA_sdcpp.safetensors（512 + BLOCKS=0，约 29 分钟，见 §16）
+# → /data/lora/celebA/celebA.safetensors（512 + BLOCKS=0，约 29 分钟，见 §16）
 ```
 | 超参 | 身份 LoRA 建议 |
 |------|----------------|
@@ -380,18 +581,18 @@ DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002
 ### 14.5 触发词映射
 `/data/lora/lora_triggers.conf` 加一行：
 ```
-celebA_sdcpp.safetensors = celebA
+celebA.safetensors = celebA
 ```
 
 ### 14.6 出图
 ```bash
 # 单独：只出这张脸
-./cpp/sd/backup.sh 2560 1440 --lora /data/lora/celebA/celebA_sdcpp.safetensors:0.7
+./cpp/sd/backup.sh 2560 1440 --lora /data/lora/celebA/celebA.safetensors:0.7
 
 # 叠加风格 LoRA（脸 × 风格）
 ./cpp/sd/backup.sh 2560 1440 \
-  --lora /data/lora/celebA/celebA_sdcpp.safetensors:0.7 \
-  --lora /data/lora/mystyle_base/mystyle_sdcpp.safetensors:0.6
+  --lora /data/lora/celebA/celebA.safetensors:0.7 \
+  --lora /data/lora/mystyle_base/mystyle.safetensors:0.6
 ```
 
 ### 14.7 相似度不够时的调法
@@ -410,11 +611,14 @@ celebA_sdcpp.safetensors = celebA
 ## 15. 相关文件速查
 | 路径 | 说明 |
 |------|------|
+| `dav://192.168.1.53:5005/sata11-18072858035/weibo` | **原始图片（WebDAV 图源）**，训练前先拷到本地 |
+| `dav://192.168.1.53:5005/sata11-18072858035/weibo/佟丽娅` | **测试目录**（145 张 / ~937M），用于流水线与小规模训练测试 |
+| `/opt/StaticPy` | **StaticPy 编译的图像处理二进制工具集**（`tools/`、`imgproc/pil`、`upscale/up`、`align_head` 等，见 §4.1） |
 | `cpp/face/facecli` | 检测/对齐裁剪/解析 CLI |
 | `train_lora/make_face_dataset.sh` | 人物图片目录 → 对齐脸数据集 |
 | `train_lora/musubi_train.sh` | LoRA 训练（`OUT_NAME` 命名，自动转 sd.cpp 命名） |
 | `/data/lora/lora_triggers.conf` | LoRA→触发词映射（backup.sh 自动注入） |
-| `/data/lora/<name>/<OUT_NAME>_sdcpp.safetensors` | 训练产出（sd.cpp 可直接加载） |
+| `/data/lora/<name>/<OUT_NAME>.safetensors` | 训练产出（sd.cpp 可直接加载） |
 
 ---
 
@@ -466,7 +670,7 @@ DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002
 | V2 | 极简，只写 `liuhaocun` | **64** | 10 | `/data/datasets/liuhaocun_min`（98） |
 
 评估：`backup.sh` **2560×1440**，**Q8** 模型，同一 seed，双 LoRA
-（`liuhaocun:X` + `mystyle:0.6`）。LoRA：`/data/lora/exp/liuhaocun_min_r{32,64}_sdcpp.safetensors`；
+（`liuhaocun:X` + `mystyle:0.6`）。LoRA：`/data/lora/exp/liuhaocun_min_r{32,64}.safetensors`；
 对比图 `~/cmpq8_{BASE,V1,V2}_*.png`、竖版 `~/vq8_{BASE,V1,V2}_*.png`。
 
 **结论**：
@@ -490,12 +694,12 @@ DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002
 
 ```bash
 ./cpp/sd/backup.sh --preset xhs ~/xhs.png \
-  --lora /data/lora/liuhaocun/liuhaocun_sdcpp.safetensors:0.7 \
-  --lora /data/lora/mystyle_base/mystyle_sdcpp.safetensors:0.6
+  --lora /data/lora/liuhaocun/liuhaocun.safetensors:0.7 \
+  --lora /data/lora/mystyle_base/mystyle.safetensors:0.6
 
 ./cpp/sd/backup.sh --preset pyq ~/pyq.png \
-  --lora /data/lora/liuhaocun/liuhaocun_sdcpp.safetensors:0.7 \
-  --lora /data/lora/mystyle_base/mystyle_sdcpp.safetensors:0.6
+  --lora /data/lora/liuhaocun/liuhaocun.safetensors:0.7 \
+  --lora /data/lora/mystyle_base/mystyle.safetensors:0.6
 ```
 
 说明：不给 preset 时默认 2560×1440 横版；也可直接传像素，如 `backup.sh 1920 2560 ...`。

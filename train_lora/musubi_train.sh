@@ -101,10 +101,20 @@ echo "DIT=$DIT"; echo "ADAPTER=${ADAPTER:-<none>} DATA=$DATA OUT=$OUT DIM=$DIM E
   --output_dir "$OUT" --output_name "$OUT_NAME" \
   "${EXTRA[@]}" "${EPOCH_ARGS[@]}"
 
-# 转成 sd.cpp 可加载的 diffusers/PEFT 命名
+# 原始权重即 sd.cpp 可加载命名（lora_unet_*），保留；可选转 GGUF
 RAW="$OUT/$OUT_NAME.safetensors"
 if [ -f "$RAW" ]; then
-    "$PY/python" "$MUSUBI/convert_lora.py" --input "$RAW" \
-        --output "$OUT/${OUT_NAME}_sdcpp.safetensors" --target other
-    echo "sd.cpp LoRA: $OUT/${OUT_NAME}_sdcpp.safetensors"
+    echo "LoRA (raw): $RAW"
+    SD_CLI="${SD_CLI:-/opt/sd/build/bin/sd-cli}"
+    if [ -x "$SD_CLI" ]; then
+        _LD="/opt/sd/build/bin:/opt/sd/build-dl/bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        if LD_LIBRARY_PATH="$_LD" "$SD_CLI" -M convert -m "$RAW" \
+            -o "$OUT/${OUT_NAME}.gguf" --type f16 >/dev/null 2>&1; then
+            echo "LoRA (gguf): $OUT/${OUT_NAME}.gguf"
+        else
+            echo "GGUF 转换失败（保留 safetensors 即可直接用）"
+        fi
+    else
+        echo "未找到 sd-cli ($SD_CLI)，跳过 GGUF 转换"
+    fi
 fi
