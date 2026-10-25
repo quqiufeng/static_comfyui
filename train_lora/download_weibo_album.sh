@@ -49,6 +49,14 @@ if [ -n "$JOB" ]; then
     done
 fi
 
+MAX="${MAX:-1536}"
+if command -v mogrify >/dev/null 2>&1; then
+    find "$OUT" -maxdepth 1 -type f \
+        \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) -print0 |
+        xargs -0 -r mogrify -resize "${MAX}x${MAX}>" -quality 95
+    echo "resize 完成（长边 ≤$MAX）"
+fi
+
 N=$(find "$OUT" -maxdepth 1 -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' \) | wc -l)
 SIZE=$(du -sh "$OUT" | cut -f1)
 echo "完成: $N 张 / $SIZE -> $OUT"

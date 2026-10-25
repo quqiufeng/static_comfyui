@@ -4,6 +4,7 @@
 // 依赖：已用 operator/tools/chrome_debug.sh 启动固定端口 Chrome(9222)
 const fs = require('fs');
 const path = require('path');
+const { execFileSync } = require('child_process');
 
 const ALBUM = process.argv[2];
 const COUNT = parseInt(process.argv[3] || '200', 10);
@@ -11,6 +12,7 @@ const OUT = process.argv[4] || '/dataset/_src/weibo_album';
 const SCRIPT_DIR = __dirname;
 const NAMES_FILE = process.env.CELEB_NAMES || path.join(SCRIPT_DIR, 'celebrities.txt');
 const NO_DOWNLOAD = process.env.NO_DOWNLOAD === '1';
+const MAX = parseInt(process.env.MAX || '1536', 10);
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const tidy = u => u.replace(/\/(orj360|orj480|thumb150|thumb180|thumbnail|mw690|small|wap360|bmiddle|mw1024|webp720|mw2000)\//, '/large/').replace(/\?.*$/, '');
@@ -160,6 +162,19 @@ async function wsUrl() {
   }
   await Promise.all(Array.from({ length: 6 }, worker));
   console.error(`downloaded ok=${ok} fail=${fail} -> ${OUT}`);
+
+  // 下载后立即 resize（长边 <= MAX，只缩不放）
+  if (process.env.RESIZE !== '0') {
+    const dirs = [...new Set(jobs.map(j => path.dirname(j.path)))];
+    for (const d of dirs) {
+      const files = fs.readdirSync(d).filter(f => /\.(jpe?g|png|webp)$/i.test(f)).map(f => path.join(d, f));
+      if (!files.length) continue;
+      try {
+        execFileSync('mogrify', ['-resize', `${MAX}x${MAX}>`, '-quality', '95', ...files], { stdio: 'ignore' });
+        console.error(`resize ${files.length} -> ${d} (max ${MAX})`);
+      } catch (e) { console.error('resize FAIL', d, e.message); }
+    }
+  }
 
   await send('Target.closeTarget', { targetId });
   ws.close();

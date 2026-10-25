@@ -288,8 +288,20 @@ bash train_lora/download_weibo_album.sh <uid|昵称|微博URL> <输出目录> [�
 bash train_lora/download_weibo_album.sh \
   'https://weibo.com/u/7619798979?tabtype=album' /dataset/_src/weibostyle 100
 ```
+**CDP 采集（推荐，caption 识别明星）**
+```bash
+# 批量账号（含 8 个已记录号，自动跳过已完成）
+bash train_lora/download_weibo_accounts.sh 200
+
+# 单号：逐张 →，取 /large/ 原图，按 caption 明星分目录
+node train_lora/weibo_album_cdp.js \
+  'https://weibo.com/u/7619798979?tabtype=album&uid=7619798979&index=0' \
+  200 /dataset/_src/weibo_album_7619798979
+```
+
 - 默认 100 页；`all` 翻到 `WEIBO_ALBUM_MAX_PAGE`（默认 500）
-- 大图直出，实测样本 7285×5464 / 8–9MB
+- **下载后立即 resize 到长边 ≤1536**（`MAX` 可调，`RESIZE=0` 保留原图）
+- 原图实测可达 7285×5464 / 8–9MB；resize 后按 1536 存，避免占空间
 - 该账号相册至少 7000+ 张，按需用页数/`limit` 控制，不必全量
 
 **处理**：
