@@ -90,7 +90,7 @@
 > **原始图片位置（2026-10-25 记录）**：`dav://192.168.1.53:5005/sata11-18072858035/weibo`
 > WebDAV 共享；Dolphin/文件管理器可直接打开，命令行挂载可改用
 > `http://192.168.1.53:5005/sata11-18072858035/weibo`（davfs2 / rclone / curl 均可）。
-> 训练前先**拷到本地目录**（如 `/data/datasets/<name>_src`），再用 `curate_dataset.py` 处理；
+> 训练前先**拷到本地目录**（如 `/dataset/<name>_src`），再用 `curate_dataset.py` 处理；
 > 不要直接对网络目录跑批量检测/打标，避免 IO 抖动和半途断连。
 >
 > **测试目录（2026-10-25 指定）**：`dav://192.168.1.53:5005/sata11-18072858035/weibo/佟丽娅`
@@ -99,7 +99,7 @@
 > ```bash
 > # 示例：挂载后拷贝（凭据按实际填写）
 > sudo mount -t davfs http://192.168.1.53:5005/sata11-18072858035/weibo /mnt/weibo
-> cp -r /mnt/weibo/<子目录> /data/datasets/<name>_src
+> cp -r /mnt/weibo/<子目录> /dataset/<name>_src
 > ```
 
 `train_lora/prepare_dataset.py`：风格图目录 → 预缩（长边 ≤1536）+ Florence 自动打标。
@@ -107,7 +107,7 @@
 > **两套数据集分开产出**：风格集 `<name>1536/`（1536，全部图合并）；
 > 人脸集 `<name>_face/`（512×512 对齐脸，按明星分目录分别训练）。
 
-产物 `/data/datasets/mystyle1536/`：
+产物 `/dataset/mystyle1536/`：
 ```
 images/            56 张（≤1536）+ *.txt per-image caption（"mystyle, ..."）
 dataset.toml
@@ -124,8 +124,8 @@ enable_bucket = true
 bucket_no_upscale = true
 
 [[datasets]]
-image_directory = "/data/datasets/mystyle1536/images"
-cache_directory = "/data/datasets/mystyle1536/cache"
+image_directory = "/dataset/mystyle1536/images"
+cache_directory = "/dataset/mystyle1536/cache"
 num_repeats = 1
 ```
 
@@ -195,12 +195,12 @@ export LD_LIBRARY_PATH=/opt/StaticPy/cpp/imgproc/build:/opt/StaticPy/cpp/sr/buil
 > **已封装为脚本**：`train_lora/image_pipeline.sh <src> <name> [style_trigger] [face_trigger]`
 > 流程：cp → **人物门禁（非人物先删）** → 缩放 → 自动筛 → 手工筛 → 扣脸/`cp` style → 打标 → 校验 → `dataset.toml`。
 > 无人脸/非人物在门禁阶段直接删除，**不进入 resize、扣脸和打标**。
-> `SKIP_MANUAL=1` 跳过手工暂停；`BASE=/data/dataset`、`MAX=1536`、`FACE_SIZE=512` 可覆盖。
+> `SKIP_MANUAL=1` 跳过手工暂停；`BASE=/dataset`、`MAX=1536`、`FACE_SIZE=512` 可覆盖。
 
-1. **拷贝子目录到 `/data/dataset/<子目录>`**：
+1. **拷贝子目录到 `/dataset/<子目录>`**：
 
    ```bash
-   cp -r <图源>/<子目录> /data/dataset/<子目录>
+   cp -r <图源>/<子目录> /dataset/<子目录>
    ```
 
    `<子目录>` 为单个明星目录（如 `佟丽娅`）。
@@ -230,40 +230,43 @@ export LD_LIBRARY_PATH=/opt/StaticPy/cpp/imgproc/build:/opt/StaticPy/cpp/sr/buil
 
 4. **分流保存（直接 cp 到 dataset，不移动）**：
 
-   - **过滤后的整图 → `/data/dataset/style/images/`**（第 2 步已缩到长边 ≤1536）
-   - **扣人脸 → `/data/dataset/face/<子目录>/images/`**（512×512 五点对齐脸）：
+   - **过滤后的整图 → `/dataset/style/<子目录>/images/`**（第 2 步已缩到长边 ≤1536）
+   - **扣人脸 → `/dataset/face/<子目录>/images/`**（512×512 五点对齐脸）：
      ```bash
-     facecli crop IN.png /data/dataset/face/<子目录>/images/OUT.png 512
+     facecli crop IN.png /dataset/face/<子目录>/images/OUT.png 512
      # 批量：facecli crop --batch  （每行 "IN\tOUT 512"）
-     # 或单张：tools crop IN.png /data/dataset/face/<子目录>/images/OUT.png 512
+     # 或单张：tools crop IN.png /dataset/face/<子目录>/images/OUT.png 512
      ```
+   - **face 必须从原始大图扣**：脚本用硬链接保留原图（resize 不影响），扣完 512 再单独去背景；
+     不要从 1536 的 style 图扣，否则脸小会被放大发虚
    - 两套 `images/` 一一对应；第 3 步已剔除无人脸，正常不会缺脸
 
 5. **不合格的删除**：
 
    - 自动筛选时，不合格的 style 副本直接删除；扣脸失败也删
-   - 处理完成后，清理 `/data/dataset/<子目录>` **原始拷贝**：只保留进入 `style/images` 的合格图，其余删除
+   - 处理完成后，清理 `/dataset/<子目录>` **原始拷贝**：只保留进入 `style/images` 的合格图，其余删除
    - `image_pipeline.sh` 第 8 步会自动做原始拷贝清理
 
 6. **手工筛选**（自动规则之后，补一刀）：
 
-   - 直接浏览 `/data/dataset/style/images/`、`/data/dataset/face/<子目录>/images/`
+   - 直接浏览 `/dataset/style/<子目录>/images/`、`/dataset/face/<子目录>/images/`
    - 不要的**在当前目录手动删掉**（`rm`），不建 rejected/、不移到别处
    - 删除：糊 / 重复 / 脸不对 / 非目标人物 / 构图不可用 / 自动反推漏检的
    - **先筛完再打标**，避免打完再删、浪费语料
 
 7. **分别反推打标，生成训练语料**（输入目录固定）：
 
-   - **style**：读 `/data/dataset/style/images/` → `img2prompt --task '<DETAILED_CAPTION>'`（或 `<CAPTION>` 更快）
-   - **face**：读 `/data/dataset/face/<子目录>/images/` → `img2prompt --task '<CAPTION>'`
+   - **style**：读 `/dataset/style/<子目录>/images/` → `img2prompt --task '<DETAILED_CAPTION>'`（或 `<CAPTION>` 更快）
+   - **face**：读 `/dataset/face/<子目录>/images/` → `img2prompt --task '<CAPTION>'`
    - 批量：`img2prompt --batch`，stdin 为该固定目录下的图片列表，stdout 每行一条描述
    - 图片在第 4 步已 **cp** 到 `dataset/*/images/`；**就地打标**，不移动
    - 每张图写同名 `.txt`：`<触发词>, <反推描述>`
    - 分别生成 `dataset.toml`：style `resolution=[1536,1536]`，face `resolution=[512,512]`
    - 最终结构：
      ```
-     /data/dataset/style/{images/*, *.txt, dataset.toml}
-     /data/dataset/face/<子目录>/{images/*, *.txt, dataset.toml}
+     /dataset/style/<子目录>/{images/*, *.txt, dataset.toml}
+     /dataset/face/<子目录>/{images/*, *.txt, dataset.toml}
+     /dataset/style/dataset.toml   # 汇总所有 style 子目录，供 style LoRA 训练
      ```
    - 训练直接以这两个目录的 `dataset.toml` 为输入
 
@@ -281,7 +284,7 @@ export LD_LIBRARY_PATH=/opt/StaticPy/cpp/imgproc/build:/opt/StaticPy/cpp/sr/buil
 ```bash
 PY=/data/venv-musubi/bin
 M=/opt/musubi-tuner/src/musubi_tuner
-D=/data/datasets/mystyle1536
+D=/dataset/mystyle1536
 
 # latent（VAE 编码；分辨率相关：换分辨率必须重算）
 $PY/python $M/zimage_cache_latents.py --dataset_config $D/dataset.toml \
@@ -299,7 +302,7 @@ $PY/python $M/zimage_cache_text_encoder_outputs.py --dataset_config $D/dataset.t
 ```bash
 DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002.safetensors \
 ADAPTER= FP8=0 BLOCKS=12 DIM=16 EPOCHS=8 \
-DATA=/data/datasets/mystyle1536 OUT=/data/lora/mystyle_base \
+DATA=/dataset/mystyle1536 OUT=/data/lora/mystyle_base \
 bash train_lora/musubi_train.sh
 ```
 
@@ -309,7 +312,7 @@ bash train_lora/musubi_train.sh
 |------|------|------|
 | `DIT` | Base DiT | DiT 权重（第一个分片） |
 | `ADAPTER` | 空 | turbo 训练时才需要；Base 留空 |
-| `DATA` | `/data/datasets/mystyle1536` | 数据集目录 |
+| `DATA` | `/dataset/mystyle1536` | 数据集目录 |
 | `OUT` | `/data/lora/mystyle_base` | 输出目录 |
 | `DIM` / `LR` | 16 / 1e-4 | network_dim=alpha / 学习率 |
 | `EPOCHS` / `STEPS` | 8 / 空 | 轮数；设 `STEPS` 则用 max_train_steps |
@@ -402,9 +405,9 @@ mystyle.safetensors = mystyle
 
 ```bash
 # 1) 数据（预缩 1536 + Florence 打标）
-/data/venv/bin/python train_lora/prepare_dataset.py <风格图目录> /data/datasets/<name> \
+/data/venv/bin/python train_lora/prepare_dataset.py <风格图目录> /dataset/<name> \
   --trigger <trigger> --caption --max-side 1536
-cp -r /data/datasets/<name> /data/datasets/<name>1536  # 或直接改 dataset.toml
+cp -r /dataset/<name> /dataset/<name>1536  # 或直接改 dataset.toml
 
 # 2) 写 dataset.toml（resolution [1536,1536], image/cache_directory）
 
@@ -412,7 +415,7 @@ cp -r /data/datasets/<name> /data/datasets/<name>1536  # 或直接改 dataset.to
 
 # 4) 训练 + 转 GGUF（§6）
 DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002.safetensors \
-FP8=0 BLOCKS=12 DIM=16 EPOCHS=8 DATA=/data/datasets/<name>1536 OUT=/data/lora/<name> \
+FP8=0 BLOCKS=12 DIM=16 EPOCHS=8 DATA=/dataset/<name>1536 OUT=/data/lora/<name> \
 bash train_lora/musubi_train.sh
 
 # 5) 出图（§7）
@@ -496,7 +499,7 @@ facecli parse  <img> <out.png> [color|face|skin|hair]   # 人脸解析（在裁�
 bash train_lora/make_face_dataset.sh <人物图片目录> <触发词>
 # 例：
 bash train_lora/make_face_dataset.sh /data/celebA_photos celebA
-# → /data/datasets/celebA_face/{images/*.png(512对齐脸), *.txt, dataset.toml}
+# → /dataset/celebA_face/{images/*.png(512对齐脸), *.txt, dataset.toml}
 ```
 - **同一个人**的图 → 训出**身份 LoRA**（脸越来越像这个人）。
 - **不同人**的美图集合 → 训出**"审美/风格脸" LoRA**（生成的脸偏这个风格，不绑定具体人）。
@@ -504,7 +507,7 @@ bash train_lora/make_face_dataset.sh /data/celebA_photos celebA
 
 ### 13.3 预缓存 + 训练（人物建议 rank32）
 ```bash
-D=/data/datasets/celebA_face
+D=/dataset/celebA_face
 PY=/data/venv-musubi/bin; M=/opt/musubi-tuner/src/musubi_tuner
 $PY/python $M/zimage_cache_latents.py --dataset_config $D/dataset.toml \
   --vae /data/models/z-image-turbo/vae/diffusion_pytorch_model.safetensors --device cuda
@@ -550,14 +553,14 @@ LoRA 重命名为 `<触发词>.safetensors`），然后：
 ```bash
 # 一键：检测 → 5点对齐裁剪(512) → Florence 打标（身份中性的内容描述）
 bash train_lora/make_face_dataset.sh /path/to/star_photos celebA
-# → /data/datasets/celebA_face/{images/*.png(512对齐脸), *.txt, dataset.toml}
+# → /dataset/celebA_face/{images/*.png(512对齐脸), *.txt, dataset.toml}
 ```
 > caption 形如 `celebA, A woman with long black hair wearing a red dress.`——描述服装/背景，身份留给触发词，
 > 正是身份 LoRA 需要的"解耦"。
 
 ### 14.4 预缓存 + 训练（身份建议 rank32~64、步数偏多）
 ```bash
-D=/data/datasets/celebA_face
+D=/dataset/celebA_face
 PY=/data/venv-musubi/bin; M=/opt/musubi-tuner/src/musubi_tuner
 $PY/python $M/zimage_cache_latents.py --dataset_config $D/dataset.toml \
   --vae /data/models/z-image-turbo/vae/diffusion_pytorch_model.safetensors --device cuda
@@ -650,7 +653,7 @@ celebA.safetensors = celebA
 ```bash
 DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002.safetensors \
   FP8=0 BLOCKS=0 DIM=32 EPOCHS=12 OUT_NAME=<trigger> \
-  DATA=/data/datasets/<name>_face OUT=/data/lora/<trigger> \
+  DATA=/dataset/<name>_face OUT=/data/lora/<trigger> \
   bash train_lora/musubi_train.sh
 ```
 
@@ -665,9 +668,9 @@ DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002
 
 | 配方 | caption | rank | epochs | 数据 |
 |------|---------|------|--------|------|
-| BASE | Florence 描述式（`liuhaocun, A woman with long black hair...`） | 32 | 12 | `/data/datasets/liuhaocun_face`（98） |
-| V1 | **极简，只写 `liuhaocun`** | 32 | 10 | `/data/datasets/liuhaocun_min`（98） |
-| V2 | 极简，只写 `liuhaocun` | **64** | 10 | `/data/datasets/liuhaocun_min`（98） |
+| BASE | Florence 描述式（`liuhaocun, A woman with long black hair...`） | 32 | 12 | `/dataset/liuhaocun_face`（98） |
+| V1 | **极简，只写 `liuhaocun`** | 32 | 10 | `/dataset/liuhaocun_min`（98） |
+| V2 | 极简，只写 `liuhaocun` | **64** | 10 | `/dataset/liuhaocun_min`（98） |
 
 评估：`backup.sh` **2560×1440**，**Q8** 模型，同一 seed，双 LoRA
 （`liuhaocun:X` + `mystyle:0.6`）。LoRA：`/data/lora/exp/liuhaocun_min_r{32,64}.safetensors`；

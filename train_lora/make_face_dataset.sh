@@ -22,7 +22,7 @@ PY="${STATICPY_PYTHON:-/data/venv/bin/python}"
 
 SRC="${1:?用法: bash make_face_dataset.sh <原始图片目录> <触发词> [输出数据集目录]}"
 TRIGGER="${2:?缺少触发词}"
-DS="${3:-/data/datasets/$(basename "$SRC")_face}"
+DS="${3:-/dataset/$(basename "$SRC")_face}"
 
 [ -x "$FACECLI" ] || { echo "facecli 未编译: $FACECLI (先跑 cpp/face/build.sh)"; exit 1; }
 

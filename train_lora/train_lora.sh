@@ -3,7 +3,7 @@
 # train_lora.sh — 训练 z_image (Z-Image-Turbo) 风格 LoRA（QLoRA 4bit, 20G 可跑）
 #
 # 用法:
-#   DATA=/data/datasets/mystyle RANK=16 STEPS=800 bash train_lora.sh
+#   DATA=/dataset/mystyle RANK=16 STEPS=800 bash train_lora.sh
 #
 # 环境变量:
 #   BASE   训练基座 (默认 /data/models/z-image-turbo)

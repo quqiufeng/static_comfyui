@@ -15,7 +15,7 @@ PY=/data/venv/bin
 
 SRC="${1:?用法: bash run_train.sh <风格图目录> [触发词] [数据集目录]}"
 TRIGGER="${2:-mystyle}"
-DATASET="${3:-/data/datasets/$(basename "$SRC")_lora}"
+DATASET="${3:-/dataset/$(basename "$SRC")_lora}"
 
 echo ">>> [1/2] 打标 + 整理数据集: $SRC -> $DATASET"
 "$PY/python" "$DIR/prepare_dataset.py" "$SRC" "$DATASET" --trigger "$TRIGGER" --caption

@@ -7,19 +7,19 @@
 #   bash image_pipeline.sh /run/user/.../weibo/佟丽娅 佟丽娅
 #
 # 流程（尺寸/筛选都在拷贝目录内完成，最后只 cp 合格图）:
-#   1) cp/scp 子目录 -> /data/dataset/<name>
+#   1) cp/scp 子目录 -> /dataset/<name>
 #   2) 人物门禁：无人脸/非人物先删除（不进入后续处理）
 #   3) 在 <name>/ 内逐张等比缩放到长边 <= MAX
 #   4) facecli detect + Florence 反推自动筛（多人脸/低分/低清/非写真/无人），不合格删除
 #   5) 手工筛选（暂停，直接在 <name>/ 里删）
 #   6) 去背景（BiRefNet，只处理筛选后的合格图）
-#   7) 合格图 cp 到 /data/dataset/style/images；facecli crop -> /data/dataset/face/<name>/images
+#   7) 合格图 cp 到 /dataset/style/<name>/images；facecli crop -> /dataset/face/<name>/images
 #   8) img2prompt 打标 -> 同名 .txt
 #   9) 校验图片↔txt
 #   10) 写 dataset.toml
 #
 # 环境变量:
-#   BASE=/data/dataset  MAX=1536  MIN_SIDE=512  MIN_FACE_SCORE=0.60
+#   BASE=/dataset  MAX=1536  MIN_SIDE=512  MIN_FACE_SCORE=0.60
 #   FACE_SIZE=512  STYLE_TRIGGER=mystyle  FACE_TRIGGER=<name>
 #   SKIP_MANUAL=1  跳过手工筛选
 #   REPO=/opt/static_comfyui  STATICPY=/opt/StaticPy
@@ -31,7 +31,7 @@ NAME="${2:?缺少 name（明星/触发词）}"
 STYLE_TRIGGER="${3:-mystyle}"
 FACE_TRIGGER="${4:-$NAME}"
 
-BASE="${BASE:-/data/dataset}"
+BASE="${BASE:-/dataset}"
 MAX="${MAX:-1536}"
 MIN_SIDE="${MIN_SIDE:-512}"
 MIN_FACE_SCORE="${MIN_FACE_SCORE:-0.60}"
@@ -47,7 +47,9 @@ PIL="$STATICPY/imgproc/pil"
 FLORENCE_DIR="/data/models/florence2"
 
 SRC_DIR="$BASE/$NAME"
-STYLE_DIR="$BASE/style/images"
+STYLE_BASE="$BASE/style/$NAME"
+STYLE_DIR="$STYLE_BASE/images"
+ORIG_DIR="$BASE/_orig/$NAME"
 FACE_DIR="$BASE/face/$NAME/images"
 
 log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
@@ -60,7 +62,8 @@ command -v identify >/dev/null || die "需要 ImageMagick identify"
 [ "$MAX" -ge 64 ] || die "MAX 太小: $MAX"
 
 mkdir -p "$BASE" "$STYLE_DIR" "$FACE_DIR"
-rm -f "$FACE_DIR"/* 2>/dev/null || true   # 重跑时清掉该明星的旧 face
+rm -f "$STYLE_DIR"/* 2>/dev/null || true   # 重跑时清掉该明星的旧 style
+rm -f "$FACE_DIR"/* 2>/dev/null || true    # 重跑时清掉该明星的旧 face
 
 # ── 1) 拷贝图源 ─────────────────────────────────────────────
 if [ -d "$SRC_DIR" ]; then
@@ -73,6 +76,12 @@ else
     log "拷贝图源: $SRC -> $SRC_DIR"
     cp -r "$SRC" "$SRC_DIR"
 fi
+
+# 留一份原始图硬链接：face 从原图扣，保证清晰度（resize 会替换源路径，不影响硬链接 inode）
+rm -rf "$ORIG_DIR"; mkdir -p "$ORIG_DIR"
+find "$SRC_DIR" -maxdepth 1 -type f \
+    \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' -o -iname '*.bmp' \) \
+    -exec ln -f {} "$ORIG_DIR/" \;
 
 # 记录本次图源全部 stem（用于清掉历史 style/face 残留）
 declare -A ALL
@@ -125,7 +134,7 @@ mapfile -t FACES < /tmp/ip_faces.jsonl
 
 log "反推描述（内容筛选 + 后续 style 打标）..."
 printf '%s\n' "${IMGS[@]}" | "$IMG2PROMPT" --model-dir "$FLORENCE_DIR" \
-    --task '<CAPTION>' --beams 1 --batch > /tmp/ip_caps.txt 2>/dev/null || true
+    --task '<CAPTION>' --beams 1 --max-new-tokens 24 --batch > /tmp/ip_caps.txt 2>/dev/null || true
 mapfile -t CAPS < /tmp/ip_caps.txt
 
 NONPHOTO='anime|manga|cartoon|illustration|illustrated|drawing|painting|sketch|logo|watermark|poster|advertisement|screenshot|comic|graphic|vector|clipart|emoji|sticker|album cover'
@@ -207,7 +216,9 @@ for img in "${IMGS[@]}"; do
     # 清掉该 stem 的旧 style 副本/标注，避免 jpg→png 后同 stem 两份
     for e in jpg jpeg png webp bmp txt; do rm -f "$STYLE_DIR/$stem.$e"; done
     cp -f "$img" "$STYLE_DIR/"
-    printf '%s\t%s %s\n' "$img" "$FACE_DIR/$stem.png" "$FACE_SIZE" >> /tmp/ip_crop.tsv
+    raw="$ORIG_DIR/$(basename "$img")"
+    [ -f "$raw" ] || raw="$img"
+    printf '%s\t%s %s\n' "$raw" "$FACE_DIR/$stem.png" "$FACE_SIZE" >> /tmp/ip_crop.tsv
 done
 log "批量扣脸 ${#IMGS[@]} 张..."
 "$FACECLI" crop --batch < /tmp/ip_crop.tsv >/tmp/ip_crop.log 2>/dev/null || true
@@ -221,8 +232,31 @@ for img in "${IMGS[@]}"; do
     fi
 done
 
+# face 从原图抠出，仍需单独去背景（batch）
+if [ -x "$BGREMOVE" ]; then
+    log "face 去背景（batch）..."
+    : > /tmp/ip_facebg.tsv
+    for f in "$FACE_DIR"/*.png; do
+        [ -f "$f" ] || continue
+        stem="$(basename "${f%.*}")"
+        printf '%s\t%s\n' "$f" "$FACE_DIR/$stem.bg.$$.png" >> /tmp/ip_facebg.tsv
+    done
+    if LD_LIBRARY_PATH="$STATICPY/cpp/birefnet${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        "$BGREMOVE" --mode transparent --list /tmp/ip_facebg.tsv >/dev/null 2>&1; then
+        for f in "$FACE_DIR"/*.bg.$$.png; do
+            [ -f "$f" ] || continue
+            mv -f "$f" "${f%.bg.$$.png}.png"
+        done
+    else
+        log "face 去背景失败，保留原图"
+        rm -f "$FACE_DIR"/*.bg.$$.png
+    fi
+fi
+rm -rf "$ORIG_DIR"
+
 # 用当前目录实际保留的 stem 清理 style/face 残留
 declare -A KEEP
+CUT=0
 for img in "${IMGS[@]}"; do [ -e "$img" ] && KEEP["$(basename "${img%.*}")"]=1; done
 for f in "$STYLE_DIR"/*; do
     [ -f "$f" ] || continue
@@ -245,24 +279,23 @@ for img in "${IMGS[@]}"; do
     out="$STYLE_DIR/$(basename "$img")"
     cap="${CAP[$stem]:-}"
     if [ -z "$cap" ]; then
-        cap="$("$IMG2PROMPT" --model-dir "$FLORENCE_DIR" --task '<CAPTION>' --beams 1 "$out" 2>/dev/null | head -1)"
+        cap="$("$IMG2PROMPT" --model-dir "$FLORENCE_DIR" --task '<CAPTION>' --beams 1 --max-new-tokens 24 "$out" 2>/dev/null | head -1)"
     fi
     if [ -n "$cap" ]; then printf '%s, %s\n' "$STYLE_TRIGGER" "$cap" > "${out%.*}.txt"
     else printf '%s\n' "$STYLE_TRIGGER" > "${out%.*}.txt"; fi
 done
 
 mapfile -t FACES_IMG < <(find "$FACE_DIR" -maxdepth 1 -type f -iname '*.png' | sort)
-log "face 打标..."
-if [ "${#FACES_IMG[@]}" -gt 0 ]; then
-    printf '%s\n' "${FACES_IMG[@]}" | "$IMG2PROMPT" --model-dir "$FLORENCE_DIR" \
-        --task '<CAPTION>' --beams 1 --batch > /tmp/ip_facecaps.txt 2>/dev/null || true
-    mapfile -t FCAPS < /tmp/ip_facecaps.txt
-    for i in "${!FACES_IMG[@]}"; do
-        img="${FACES_IMG[$i]}"; cap="${FCAPS[$i]:-}"
-        if [ -n "$cap" ]; then printf '%s, %s\n' "$FACE_TRIGGER" "$cap" > "${img%.*}.txt"
-        else printf '%s\n' "$FACE_TRIGGER" > "${img%.*}.txt"; fi
-    done
-fi
+log "face 打标（复用 style 描述）..."
+for img in "${FACES_IMG[@]}"; do
+    stem="$(basename "${img%.*}")"
+    st="$STYLE_DIR/$stem.txt"
+    if [ -s "$st" ]; then
+        sed -e "s/^${STYLE_TRIGGER}/${FACE_TRIGGER}/" "$st" > "${img%.*}.txt"
+    else
+        printf '%s\n' "$FACE_TRIGGER" > "${img%.*}.txt"
+    fi
+done
 
 # ── 9) 校验：图片 ↔ txt ────────────────────────────────────
 if [ -x "$SCRIPT_DIR/check_labels.sh" ]; then
@@ -288,8 +321,30 @@ cache_directory = "$1/cache"
 num_repeats = 1
 EOF
 }
-write_toml "$BASE/style" "$MAX"
+write_toml "$STYLE_BASE" "$MAX"
 write_toml "$BASE/face/$NAME" "$FACE_SIZE"
+
+# style 总表：一个 LoRA 用全部明星图片（多个 [[datasets]]）
+{
+    cat <<'EOF'
+[general]
+resolution = [1536, 1536]
+caption_extension = ".txt"
+batch_size = 1
+enable_bucket = true
+bucket_no_upscale = true
+EOF
+    for d in "$BASE"/style/*/; do
+        [ -d "$d/images" ] || continue
+        cat <<EOF
+
+[[datasets]]
+image_directory = "$d/images"
+cache_directory = "$d/cache"
+num_repeats = 1
+EOF
+    done
+} > "$BASE/style/dataset.toml"
 
 log "完成"
 echo "  source: $SRC_DIR ($(find "$SRC_DIR" -maxdepth 1 -type f | wc -l) 张)"

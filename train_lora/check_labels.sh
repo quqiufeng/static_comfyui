@@ -43,7 +43,7 @@ FIX=0
 if [ "${#MISS[@]}" -gt 0 ]; then
     echo "  补打标 ${#MISS[@]} 张..."
     printf '%s\n' "${MISS[@]}" | "$IMG2PROMPT" --model-dir "$FLORENCE_DIR" \
-        --task "$TASK" --beams 1 --batch > /tmp/check_labels_caps.txt 2>/dev/null || true
+        --task "$TASK" --beams 1 --max-new-tokens 24 --batch > /tmp/check_labels_caps.txt 2>/dev/null || true
     mapfile -t CAPS < /tmp/check_labels_caps.txt
     for i in "${!MISS[@]}"; do
         img="${MISS[$i]}"; cap="${CAPS[$i]:-}"
