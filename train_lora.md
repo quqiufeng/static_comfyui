@@ -277,6 +277,29 @@ export LD_LIBRARY_PATH=/opt/StaticPy/cpp/imgproc/build:/opt/StaticPy/cpp/sr/buil
    - 脚本：`bash train_lora/check_labels.sh <images_dir> <trigger>`
    - `image_pipeline.sh` 结束会**自动**对 style/face 各跑一次
 
+### 4.4 Style-only 数据源（不要求人脸）
+
+适用于「整本相册都是同一风格、但不按明星」的图源，不扣脸、不去背景、不做人物门禁。
+
+**下载**（复用 my-agent 的微博相册接口）：
+```bash
+bash train_lora/download_weibo_album.sh <uid|昵称|微博URL> <输出目录> [页数|all] [limit]
+# 例：
+bash train_lora/download_weibo_album.sh \
+  'https://weibo.com/u/7619798979?tabtype=album' /dataset/_src/weibostyle 100
+```
+- 默认 100 页；`all` 翻到 `WEIBO_ALBUM_MAX_PAGE`（默认 500）
+- 大图直出，实测样本 7285×5464 / 8–9MB
+- 该账号相册至少 7000+ 张，按需用页数/`limit` 控制，不必全量
+
+**处理**：
+```bash
+BASE=/dataset SKIP_MANUAL=1 LIMIT=2000 \
+  bash train_lora/style_pipeline.sh /dataset/_src/weibostyle weibostyle weibostyle
+```
+- 只做：resize（长边 ≤1536）→ 手工筛（可跳过）→ Florence 打标 → `style/<name>/dataset.toml` + 汇总表
+- **不扣脸、不去背景、不要求有人**；背景和场景本身就是风格的一部分
+
 ---
 
 ## 5. 预缓存
@@ -371,6 +394,8 @@ mystyle.safetensors = mystyle
 |------|------|
 | `image_pipeline.sh` | **图片流水线**：cp → 缩放 → 自动筛 → 扣脸 → 手工筛 → 打标 → 校验 → `dataset.toml`（shell + 现有二进制） |
 | `check_labels.sh` | **图片↔标注校验**：有图无 txt 补打标；有 txt 无图删 txt |
+| `download_weibo_album.sh` | **微博相册下载**：uid/昵称/URL → 大图目录（复用 my-agent 接口） |
+| `style_pipeline.sh` | **纯 style 流水线**：resize → 手工筛 → 打标 → dataset.toml（不扣脸/不去背景） |
 | `musubi_train.sh` | **musubi 训练封装**（当前主用，支持 Base/turbo、fp8、blocks_to_swap）+ 保留原始权重 + 转 GGUF |
 | `prepare_dataset.py` | 风格图 → 预缩 + Florence 批量打标（`--batch`）+ `metadata.jsonl`/`.txt` |
 | `run_train.sh` / `train_dreambooth_lora_z_image.py` / `qnbit4.json` | diffusers 路线（备选，已适配 0.38） |
