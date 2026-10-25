@@ -291,7 +291,7 @@ bash train_lora/download_weibo_album.sh \
 **CDP 采集（推荐，caption 识别明星）**
 ```bash
 # 批量账号（含 8 个已记录号，自动跳过已完成）
-bash train_lora/download_weibo_accounts.sh 200
+bash train_lora/download_weibo_accounts.sh 100   # 100 = 每号 100 张（不是总数）
 
 # 单号：逐张 →，取 /large/ 原图，按 caption 明星分目录
 node train_lora/weibo_album_cdp.js \
@@ -300,8 +300,8 @@ node train_lora/weibo_album_cdp.js \
 ```
 
 - 默认 100 页；`all` 翻到 `WEIBO_ALBUM_MAX_PAGE`（默认 500）
-- **下载后立即 resize 到长边 ≤1536**（`MAX` 可调，`RESIZE=0` 保留原图）
-- 原图实测可达 7285×5464 / 8–9MB；resize 后按 1536 存，避免占空间
+- **下载后立即 resize 到长边 ≤2048**（源图留余量；`MAX` 可调，`RESIZE=0` 保留原图）
+- 原图实测可达 7285×5464 / 8–9MB；resize 后按 2048 存，兼顾细节与空间
 - 该账号相册至少 7000+ 张，按需用页数/`limit` 控制，不必全量
 
 **处理**：
@@ -309,7 +309,7 @@ node train_lora/weibo_album_cdp.js \
 BASE=/dataset SKIP_MANUAL=1 LIMIT=2000 \
   bash train_lora/style_pipeline.sh /dataset/_src/weibostyle weibostyle weibostyle
 ```
-- 只做：resize（长边 ≤1536）→ 手工筛（可跳过）→ Florence 打标 → `style/<name>/dataset.toml` + 汇总表
+- 只做：resize（长边 ≤1536，从 2048 源图再缩）→ 手工筛（可跳过）→ Florence 打标 → `style/<name>/dataset.toml` + 汇总表
 - **不扣脸、不去背景、不要求有人**；背景和场景本身就是风格的一部分
 
 ---

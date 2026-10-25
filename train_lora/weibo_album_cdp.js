@@ -12,7 +12,7 @@ const OUT = process.argv[4] || '/dataset/_src/weibo_album';
 const SCRIPT_DIR = __dirname;
 const NAMES_FILE = process.env.CELEB_NAMES || path.join(SCRIPT_DIR, 'celebrities.txt');
 const NO_DOWNLOAD = process.env.NO_DOWNLOAD === '1';
-const MAX = parseInt(process.env.MAX || '1536', 10);
+const MAX = parseInt(process.env.MAX || '2048', 10);
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const tidy = u => u.replace(/\/(orj360|orj480|thumb150|thumb180|thumbnail|mw690|small|wap360|bmiddle|mw1024|webp720|mw2000)\//, '/large/').replace(/\?.*$/, '');
@@ -58,6 +58,30 @@ async function wsUrl() {
   if (!ALBUM) { console.error('usage: node weibo_album_cdp.js <album_url> [count] [outdir]'); process.exit(2); }
   fs.mkdirSync(OUT, { recursive: true });
 
+  const tsv = path.join(OUT, 'metadata.tsv');
+  const progressFile = path.join(OUT, 'progress.json');
+  const uid = (ALBUM.match(/uid=(\d+)/) || [])[1] || '';
+  const existing = [];
+  if (fs.existsSync(tsv)) {
+    for (const line of fs.readFileSync(tsv, 'utf8').split('\n')) {
+      if (!line.trim()) continue;
+      const p = line.split('\t');
+      if (!p[0]) continue;
+      existing.push({ url: p[0], celeb: p[1] || 'unknown', caption: p.slice(2).join('\t') });
+    }
+  }
+  const writeProgress = (count, last) => {
+    fs.writeFileSync(progressFile, JSON.stringify({
+      uid, out: OUT, count, target: COUNT, last_url: last || '', updated: new Date().toISOString()
+    }, null, 2) + '\n');
+  };
+  writeProgress(existing.length, existing.length ? existing[existing.length - 1].url : '');
+  if (existing.length >= COUNT) {
+    console.error(`already ${existing.length}/${COUNT} -> ${tsv}`);
+    process.exit(0);
+  }
+  console.error(`resume existing=${existing.length} target=${COUNT}`);
+
   const ws = new WebSocket(await wsUrl());
   let id = 0; const pend = {};
   const send = (method, params, sessionId) => new Promise((res, rej) => {
@@ -93,6 +117,17 @@ async function wsUrl() {
   await sleep(3000);
   console.error('viewer_open=' + opened);
 
+  // 续采：先快速按 → 到上次最后一张（少按 1 次，让主循环去确认/跳过）
+  const ff = Math.max(0, existing.length - 1);
+  if (ff > 0) {
+    console.error(`fast-forward ${ff}...`);
+    for (let i = 0; i < ff; i++) {
+      await pressRight();
+      await sleep(220);
+      if ((i + 1) % 25 === 0) console.error(`  ff ${i + 1}/${ff}`);
+    }
+  }
+
   const EXTRACT = `(()=>{
     const roots=[...document.querySelectorAll('div')].filter(e=>{
       const t=e.innerText||'';
@@ -107,10 +142,13 @@ async function wsUrl() {
     return {src:big.currentSrc||big.src, text:(root.innerText||'').slice(0,3000)};
   })()`;
 
-  const rows = [];
-  const seen = new Set();
-  let prev = '', same = 0, miss = 0;
-  for (let n = 0; n < COUNT; n++) {
+  const rows = existing.slice();
+  const seen = new Set(existing.map(r => r.url));
+  let prev = '', same = 0, miss = 0, attempts = 0;
+  const need = COUNT - rows.length;
+  const maxAttempts = need * 4 + 100;
+  while (rows.length < COUNT && attempts < maxAttempts) {
+    attempts++;
     const v = await ev(EXTRACT);
     let url = '';
     if (v && v.src && /sinaimg\.cn/.test(v.src)) {
@@ -119,21 +157,22 @@ async function wsUrl() {
         seen.add(url);
         const cap = (v.text || '').replace(/\s+/g, ' ').trim();
         const celeb = matchCeleb(cap);
-        rows.push({ url, celeb, caption: cap });
+        const row = { url, celeb, caption: cap };
+        rows.push(row);
+        fs.appendFileSync(tsv, `${row.url}\t${row.celeb}\t${row.caption}\n`);
+        writeProgress(rows.length, url);
         console.error(`[${rows.length}/${COUNT}] ${celeb} ${url}`);
       }
     }
     if (url && url === prev) same++; else same = 0;
     prev = url;
     if (!url) miss++; else miss = 0;
-    if (same >= 4 || miss >= 4) { console.error('stop: no progress'); break; }
+    if (same >= 6 || miss >= 6) { console.error('stop: no progress'); break; }
     await pressRight();
     await sleep(1300);
   }
-
-  const tsv = path.join(OUT, 'metadata.tsv');
-  fs.writeFileSync(tsv, rows.map(r => `${r.url}\t${r.celeb}\t${r.caption}`).join('\n') + '\n');
-  console.error(`collected=${rows.length} -> ${tsv}`);
+  writeProgress(rows.length, rows.length ? rows[rows.length - 1].url : '');
+  console.error(`collected=${rows.length}/${COUNT} -> ${tsv}`);
 
   if (NO_DOWNLOAD) { await send('Target.closeTarget', { targetId }); ws.close(); process.exit(0); }
 
