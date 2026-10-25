@@ -20,6 +20,10 @@ CONTROL_NET="${CONTROL_NET:-}"
 CONTROL_DIR="${CONTROL_DIR:-}"
 CONTROL_STRENGTH="${CONTROL_STRENGTH:-1.0}"
 DTYPE="${DTYPE:-}"
+IPADAPTER="${IPADAPTER:-}"
+CLIP_VISION="${CLIP_VISION:-}"
+IPADAPTER_IMAGE="${IPADAPTER_IMAGE:-}"
+IPADAPTER_STRENGTH="${IPADAPTER_STRENGTH:-0.8}"
 
 PROMPT="${1:-a cute cartoon knight walking to the right, side view, plain white background, full body}"
 OUTD="${2:-$HOME/iso_gen/anim_out}"
@@ -62,6 +66,10 @@ WF="$(mktemp)"
   else
     echo "  \"2\": {\"class_type\":\"$LOADER\",\"inputs\":{\"model\":$BASE_REF,\"motion_module\":\"$MOTION\"}},"
     MODELREF='["2",0]'
+  fi
+  if [ -n "$IPADAPTER" ]; then
+    echo "  \"10\": {\"class_type\":\"IPAdapterApply\",\"inputs\":{\"model\":$MODELREF,\"ipadapter_model\":\"$IPADAPTER\",\"clip_vision_model\":\"$CLIP_VISION\",\"image_path\":\"$IPADAPTER_IMAGE\",\"weight\":$IPADAPTER_STRENGTH}},"
+    MODELREF='["10",0]'
   fi
   echo "  \"3\": {\"class_type\":\"$SAMPLER\",\"inputs\":{\"model\":$MODELREF,\"positive\":\"$PROMPT\",\"negative\":\"$NEG\",\"width\":$W,\"height\":$H,\"steps\":$STEPS,\"cfg\":$CFG,\"seed\":$SEED,\"frames\":$FRAMES,\"fps\":$FPS,\"sampler_name\":\"euler\",\"scheduler\":\"discrete\",\"output_dir\":\"$OUTD\"$EXTRA}}"
   echo '}'
