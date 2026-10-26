@@ -22,7 +22,6 @@ set -uo pipefail
 COUNT="${1:-100}"
 OUTBASE="${OUTBASE:-/dataset/_src}"
 CDP_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/weibo_album_cdp.js"
-CHROME_DEBUG="/opt/my-agent/operator/tools/chrome_debug.sh"
 STATUS=/tmp/weibo_accounts.status
 PROGRESS="$OUTBASE/weibo_progress.tsv"
 : > "$STATUS"
@@ -39,20 +38,21 @@ ACCOUNTS=(
   "7619798979|weibo_album_7619798979_large"
   "7954334448|weibo_album_7954334448"
   "5880302175|weibo_album_5880302175"
-  "6872799860|weibo_album_6872799860"
   "3018707285|weibo_album_3018707285"
   "6657546529|weibo_album_6657546529"
   "7972556454|weibo_album_7972556454"
   "7918574208|weibo_album_7918574208"
+  "7864668908|weibo_album_7864668908"
+  "6898913719|weibo_album_6898913719"
+  "7311284104|weibo_album_7311284104"
 )
 
 [ -f "$CDP_SCRIPT" ] || { echo "缺少 $CDP_SCRIPT" >&2; exit 1; }
 mkdir -p "$OUTBASE" 2>/dev/null || { echo "无法创建 $OUTBASE" >&2; exit 1; }
 
 if ! curl -s --max-time 2 http://127.0.0.1:9222/json/version >/dev/null; then
-  echo "启动专用 Chrome（9222）..."
-  bash "$CHROME_DEBUG"
-  sleep 2
+  echo "ERROR: Chrome 9222 未运行；请先手动启动专用实例（本脚本不会杀/重启浏览器）" >&2
+  exit 1
 fi
 
 for entry in "${ACCOUNTS[@]}"; do
@@ -63,8 +63,11 @@ for entry in "${ACCOUNTS[@]}"; do
 
   n=0
   [ -f "$out/metadata.tsv" ] && n=$(wc -l < "$out/metadata.tsv")
-  if [ "${FORCE:-0}" != "1" ] && [ "$n" -ge "$COUNT" ]; then
-    echo "SKIP $uid ($n)" >> "$STATUS"
+  ended=false
+  [ -f "$out/progress.json" ] && ended=$(jq -r '.ended // false' "$out/progress.json" 2>/dev/null || echo false)
+
+  if [ "${FORCE:-0}" != "1" ] && { [ "$n" -ge "$COUNT" ] || { [ "$ended" = "true" ] && [ "$n" -gt 0 ]; }; }; then
+    echo "SKIP $uid ($n, ended=$ended)" >> "$STATUS"
     record_progress "$uid" "$name" "$n" "$out"
     continue
   fi
@@ -74,13 +77,39 @@ for entry in "${ACCOUNTS[@]}"; do
     echo "STOP disk<$free G" >> "$STATUS"; break
   fi
 
+  # 不自动启动/重启 Chrome：9222 不在就停下，绝不杀现有浏览器
+  if ! curl -s --max-time 2 http://127.0.0.1:9222/json/version >/dev/null; then
+    echo "NO_CHROME $uid (请手动启动 9222，脚本不杀浏览器)" >> "$STATUS"
+    break
+  fi
+
   echo "START $uid $name target=$COUNT $(date '+%F %T')" >> "$STATUS"
+  : > "$log"
   timeout 1800 node "$CDP_SCRIPT" \
     "https://weibo.com/u/$uid?tabtype=album&uid=$uid&index=0" "$COUNT" "$out" \
-    > "$log" 2>&1
-  rc=$?
+    >> "$log" 2>&1 &
+  np=$!
+  lost=0
+  while kill -0 "$np" 2>/dev/null; do
+    sleep 5
+    if ! curl -s --max-time 2 http://127.0.0.1:9222/json/version >/dev/null; then
+      echo "CHROME_LOST $uid (不再自动重启；已采部分保留)" >> "$STATUS"
+      kill "$np" 2>/dev/null
+      wait "$np" 2>/dev/null
+      lost=1
+      break
+    fi
+  done
+  if [ "$lost" -eq 0 ]; then
+    wait "$np"; rc=$?
+  else
+    rc=137
+  fi
+
   cnt=$(wc -l < "$out/metadata.tsv" 2>/dev/null || echo 0)
-  echo "END $uid rc=$rc n=$cnt $(date '+%F %T')" >> "$STATUS"
+  ended=false
+  [ -f "$out/progress.json" ] && ended=$(jq -r '.ended // false' "$out/progress.json" 2>/dev/null || echo false)
+  echo "END $uid rc=$rc n=$cnt ended=$ended $(date '+%F %T')" >> "$STATUS"
   record_progress "$uid" "$name" "$cnt" "$out"
 done
 echo "ALL DONE $(date '+%F %T')" >> "$STATUS"

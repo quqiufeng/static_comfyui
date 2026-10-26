@@ -304,6 +304,15 @@ node train_lora/weibo_album_cdp.js \
 - 原图实测可达 7285×5464 / 8–9MB；resize 后按 2048 存，兼顾细节与空间
 - 该账号相册至少 7000+ 张，按需用页数/`limit` 控制，不必全量
 
+> **CDP 续采注意（2026-10-26 实测）**
+> - 先用 `curl -s http://127.0.0.1:9222/json/list` 查已有 tab：
+>   `weibo.com/u/<uid>?tabtype=album&index=N` 就是活着的 viewer
+> - **复用已有 tab**（按 uid 匹配后 attach），不要再 `Target.createTarget` 从 0 新建
+> - 按 `→` 后 viewer **index 先变、图片后加载**：必须等到「index 增加 **且** img `src` 变化」再取图
+> - 固定 sleep 1.3s 会读到上一张的 `src`，连续重复后被误判成“相册到底”
+> - index 没有 ~1330 上限：实测 `1344 → 1350` 正常，并在 1350 拿到新图
+> - 单号 `timeout 1800`（30 分钟）会在大相册约 1300 张处中断；大号改用更长超时/续采
+
 **处理**：
 ```bash
 BASE=/dataset SKIP_MANUAL=1 LIMIT=2000 \
