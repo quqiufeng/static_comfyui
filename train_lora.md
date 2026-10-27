@@ -69,6 +69,7 @@
 | 训练 venv | **`/data/venv-musubi`**（`python3 -m venv --system-site-packages`） |
 | torch | 2.6.0+cu126（软链自 `/data/venv`；musubi venv 自带被 `~/.local` CPU 版抢先，故软链 CUDA 版） |
 | 库版本 | transformers **4.57.6** / diffusers **0.38.0** / huggingface_hub **0.36.2**（降到与 torch 2.6 匹配） |
+| flash-attn | **2.7.4**（已链接进 `/data/venv-musubi`，训练默认 `ATTN=flash`；GPU smoke test 通过） |
 | musubi-tuner | `/opt/musubi-tuner`（源码 `-e` 安装） |
 
 ---
@@ -258,7 +259,7 @@ export LD_LIBRARY_PATH=/opt/StaticPy/cpp/imgproc/build:/opt/StaticPy/cpp/sr/buil
 
    - **style**：读 `/dataset/style/<子目录>/images/` → `img2prompt --task '<DETAILED_CAPTION>'`（或 `<CAPTION>` 更快）
    - **face**：读 `/dataset/face/<子目录>/images/` → `img2prompt --task '<CAPTION>'`
-   - 批量：`img2prompt --batch`，stdin 为该固定目录下的图片列表，stdout 每行一条描述
+   - 批量：`img2prompt --batch`，stdin 为该固定目录下的图片列表，stdout 每行一条描述；**模型只加载一次**，后续图片复用
    - 图片在第 4 步已 **cp** 到 `dataset/*/images/`；**就地打标**，不移动
    - 每张图写同名 `.txt`：`<触发词>, <反推描述>`
    - 分别生成 `dataset.toml`：style `resolution=[1536,1536]`，face `resolution=[512,512]`
@@ -321,6 +322,87 @@ BASE=/dataset SKIP_MANUAL=1 LIMIT=2000 \
 - 只做：resize（长边 ≤1536，从 2048 源图再缩）→ 手工筛（可跳过）→ Florence 打标 → `style/<name>/dataset.toml` + 汇总表
 - **不扣脸、不去背景、不要求有人**；背景和场景本身就是风格的一部分
 
+### 4.5 每次训练抽样 2000 张（新目录 + JSON）
+
+> 适用：图源已按明星分目录（`/dataset/<明星>/`）。每次训练从现有库抽固定数量，
+> **源图只读**（只 `cp`，不 `mv`/不 resize）；处理/打标复用 `style_pipeline.sh`。
+
+`train_lora/make_style_dataset.sh` 做四件事：
+
+1. **分层抽样**：按明星轮转（round-robin）轮流取，避免大目录占比过高；`unknown` 默认排除。
+2. **写 `selection.json`**：seed、目标数、每明星张数、源路径、复制后文件名、输出路径。
+3. **复制到本次 run 的 `selected/`**：`cp -p`（尽量 reflink），源目录完全不动。
+4. **调 `style_pipeline.sh`**：resize（≤1536）→ 打标 → `style/<name>/dataset.toml`。
+
+> **打标只启动一次模型**：`style_pipeline.sh` 用一次 `img2prompt --batch` 把全部图片
+> 喂给同一个进程，Florence-2 加载一次后连续复用，不会逐张重启。
+
+```bash
+# 抽 2000 张 + 处理打标
+bash train_lora/make_style_dataset.sh 2000 style2000 mystyle
+
+# 只抽样/复制/写 JSON，暂不打标
+PROCESS=0 bash train_lora/make_style_dataset.sh 2000 style2000 mystyle
+
+# 换一批（换 seed；同 seed = 同一批图，便于复现）
+SEED=123 bash train_lora/make_style_dataset.sh 2000 style2000 mystyle
+```
+
+环境变量：
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `SRC_BASE` | `/dataset` | 源目录（只读） |
+| `OUT_ROOT` | `/dataset/_runs` | 每次 run 的输出根目录 |
+| `SEED` | `42` | 抽样种子；同 seed 抽到同一批 |
+| `INCLUDE_UNKNOWN` | `0` | 1=把 `unknown/` 也纳入抽样 |
+| `MAX` | `1536` | 训练长边（传给 `style_pipeline.sh`） |
+| `TASK` | `<CAPTION>` | 打标任务；可改 `<DETAILED_CAPTION>` |
+| `SKIP_MANUAL` | `1` | 跳过手工筛选（全自动） |
+| `PROCESS` | `1` | 0=只抽样/复制/写 JSON，不跑打标 |
+| `RUN` | 自动时间戳 | 自定义本次输出目录 |
+
+产物：
+
+```
+/dataset/_runs/style2000_<时间>/
+  selection.json          # 选了哪些图（可复现）
+  selected/               # 复制出的源图（源图不动）
+  style/style2000/images/ # 处理后图片 + 同名 .txt
+  style/style2000/dataset.toml
+```
+
+`selection.json` 关键字段：
+
+```json
+{
+  "created_at": "2026-10-27T13:30:00+08:00",
+  "seed": 42,
+  "target": 2000,
+  "selected": 2000,
+  "source_root": "/dataset",
+  "per_star": {"田曦薇": 26, "娜扎": 24, "...": 18},
+  "images": [
+    {"star": "田曦薇", "source": "/dataset/田曦薇/x.jpg", "staged": "x.jpg"}
+  ],
+  "output": {
+    "selected": "/dataset/_runs/style2000_<时间>/selected",
+    "images": "/dataset/_runs/style2000_<时间>/style/style2000/images",
+    "dataset_toml": "/dataset/_runs/style2000_<时间>/style/style2000/dataset.toml"
+  }
+}
+```
+
+训练：
+
+```bash
+DATA=/dataset/_runs/style2000_<时间>/style/style2000 \
+  EPOCHS=4 BLOCKS=8 DIM=16 OUT=/data/lora/style2000 \
+  bash train_lora/musubi_train.sh
+```
+
+> 2000 张 × 4 epochs ≈ 8000 步，1536 档 3080 约 20 小时；每轮自动存 checkpoint，训完出图盲测选最优。
+
 ---
 
 ## 5. 预缓存
@@ -328,7 +410,7 @@ BASE=/dataset SKIP_MANUAL=1 LIMIT=2000 \
 ```bash
 PY=/data/venv-musubi/bin
 M=/opt/musubi-tuner/src/musubi_tuner
-D=/dataset/mystyle1536
+D=/dataset/mystyle1536   # 或 §4.5 的 /dataset/_runs/<run>/style/<name>
 
 # latent（VAE 编码；分辨率相关：换分辨率必须重算）
 $PY/python $M/zimage_cache_latents.py --dataset_config $D/dataset.toml \
@@ -345,9 +427,10 @@ $PY/python $M/zimage_cache_text_encoder_outputs.py --dataset_config $D/dataset.t
 
 ```bash
 DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002.safetensors \
-ADAPTER= FP8=0 BLOCKS=12 DIM=16 EPOCHS=8 \
+ADAPTER= FP8=0 DIM=16 EPOCHS=8 \
 DATA=/dataset/mystyle1536 OUT=/data/lora/mystyle_base \
 bash train_lora/musubi_train.sh
+# BLOCKS 不设时按显存/分辨率自动（20G/1536 约 8）；ATTN 默认 flash
 ```
 
 环境变量：
@@ -360,16 +443,17 @@ bash train_lora/musubi_train.sh
 | `OUT` | `/data/lora/mystyle_base` | 输出目录 |
 | `DIM` / `LR` | 16 / 1e-4 | network_dim=alpha / 学习率 |
 | `EPOCHS` / `STEPS` | 8 / 空 | 轮数；设 `STEPS` 则用 max_train_steps |
-| `FP8` | 0 | 1=开 fp8（掉质量，默认关） |
-| `BLOCKS` | 12 | `--blocks_to_swap`（省显存）。**512 人脸数据集设 `0` 可提速约 4 倍**（见 §16） |
+| `FP8` | 0 | 1=开 fp8（掉质量，默认关；3080 无原生 fp8 加速） |
+| `BLOCKS` | 自动 | `--blocks_to_swap`（省显存）；不设时按显存/分辨率自动（20G/1536 约 8）。**512 人脸数据集设 `0` 可提速约 4 倍**（见 §16） |
+| `ATTN` | `flash` | `flash` / `sdpa` / `sage` / `xformers`；`flash_attn` 不可用时自动回退 `sdpa` |
 
-脚本内固定：`--sdpa --mixed_precision bf16 --timestep_sampling shift --weighting_scheme none
+脚本内默认：`--flash_attn`（`ATTN=flash`）、`--mixed_precision bf16 --timestep_sampling shift --weighting_scheme none
 --discrete_flow_shift 2.0 --optimizer_type adamw8bit --gradient_checkpointing
 --network_module networks.lora_zimage`；训练后保留原始 `out.safetensors`，并自动转出 `.gguf`（f16）。
 
 > **脚本已内置优化，无需再手调**：VRAM 自检 → 按分辨率自动 `--blocks_to_swap`；
 > block swap 默认 `pinned + H2D-only + ring_size 2`（`SWAP_MODE=plain|pinned` 可切）；
-> `--gradient_checkpointing`、`adamw8bit`、`--sdpa`、bf16、persistent data loader；
+> `--gradient_checkpointing`、`adamw8bit`、`--flash_attn`（不可用回退 `--sdpa`）、bf16、persistent data loader；
 > 每 epoch 自动存 checkpoint。1536 档在解锁 3080 上约 **8.8s/步**，直接按此配方跑即可。
 
 ---
@@ -417,7 +501,9 @@ mystyle.safetensors = mystyle
 | `check_labels.sh` | **图片↔标注校验**：有图无 txt 补打标；有 txt 无图删 txt |
 | `download_weibo_album.sh` | **微博相册下载**：uid/昵称/URL → 大图目录（复用 my-agent 接口） |
 | `style_pipeline.sh` | **纯 style 流水线**：resize → 手工筛 → 打标 → dataset.toml（不扣脸/不去背景） |
-| `musubi_train.sh` | **musubi 训练封装**（当前主用，支持 Base/turbo、fp8、blocks_to_swap）+ 保留原始权重 + 转 GGUF |
+| `make_style_dataset.sh` | **每次训练抽样**：从明星库分层抽 N 张 → `selection.json` → 复制到新 run → 调 `style_pipeline.sh`；源图不动（§4.5） |
+| `move_nonperson.sh` | **非人物/局部特写清理**：Florence 短描述 → 无人脸图再用 `<DETAILED_CAPTION>` 复判 → mv 到 `others/`；支持断点/并发/缓存重判 |
+| `musubi_train.sh` | **musubi 训练封装**（当前主用，支持 Base/turbo、fp8、blocks_to_swap、`ATTN=flash`）+ 保留原始权重 + 转 GGUF |
 | `prepare_dataset.py` | 风格图 → 预缩 + Florence 批量打标（`--batch`）+ `metadata.jsonl`/`.txt` |
 | `run_train.sh` / `train_dreambooth_lora_z_image.py` / `qnbit4.json` | diffusers 路线（备选，已适配 0.38） |
 | `convert_lora.py` | 可选：仅处理 sd.cpp 未识别的额外前缀（正常训练/出图不再需要） |
@@ -450,7 +536,12 @@ mystyle.safetensors = mystyle
 ## 10. 快速复现（换一套风格图）
 
 ```bash
-# 1) 数据（预缩 1536 + Florence 打标）
+# 0) 图源已按明星分目录：抽 2000 张 + 生成 style 数据集（源图不动，详见 §4.5）
+bash train_lora/make_style_dataset.sh 2000 style2000 mystyle
+# → DATA=/dataset/_runs/style2000_<时间>/style/style2000
+# 用第 0 步时，跳过下面第 1–2 步，直接预缓存/训练
+
+# 1) 新风格图源（预缩 1536 + Florence 打标）
 /data/venv/bin/python train_lora/prepare_dataset.py <风格图目录> /dataset/<name> \
   --trigger <trigger> --caption --max-side 1536
 cp -r /dataset/<name> /dataset/<name>1536  # 或直接改 dataset.toml

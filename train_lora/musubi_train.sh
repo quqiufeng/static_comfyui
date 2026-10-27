@@ -11,6 +11,7 @@
 #   EPOCHS    训练轮数 (默认 8)   STEPS  若设置则用 max_train_steps 覆盖
 #   FP8       1=开 --fp8_base --fp8_scaled（默认 0，保质量）
 #   BLOCKS    --blocks_to_swap N（默认 12，省显存）
+#   ATTN      flash|sdpa|sage|xformers（默认 flash；不可用自动回退 sdpa）
 #   RES/SEED  可选
 # =============================================================================
 set -euo pipefail
@@ -28,6 +29,7 @@ DIM="${DIM:-16}"
 LR="${LR:-1e-4}"
 EPOCHS="${EPOCHS:-8}"
 FP8="${FP8:-0}"
+ATTN="${ATTN:-flash}"
 
 # ── 显存自检 & 自动 blocks_to_swap（未显式设置 BLOCKS 时）──────────────
 detect_vram_gb() {
@@ -82,16 +84,42 @@ if [ -n "$BLOCKS" ] && [ "$BLOCKS" != "0" ]; then
     esac
 fi
 
+case "$ATTN" in
+    flash)
+        if "$PY/python" -c 'import flash_attn' >/dev/null 2>&1; then
+            ATTN_FLAG=(--flash_attn)
+        else
+            echo "[warn] flash_attn 不可用，回退 --sdpa" >&2
+            ATTN_FLAG=(--sdpa)
+        fi ;;
+    sage)
+        if "$PY/python" -c 'import sageattention' >/dev/null 2>&1; then
+            ATTN_FLAG=(--sage_attn)
+        else
+            echo "[warn] sageattention 不可用，回退 --sdpa" >&2
+            ATTN_FLAG=(--sdpa)
+        fi ;;
+    xformers)
+        if "$PY/python" -c 'import xformers' >/dev/null 2>&1; then
+            ATTN_FLAG=(--xformers)
+        else
+            echo "[warn] xformers 不可用，回退 --sdpa" >&2
+            ATTN_FLAG=(--sdpa)
+        fi ;;
+    sdpa)    ATTN_FLAG=(--sdpa) ;;
+    *)       echo "ERROR: ATTN=$ATTN（可选 flash|sdpa|sage|xformers）" >&2; exit 1 ;;
+esac
+
 EPOCH_ARGS=(--max_train_epochs "$EPOCHS" --save_every_n_epochs 1)
 [ -n "${STEPS:-}" ] && EPOCH_ARGS=(--max_train_steps "$STEPS" --save_every_n_steps "${SAVE_EVERY:-200}")
 
-echo "DIT=$DIT"; echo "ADAPTER=${ADAPTER:-<none>} DATA=$DATA OUT=$OUT DIM=$DIM EPOCHS=$EPOCHS FP8=$FP8 BLOCKS=$BLOCKS"
+echo "DIT=$DIT"; echo "ADAPTER=${ADAPTER:-<none>} DATA=$DATA OUT=$OUT DIM=$DIM EPOCHS=$EPOCHS FP8=$FP8 BLOCKS=$BLOCKS ATTN=${ATTN_FLAG[*]}"
 
 "$PY/accelerate" launch --num_cpu_threads_per_process 1 --mixed_precision bf16 \
   "$MUSUBI/zimage_train_network.py" \
   --dit "$DIT" --vae "$VAE" --text_encoder "$TE" \
   --dataset_config "$DATA/dataset.toml" \
-  --sdpa --mixed_precision bf16 \
+  "${ATTN_FLAG[@]}" --mixed_precision bf16 \
   --timestep_sampling shift --weighting_scheme none --discrete_flow_shift 2.0 \
   --optimizer_type adamw8bit --learning_rate "$LR" \
   --gradient_checkpointing \

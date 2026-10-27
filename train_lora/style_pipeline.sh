@@ -86,7 +86,9 @@ mapfile -t IMGS < <(find "$OUT" -maxdepth 1 -type f \
     \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' -o -iname '*.bmp' \) | sort)
 [ "${#IMGS[@]}" -gt 0 ] || die "筛选后为空"
 
-log "打标 ${#IMGS[@]} 张（task=$TASK）..."
+# 一次 --batch 把所有图片喂给同一个 img2prompt 进程：Florence 只加载一次，
+# 后续逐张推理复用同一模型，不会每张重启。
+log "打标 ${#IMGS[@]} 张（task=$TASK，一次 --batch，模型只加载一次）..."
 printf '%s\n' "${IMGS[@]}" | "$IMG2PROMPT" --model-dir "$FLORENCE_DIR" \
     --task "$TASK" --beams 1 --max-new-tokens 32 --batch > /tmp/style_caps.txt 2>/dev/null || true
 mapfile -t CAPS < /tmp/style_caps.txt
