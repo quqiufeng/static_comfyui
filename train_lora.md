@@ -1,7 +1,9 @@
 # 训练自己的 z_image LoRA（风格锁定）
 
 > 目标：用几十张同风格图片训一个 **Z-Image LoRA**。以后出图直接
-> `backup.sh ... --lora my_style.safetensors:0.7` 就带该风格，**不用再手写风格提示词**。
+> `backup.sh ... --lora my_style.safetensors:1.2` 就带该风格，**不用再手写风格提示词**。
+> 注意：权重不是固定 0.7；本机风格 LoRA 实测 **0.7 几乎无感，v5 定稿 1.2**（见 §7.1）。
+> **训练规模已定稿：300 张高质量精选图 / 7 epochs（2100 步）即可**，继续加图没有明显收益。
 
 ## 训练任务（只有两类，2026-10-25 明确）
 
@@ -37,10 +39,11 @@
 | fp8 | **关**（`--fp8_base --fp8_scaled` 会掉质量） |
 | 分辨率 | **1536**（bucketed） |
 | 网络 | lora_zimage，`rank=alpha=16` |
-| 步数 | **总步数 = 图片数 × repeats × epochs ÷ batch_size**（例：200 张×1×8 = 1600 步；8 epochs 是常见值）。**每 1~2 个 epoch 存 checkpoint，训完出图盲测选最优**——最优往往**不是**最后一步 |
+| 数据量 | **300 张高质量精选**（定稿；510 / 866 均未优于 300，2000 张只会更慢；关键在质量与统一度） |
+| 步数 | **总步数 = 图片数 × repeats × epochs ÷ batch_size**。定稿：300 张 × 7 epochs = **2100 步**。**每 epoch 存 checkpoint，训完出图盲测选最优**——最优往往**不是**最后一步 |
 | 显存 | 20G：`--blocks_to_swap 12`（见 §16；显存被占时需更大，或先释放占显存的服务） |
-| 实测 | 11.4s/步（未解锁）；本机 3080 已解锁，训练约 **+30% → ~8.8s/步**；LoRA ~140MB |
-| 出图 | `backup.sh ... --lora <OUT_NAME>.safetensors:0.7`（或 `.gguf`） |
+| 实测 | **5.98s/步**（1536 / 20G 3080 / `ATTN=flash` / `BLOCKS=8`）；v5 300 张 / 7 epochs = 2100 步 / **3h31m** / loss 0.346；LoRA ~140MB |
+| 出图 | `backup.sh ... --lora <OUT_NAME>.safetensors:1.2`；**v5 定稿 1.2**（0.7 通常无感，见 §7.1） |
 
 **关键结论**：Base 模型训练 → 保细节（发丝/皮肤纹理）；turbo+adapter+fp8 会磨皮。
 详见 §9。
@@ -322,10 +325,12 @@ BASE=/dataset SKIP_MANUAL=1 LIMIT=2000 \
 - 只做：resize（长边 ≤1536，从 2048 源图再缩）→ 手工筛（可跳过）→ Florence 打标 → `style/<name>/dataset.toml` + 汇总表
 - **不扣脸、不去背景、不要求有人**；背景和场景本身就是风格的一部分
 
-### 4.5 每次训练抽样 2000 张（新目录 + JSON）
+### 4.5 每次训练抽样 300 张高质量图（新目录 + JSON）
 
-> 适用：图源已按明星分目录（`/dataset/<明星>/`）。每次训练从现有库抽固定数量，
-> **源图只读**（只 `cp`，不 `mv`/不 resize）；处理/打标复用 `style_pipeline.sh`。
+> **定稿：300 张高质量精选即可**（2026-10-31）。实测 300 张 / 7 epochs（2100 步）
+> 已能达到目标风格；510、866 张都没有更好，2000 张只会更慢，继续加量主要是浪费时间。
+> 图源已按明星分目录（`/dataset/<明星>/`）；**源图只读**（只 `cp`，不 `mv`/不 resize）；
+> 处理/打标复用 `style_pipeline.sh`。命令行里的 `style2000` 是历史目录名，实际数量以参数为准。
 
 `train_lora/make_style_dataset.sh` 做四件事：
 
@@ -338,14 +343,14 @@ BASE=/dataset SKIP_MANUAL=1 LIMIT=2000 \
 > 喂给同一个进程，Florence-2 加载一次后连续复用，不会逐张重启。
 
 ```bash
-# 抽 2000 张 + 处理打标
-bash train_lora/make_style_dataset.sh 2000 style2000 mystyle
+# 抽 300 张高质量图 + 处理打标（定稿规模）
+bash train_lora/make_style_dataset.sh 300 style2000 mystyle
 
 # 只抽样/复制/写 JSON，暂不打标
-PROCESS=0 bash train_lora/make_style_dataset.sh 2000 style2000 mystyle
+PROCESS=0 bash train_lora/make_style_dataset.sh 300 style2000 mystyle
 
 # 换一批（换 seed；同 seed = 同一批图，便于复现）
-SEED=123 bash train_lora/make_style_dataset.sh 2000 style2000 mystyle
+SEED=123 bash train_lora/make_style_dataset.sh 300 style2000 mystyle
 ```
 
 环境变量：
@@ -378,8 +383,8 @@ SEED=123 bash train_lora/make_style_dataset.sh 2000 style2000 mystyle
 {
   "created_at": "2026-10-27T13:30:00+08:00",
   "seed": 42,
-  "target": 2000,
-  "selected": 2000,
+  "target": 300,
+  "selected": 300,
   "source_root": "/dataset",
   "per_star": {"田曦薇": 26, "娜扎": 24, "...": 18},
   "images": [
@@ -397,11 +402,12 @@ SEED=123 bash train_lora/make_style_dataset.sh 2000 style2000 mystyle
 
 ```bash
 DATA=/dataset/_runs/style2000_<时间>/style/style2000 \
-  EPOCHS=4 BLOCKS=8 DIM=16 OUT=/data/lora/style2000 \
+  EPOCHS=7 BLOCKS=8 DIM=16 OUT=/data/lora/style2000 \
   bash train_lora/musubi_train.sh
 ```
 
-> 2000 张 × 4 epochs ≈ 8000 步，1536 档 3080 约 20 小时；每轮自动存 checkpoint，训完出图盲测选最优。
+> **定稿：300 张 × 7 epochs = 2100 步 / 3h31m / loss 0.346**（2026-10-31 实测，5.98s/步）。
+> 2000 张 × 4 epochs ≈ 8000 步 / 约 13 小时，且效果并不更好；每轮自动存 checkpoint，训完出图盲测选最优。
 
 ---
 
@@ -427,7 +433,7 @@ $PY/python $M/zimage_cache_text_encoder_outputs.py --dataset_config $D/dataset.t
 
 ```bash
 DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002.safetensors \
-ADAPTER= FP8=0 DIM=16 EPOCHS=8 \
+ADAPTER= FP8=0 DIM=16 EPOCHS=7 \
 DATA=/dataset/mystyle1536 OUT=/data/lora/mystyle_base \
 bash train_lora/musubi_train.sh
 # BLOCKS 不设时按显存/分辨率自动（20G/1536 约 8）；ATTN 默认 flash
@@ -442,7 +448,7 @@ bash train_lora/musubi_train.sh
 | `DATA` | `/dataset/mystyle1536` | 数据集目录 |
 | `OUT` | `/data/lora/mystyle_base` | 输出目录 |
 | `DIM` / `LR` | 16 / 1e-4 | network_dim=alpha / 学习率 |
-| `EPOCHS` / `STEPS` | 8 / 空 | 轮数；设 `STEPS` 则用 max_train_steps |
+| `EPOCHS` / `STEPS` | 7 / 空 | 轮数；定稿 300 张 × 7 = 2100 步；设 `STEPS` 则用 max_train_steps |
 | `FP8` | 0 | 1=开 fp8（掉质量，默认关；3080 无原生 fp8 加速） |
 | `BLOCKS` | 自动 | `--blocks_to_swap`（省显存）；不设时按显存/分辨率自动（20G/1536 约 8）。**512 人脸数据集设 `0` 可提速约 4 倍**（见 §16） |
 | `ATTN` | `flash` | `flash` / `sdpa` / `sage` / `xformers`；`flash_attn` 不可用时自动回退 `sdpa` |
@@ -465,6 +471,7 @@ musubi 输出是 sd-scripts 命名（`lora_unet_*`）。**sd.cpp 已原生兼容
 `safetensors` 与 `GGUF` 都能按扩展名自动加载，**不需要先转命名**：
 
 ```bash
+# 0.7 起调；风格 LoRA 若 0.7 看不出效果，按 §7.1 上调到 1.0~1.2
 ./cpp/sd/backup.sh 2560 1440 \
   --lora /data/lora/<name>/<OUT_NAME>.safetensors:0.7
 ```
@@ -478,10 +485,10 @@ musubi 输出是 sd-scripts 命名（`lora_unet_*`）。**sd.cpp 已原生兼容
 # backup.sh 会按 /data/lora/lora_triggers.conf 自动把触发词前置到默认提示词
 # 原始 musubi 输出、*.safetensors、转出的 .gguf 三种都可直接加载
 ./cpp/sd/backup.sh 2560 1440 \
-  --lora /data/lora/mystyle_base/mystyle.safetensors:0.7
+  --lora /data/lora/style2000_v5/mystyle.gguf:1.2
 # 输出: ✓ LoRA 触发词注入: mystyle
-#       Prompt: mystyle, solo,single woman,half body portrait...
-# sd.cpp: (420 / 420) LoRA tensors have been applied
+#       Prompt: ... soft lighting, mystyle, solo,single woman,half body portrait...
+# sd.cpp: (630 / 630) LoRA tensors have been applied
 ```
 
 触发词映射（`/data/lora/lora_triggers.conf`，可用 `LORA_TRIGGERS_FILE` 覆盖；模板见
@@ -489,6 +496,117 @@ musubi 输出是 sd-scripts 命名（`lora_unet_*`）。**sd.cpp 已原生兼容
 ```
 <lora 文件名> = <触发词>
 mystyle.safetensors = mystyle
+```
+
+### 7.1 2026-10-31 定稿：v5 风格 LoRA 出图参数（实测）
+
+训练规模已定稿：**300 张高质量精选 / 7 epochs = 2100 步 / 3h31m / loss 0.346**。
+`style2000_v5` 定稿 **1.2**；0.7 基本无感（v4 实测），1.0 偶发双人，1.2 稳定，效果已获用户确认。
+训练用 **Base**、推理挂 **Turbo**；sd.cpp 显示 **630/630** tensors 全应用。
+（v4 为 510 张 / 4 epochs，需 1.2 是因为权重幅度偏小；v5 已取代 v4。）
+
+| 项 | 值 |
+|---|---|
+| 扩散模型 | `/data/models/image/z_image_turbo-Q8_K_M.gguf` |
+| LoRA | `/data/lora/style2000_v5/mystyle.gguf`（或同目录 `.safetensors`） |
+| 权重 | **1.2**（定稿；0.7 无感；更高权重更易脸变/双人，未采用） |
+| 触发词 | `mystyle`（由 `/data/lora/lora_triggers.conf` 自动注入） |
+| steps / hires_steps | **20 / 40** |
+| cfg / sampler / scheduler | **2.0 / euler / discrete** |
+| hires | 开，strength **0.25**，upscaler **latent-bicubic** |
+| 尺寸 | 2560×1440（base 1920×1080）；pyq 2048×2048；xhs 1920×2560；竖屏 1440×2560 |
+| VAE tiling | tile 128 / overlap 0.5 |
+| FreSca | low 1.0 / high 1.25 / cutoff 20 |
+| EasyCache | `easycache,1,0.15,0.95` |
+| 后处理 | clarity 0；sharpen 0.3,1；smart_sharpen 0.5,2；edge_sharpen 0,2,0.3 |
+
+**最终 prompt**（质量前缀 + 默认 prompt + 自动触发词）：
+
+```
+masterpiece, best quality, ultra-detailed, sharp focus, 8k uhd, photorealistic, highly detailed, crisp, clear, centered composition, professional portrait, medium shot, realistic skin texture, soft lighting, mystyle, solo,single woman,half body standard portrait of a young woman, subject perfectly centered, symmetrical composition, front view, soft natural lighting, elegant pose, studio lighting, sharp eyes, solid soft light green background, sage green, clean seamless plain background, no props, flat solid color backdrop, fair skin, pale skin, smooth skin, matte skin, porcelain skin, flawless skin, medium close up
+```
+
+**negative（backup.sh 默认）**：
+
+```
+blurry, low quality, worst quality, jpeg artifacts, noise, grain, soft focus, out of focus, hazy, unclear, bad anatomy, deformed, border artifacts, edge distortion, tiling artifacts, edge artifacts, frame distortion, warped edges, stretched proportions, asymmetrical face, off-center, cropped, out of frame, partial face, cut off, incomplete head, cropped head, watermark, text, logo, signature, cropped shoulders, oily skin, shiny skin, greasy skin, glossy skin, plastic skin, skin blemishes, embedding:EasyNegative, embedding:bad-hands-5
+```
+
+```bash
+# 定稿效果（用户确认）：2560×1440 + w1.2 + seed 102986709
+REF=/home/quqiufeng/v4gguf_ref_2560x1440_20261030_231734.png
+SEED=102986709 ./cpp/sd/backup.sh --from-image "$REF" ~/v5_2560x1440.png 2560 1440 \
+  --lora /data/lora/style2000_v5/mystyle.gguf:1.2
+
+# 同参数、随机 seed
+SEED=$(shuf -i 1-2147483646 -n1) ./cpp/sd/backup.sh --from-image "$REF" ~/v5_2560x1440.png 2560 1440 \
+  --lora /data/lora/style2000_v5/mystyle.gguf:1.2
+
+# 朋友圈 2048×2048（同一 seed 可保持同一人）
+SEED=102986709 ./cpp/sd/backup.sh --from-image "$REF" ~/pyq.png 2048 2048 \
+  --lora /data/lora/style2000_v5/mystyle.gguf:1.2
+
+# 小红书 1920×2560
+SEED=102986709 ./cpp/sd/backup.sh --from-image "$REF" ~/xhs.png 1920 2560 \
+  --lora /data/lora/style2000_v5/mystyle.gguf:1.2
+```
+
+**已确认样张**（三张均通过）：
+
+| 用途 | 文件 | seed |
+|---|---|---|
+| 2560×1440 | `/home/quqiufeng/v5_2560x1440_w12_seed102986709_20261031_064703.png` | 102986709 |
+| 朋友圈 2048² | `/home/quqiufeng/v5_pyq_seed102986709_20261031_065635.png` | 102986709 |
+| 小红书 1920×2560 | `/home/quqiufeng/v5_xhs_seed_reroll2_20261031_071430.png` | 1340838768 |
+
+实测耗时（v5 GGUF 1.2，RTX 3080 20G）：
+
+| 尺寸 | 耗时 |
+|---|---|
+| 2560×1440 | 3m52s–3m55s |
+| pyq 2048×2048 | 4m48s |
+| xhs 1920×2560 | 5m55s–5m59s |
+| 1440×2560 | 约 4m10s（v4 同参实测） |
+
+注意：
+
+- `--from-image` **不还原 negative**（仍用 `backup.sh` 默认负面词）；参考图里内嵌的是 v4 LoRA，
+  命令中必须显式 `--lora .../style2000_v5/mystyle.gguf:1.2` 覆盖。尺寸可被位置参数覆盖；
+  seed 用环境变量 `SEED=...` 覆盖。**同 seed 可逐像素复现**（实测 diff=0）。
+- **xhs 1920×2560 容易在底部再生成一个头/半身**；在默认 negative 末尾追加
+  `two people, multiple women, duplicate, cloned face, extra head, disembodied head, second face, twins, mirror image, reflection`
+  后设为 `NEGATIVE_PROMPT`，实测恢复单人。
+- v5 训练：`/dataset/_runs/style2000_20261027_133634/`，300 张 / 7 epochs / 2100 步 /
+  3h31m / loss 0.346；输出 `/data/lora/style2000_v5/`
+  （`mystyle-000001~000006`、`mystyle.safetensors`、`mystyle.gguf`）。
+
+### 7.2 定稿样张参数记录（2026-10-31）
+
+三张用户确认样张的**完整出图参数**已单独落盘（PNG 内也嵌有 `tEXt:parameters`）：
+
+- 记录文件：`train_lora/records/2026-10-31_v5_final.json`
+  （prompt / negative / seed / 尺寸 / base 尺寸 / steps / cfg / sampler / lora / 耗时 / sha256 / 复现命令）
+- xhs 防双人负面词：`train_lora/records/2026-10-31_v5_xhs_negative.txt`
+
+| 用途 | 文件 | seed | 尺寸（base） | negative |
+|---|---|---|---|---|
+| 2560×1440 | `~/v5_2560x1440_w12_seed102986709_20261031_064703.png` | 102986709 | 2560×1440（1920×1080） | 默认 |
+| 朋友圈 | `~/v5_pyq_seed102986709_20261031_065635.png` | 102986709 | 2048×2048（1664×1664） | 默认 |
+| 小红书 | `~/v5_xhs_seed_reroll2_20261031_071430.png` | 1340838768 | 1920×2560（1536×2048） | 默认 + 防双人 |
+
+复现 xhs 定稿样张：
+
+```bash
+REF=/home/quqiufeng/v4gguf_ref_2560x1440_20261030_231734.png
+NEGATIVE_PROMPT="$(cat train_lora/records/2026-10-31_v5_xhs_negative.txt)" \
+SEED=1340838768 ./cpp/sd/backup.sh --from-image "$REF" ~/v5_xhs.png 1920 2560 \
+  --lora /data/lora/style2000_v5/mystyle.gguf:1.2
+```
+
+查看任意成图的记录参数：
+
+```bash
+./cpp/sd/build/img_hires --dump-meta ~/v5_xhs_seed_reroll2_20261031_071430.png
 ```
 
 ---
@@ -524,7 +642,7 @@ mystyle.safetensors = mystyle
 4. **turbo+adapter** 强行把少步数轨迹拽回连续流 → 偏低频。
 5. **分辨率 1024** 高频信息不足 → 2560 放大后更糊。
 
-改进（已采纳）：换 Base、关 fp8、rank16/alpha16、8 epochs、1536 分辨率、blocks_to_swap 4。
+改进（已采纳）：换 Base、关 fp8、rank16/alpha16、1536 分辨率、300 张精选 / 7 epochs（定稿）、blocks_to_swap 4。
 
 仍可做：
 - **caption 解耦**：把 `smooth skin / studio soft lighting` 写进 caption，推理只给触发词。
@@ -536,8 +654,8 @@ mystyle.safetensors = mystyle
 ## 10. 快速复现（换一套风格图）
 
 ```bash
-# 0) 图源已按明星分目录：抽 2000 张 + 生成 style 数据集（源图不动，详见 §4.5）
-bash train_lora/make_style_dataset.sh 2000 style2000 mystyle
+# 0) 图源已按明星分目录：抽 300 张高质量图 + 生成 style 数据集（源图不动，详见 §4.5）
+bash train_lora/make_style_dataset.sh 300 style2000 mystyle
 # → DATA=/dataset/_runs/style2000_<时间>/style/style2000
 # 用第 0 步时，跳过下面第 1–2 步，直接预缓存/训练
 
@@ -552,11 +670,11 @@ cp -r /dataset/<name> /dataset/<name>1536  # 或直接改 dataset.toml
 
 # 4) 训练 + 转 GGUF（§6）
 DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002.safetensors \
-FP8=0 BLOCKS=12 DIM=16 EPOCHS=8 DATA=/dataset/<name>1536 OUT=/data/lora/<name> \
+FP8=0 BLOCKS=12 DIM=16 EPOCHS=7 DATA=/dataset/<name>1536 OUT=/data/lora/<name> \
 bash train_lora/musubi_train.sh
 
 # 5) 出图（§7）
-./cpp/sd/backup.sh 2560 1440 --lora /data/lora/<name>/mystyle.safetensors:0.7
+./cpp/sd/backup.sh 2560 1440 --lora /data/lora/<name>/mystyle.safetensors:1.2
 ```
 
 ---
@@ -818,32 +936,43 @@ DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002
    都没有可感知收益（数据与身份已足够）。
 2. **Q8 明显优于 Q5**（细节/通透），是真正有效的杠杆 —— 优先用
    `DIFFUSION_MODEL=/data/models/image/z_image_turbo-Q8_K_M.gguf`。
-3. 想更"像"应走**推理侧**：LoRA 权重 0.7→0.9、CFG 2.0→3.0、或人脸局部重绘
-   （ADetailer 式），继续调训练配方收益很低。
+3. 想更"像"应走**推理侧**：LoRA 权重 0.7→0.9（风格 LoRA 实测要到 **1.0–1.2**，见 §7.1）、
+   CFG 2.0→3.0、或人脸局部重绘（ADetailer 式），继续调训练配方收益很低。
 
 ---
 
 ## 18. 出图尺寸预设（小红书图 / 朋友圈图）
 
-`backup.sh` 内置 `--preset` 社媒尺寸（Q8 默认，双 LoRA 照常）：
+`backup.sh` 内置 `--preset` 社媒尺寸（Q8 默认；耗时按 §7.1 的 v5 GGUF 1.2 实测）：
 
-| preset | 别名 | 尺寸 | 比例 | 用途 |
+| preset | 别名 | 尺寸 | 比例 | 用途 / 实测耗时 |
 |--------|------|------|------|------|
-| `xhs` | `小红书` / `xiaohongshu` | **1920×2560** | 3:4 | 小红书竖图 |
-| `pyq` | `朋友圈` / `moments` | **2048×2048** | 1:1 | 朋友圈方图（约 2.5min/张） |
+| `xhs` | `小红书` / `xiaohongshu` | **1920×2560** | 3:4 | 小红书竖图，约 **5m55s–5m59s** |
+| `pyq` | `朋友圈` / `moments` | **2048×2048** | 1:1 | 朋友圈方图，约 **4m48s** |
+| — | 直接传像素 | **1440×2560** | 9:16 | 竖屏，约 **4m10s**（v4 同参） |
 
 ```bash
+# 风格 LoRA v5（0.7 无感，用 1.2）
 ./cpp/sd/backup.sh --preset xhs ~/xhs.png \
-  --lora /data/lora/liuhaocun/liuhaocun.safetensors:0.7 \
-  --lora /data/lora/mystyle_base/mystyle.safetensors:0.6
+  --lora /data/lora/style2000_v5/mystyle.gguf:1.2
 
 ./cpp/sd/backup.sh --preset pyq ~/pyq.png \
-  --lora /data/lora/liuhaocun/liuhaocun.safetensors:0.7 \
-  --lora /data/lora/mystyle_base/mystyle.safetensors:0.6
+  --lora /data/lora/style2000_v5/mystyle.gguf:1.2
+
+# 竖屏 1440×2560
+./cpp/sd/backup.sh 1440 2560 \
+  --lora /data/lora/style2000_v5/mystyle.gguf:1.2
+
+# 定稿 seed（2560/pyq 已验证）；xhs 同 seed 易出双人，见 §7.1 防双人负面词
+SEED=102986709 ./cpp/sd/backup.sh --preset pyq ~/pyq.png \
+  --lora /data/lora/style2000_v5/mystyle.gguf:1.2
+SEED=102986709 ./cpp/sd/backup.sh --preset xhs ~/xhs.png \
+  --lora /data/lora/style2000_v5/mystyle.gguf:1.2
 ```
 
 说明：不给 preset 时默认 2560×1440 横版；也可直接传像素，如 `backup.sh 1920 2560 ...`。
 朋友圈统一用 2048×2048（1440×1440 偏糊，2560² 太慢）。
+身份 LoRA 权重仍从 0.7 起；风格 LoRA 若 0.7 看不出，按 §7.1 上调到 1.0–1.2。
 
 ---
 
@@ -857,10 +986,23 @@ DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002
 # 查看某张图的参数
 ./cpp/sd/build/img_hires --dump-meta ~/out.png
 
-# 从参考图复刻（读回 prompt/seed/steps/cfg/sampler/lora/尺寸，重出一张）
+# 从参考图复刻（读回 prompt/steps/cfg/sampler/hires/lora/尺寸）
 ./cpp/sd/backup.sh --from-image ~/out.png ~/new.png
-# 说明：CLI/env 显式给的参数优先，未给的用参考图里的
+
+# 只换随机 seed（复刻 §7.1 v5 定稿参数；参考图内已含 v5 LoRA 1.2）
+REF=/home/quqiufeng/v5_2560x1440_w12_seed102986709_20261031_064703.png
+SEED=$(shuf -i 1-2147483646 -n1) ./cpp/sd/backup.sh --from-image "$REF" ~/out.png
+
+# 复刻参数但改尺寸（位置参数优先于参考图尺寸）
+SEED=$(shuf -i 1-2147483646 -n1) ./cpp/sd/backup.sh --from-image "$REF" ~/pyq.png 2048 2048
 ```
+
+说明：
+
+- CLI/env 显式给的参数优先；未给的用参考图里的。`lora` 连同权重（如 `mystyle.gguf:1.2`）一起恢复。
+- **`negative` 不还原**，仍用 `backup.sh` 默认负面词；§7.1 的 xhs 定稿图另加了防双人负面词，复刻时需自行设 `NEGATIVE_PROMPT`。
+- `clarity/sharpen/fresca/cache` 也走当前默认值；需要不同就显式设环境变量。
+- `--preset` 会被参考图尺寸覆盖；要改尺寸请用位置参数（`out.png 2048 2048`）。
 
 用途：忘了用过的 prompt / 参数，直接拿参考图即可复刻。旧图（本功能之前生成的）没有该元数据。
 

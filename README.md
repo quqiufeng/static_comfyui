@@ -109,7 +109,7 @@ REALISM=0 SEED=42 bash cpp/sd/backup_qwen.sh '<提示词>' ./output/out.png 2560
 
 HiResFix ≠ 插值放大。流程（`cpp/sd/backup.sh` → `img_hires` → `libsdcpp_adapter.so` → sd.cpp）：
 
-1. **base 阶段**：在较低分辨率（如 1920×1080）跑完整采样，出构图与主体（默认 `steps=16`）。
+1. **base 阶段**：在较低分辨率（如 1920×1080）跑完整采样，出构图与主体（默认 `steps=20`）。
 2. **latent 放大**：直接在 latent 空间插值放大到目标尺寸（`latent-bicubic` 默认偏柔 / `latent-bislerp` 保细节），**不经过像素域**，无放大算法的涂抹感；等价 ComfyUI 的 `LatentUpscale(bicubic)`。
 3. **二次采样（denoise 重绘）**：加噪后以 `hires_strength=0.25` 的去噪强度二次采样（默认柔化档）。sd.cpp 按 sd-webui 语义先把调度总步数放大为 `hires_steps / strength`（30/0.25=120），再截取尾部**恰好 30 步**有效去噪（`request.cpp:449`），既补细节又不破坏构图。等价 `KSampler(denoise=0.25)`；想要更强毛孔纹理可回 E1xMIN 档（`strength=0.4`）。
 4. **后处理**：clarity 局部对比 / sharpen / smart_sharpen / edge_sharpen（`sdcpp_adapter.cpp` postproc）。
@@ -145,6 +145,14 @@ HiResFix ≠ 插值放大。流程（`cpp/sd/backup.sh` → `img_hires` → `lib
 | 4K（倍数上限） | 3840×2160 | 2160×3840 | 2560×1440 → 1.5× |
 
 注意：`2560×1440 / 1440×2560` 中 1440 是 **32 整除而非 64 整除**——z_image/Qwen 下完全合规并命中硬编码表（最优 1.33×），仅 SDXL 会被抬到 1472。表外自定义尺寸走通用公式（目标 latent ×4/5、对齐到 8 的倍数），只要倍数 ≤1.5× 即可用。
+
+> **风格 LoRA 出图定稿（2026-10-31）**：`/data/lora/style2000_v5/mystyle.gguf:1.2`，
+> steps 20 / hires 40 / cfg 2.0 / euler / discrete / hires_strength 0.25 / latent-bicubic，
+> 2560×1440（base 1920×1080），实测 3m52s–3m55s；0.7 权重几乎无感。
+> 训练规模定稿：**300 张高质量精选 / 7 epochs（2100 步 / 3h31m）即可**。
+> 完整 prompt / 负面词 / pyq / xhs / 竖屏命令见
+> [train_lora.md §7.1](./train_lora.md#71-2026-10-31-定稿v5-风格-lora-出图参数实测)；
+> 三张定稿样张的完整参数记录见 `train_lora/records/2026-10-31_v5_final.json`。
 
 对照关闭缓存与参数扫描区间见下节与 `cpp/sd/backup.sh` 头注释（默认档已于 2026-09-27 由 E1xMIN 切为 MIN 全低配，见头注释）。
 

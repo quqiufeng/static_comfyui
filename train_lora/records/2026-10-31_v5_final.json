@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "created_at": "2026-10-31",
+  "recipe": "z_image_v5_style_final",
+  "note": "Three user-approved v5 samples. Parameters are also embedded in each PNG tEXt chunk 'parameters'.",
+  "training": {
+    "run_dir": "/dataset/_runs/style2000_20261027_133634",
+    "images": 300,
+    "epochs": 7,
+    "steps": 2100,
+    "duration": "3h31m",
+    "loss": 0.346,
+    "lora_dir": "/data/lora/style2000_v5",
+    "lora": "/data/lora/style2000_v5/mystyle.gguf",
+    "weight": 1.2,
+    "trigger": "mystyle"
+  },
+  "models": {
+    "diffusion_model": "/data/models/image/z_image_turbo-Q8_K_M.gguf",
+    "llm": "/data/models/image/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+    "vae": "/data/models/image/ae.safetensors",
+    "clip_l": "/data/models/image/clip_l.safetensors",
+    "clip_g": "/data/models/image/clip_g.safetensors"
+  },
+  "common": {
+    "prompt": "masterpiece, best quality, ultra-detailed, sharp focus, 8k uhd, photorealistic, highly detailed, crisp, clear, centered composition, professional portrait, medium shot, realistic skin texture, soft lighting, mystyle, solo,single woman,half body standard portrait of a young woman, subject perfectly centered, symmetrical composition, front view, soft natural lighting, elegant pose, studio lighting, sharp eyes, solid soft light green background, sage green, clean seamless plain background, no props, flat solid color backdrop, fair skin, pale skin, smooth skin, matte skin, porcelain skin, flawless skin, medium close up",
+    "negative_default": "blurry, low quality, worst quality, jpeg artifacts, noise, grain, soft focus, out of focus, hazy, unclear, bad anatomy, deformed, border artifacts, edge distortion, tiling artifacts, edge artifacts, frame distortion, warped edges, stretched proportions, asymmetrical face, off-center, cropped, out of frame, partial face, cut off, incomplete head, cropped head, watermark, text, logo, signature, cropped shoulders, oily skin, shiny skin, greasy skin, glossy skin, plastic skin, skin blemishes, embedding:EasyNegative, embedding:bad-hands-5",
+    "steps": 20,
+    "hires_steps": 40,
+    "cfg": 2.0,
+    "method": "euler",
+    "scheduler": "discrete",
+    "hires": 1,
+    "hires_strength": 0.25,
+    "hires_upscaler": "latent-bicubic",
+    "vae_tiling": 1,
+    "vae_tile_size": 128,
+    "vae_tile_overlap": 0.5,
+    "fresca": "1,1,1.25,20",
+    "cache": "easycache,1,0.15,0.95",
+    "clarity": 0.0,
+    "sharpen": "0.3,1",
+    "smart_sharpen": "0.5,2",
+    "edge_sharpen": "0,2,0.3",
+    "lora": "/data/lora/style2000_v5/mystyle.gguf:1.2",
+    "reference_image": "/home/quqiufeng/v4gguf_ref_2560x1440_20261030_231734.png"
+  },
+  "samples": [
+    {
+      "label": "2560x1440",
+      "file": "/home/quqiufeng/v5_2560x1440_w12_seed102986709_20261031_064703.png",
+      "sha256": "b861519faff0417743c56da0ad4aabee3c6e0cfb56566ddcf5c0fdc1791db928",
+      "size_bytes": 4664274,
+      "seed": 102986709,
+      "width": 2560,
+      "height": 1440,
+      "base_width": 1920,
+      "base_height": 1080,
+      "negative": "blurry, low quality, worst quality, jpeg artifacts, noise, grain, soft focus, out of focus, hazy, unclear, bad anatomy, deformed, border artifacts, edge distortion, tiling artifacts, edge artifacts, frame distortion, warped edges, stretched proportions, asymmetrical face, off-center, cropped, out of frame, partial face, cut off, incomplete head, cropped head, watermark, text, logo, signature, cropped shoulders, oily skin, shiny skin, greasy skin, glossy skin, plastic skin, skin blemishes, embedding:EasyNegative, embedding:bad-hands-5",
+      "duration": "3m55s",
+      "command": "REF=/home/quqiufeng/v4gguf_ref_2560x1440_20261030_231734.png; SEED=102986709 ./cpp/sd/backup.sh --from-image \"$REF\" ~/v5_2560x1440.png 2560 1440 --lora /data/lora/style2000_v5/mystyle.gguf:1.2"
+    },
+    {
+      "label": "pyq_2048x2048",
+      "file": "/home/quqiufeng/v5_pyq_seed102986709_20261031_065635.png",
+      "sha256": "aeb2a7d8fe7c9d6a2cc3021a59ccf6357a4ee0a039347be227d394857517aa8f",
+      "size_bytes": 5585309,
+      "seed": 102986709,
+      "width": 2048,
+      "height": 2048,
+      "base_width": 1664,
+      "base_height": 1664,
+      "negative": "blurry, low quality, worst quality, jpeg artifacts, noise, grain, soft focus, out of focus, hazy, unclear, bad anatomy, deformed, border artifacts, edge distortion, tiling artifacts, edge artifacts, frame distortion, warped edges, stretched proportions, asymmetrical face, off-center, cropped, out of frame, partial face, cut off, incomplete head, cropped head, watermark, text, logo, signature, cropped shoulders, oily skin, shiny skin, greasy skin, glossy skin, plastic skin, skin blemishes, embedding:EasyNegative, embedding:bad-hands-5",
+      "duration": "4m48s",
+      "command": "REF=/home/quqiufeng/v4gguf_ref_2560x1440_20261030_231734.png; SEED=102986709 ./cpp/sd/backup.sh --from-image \"$REF\" ~/v5_pyq.png 2048 2048 --lora /data/lora/style2000_v5/mystyle.gguf:1.2"
+    },
+    {
+      "label": "xhs_1920x2560",
+      "file": "/home/quqiufeng/v5_xhs_seed_reroll2_20261031_071430.png",
+      "sha256": "6a5a45f0c4bdff39a7caf061deb01b875468ecfb773ecaf94e4a222ea59f88bb",
+      "size_bytes": 6279697,
+      "seed": 1340838768,
+      "width": 1920,
+      "height": 2560,
+      "base_width": 1536,
+      "base_height": 2048,
+      "negative": "blurry, low quality, worst quality, jpeg artifacts, noise, grain, soft focus, out of focus, hazy, unclear, bad anatomy, deformed, border artifacts, edge distortion, tiling artifacts, edge artifacts, frame distortion, warped edges, stretched proportions, asymmetrical face, off-center, cropped, out of frame, partial face, cut off, incomplete head, cropped head, watermark, text, logo, signature, cropped shoulders, oily skin, shiny skin, greasy skin, glossy skin, plastic skin, skin blemishes, two people, multiple women, duplicate, cloned face, extra head, disembodied head, second face, twins, mirror image, reflection, embedding:EasyNegative, embedding:bad-hands-5",
+      "negative_extra": "two people, multiple women, duplicate, cloned face, extra head, disembodied head, second face, twins, mirror image, reflection",
+      "duration": "5m55s",
+      "command": "REF=/home/quqiufeng/v4gguf_ref_2560x1440_20261030_231734.png; NEGATIVE_PROMPT=\"$(cat train_lora/records/2026-10-31_v5_xhs_negative.txt)\" SEED=1340838768 ./cpp/sd/backup.sh --from-image \"$REF\" ~/v5_xhs.png 1920 2560 --lora /data/lora/style2000_v5/mystyle.gguf:1.2"
+    }
+  ]
+}
