@@ -4,6 +4,8 @@
 > `backup.sh ... --lora my_style.safetensors:1.2` 就带该风格，**不用再手写风格提示词**。
 > 注意：权重不是固定 0.7；本机风格 LoRA 实测 **0.7 几乎无感，v5 定稿 1.2**（见 §7.1）。
 > **训练规模已定稿：300 张高质量精选图 / 7 epochs（2100 步）即可**，继续加图没有明显收益。
+> **人脸 LoRA 已定稿：4 epochs 足够**（不必 8–12），512 对齐脸 / rank32 / `BLOCKS=0`；
+> 批量脚本 `train_lora/train_faces_batch.sh`（见 §14.9）。
 
 ## 训练任务（只有两类，2026-10-25 明确）
 
@@ -770,9 +772,9 @@ $PY/python $M/zimage_cache_text_encoder_outputs.py --dataset_config $D/dataset.t
   --text_encoder /data/models/z-image-te-qwen3.safetensors --batch_size 8 --device cuda
 
 DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002.safetensors \
-  FP8=0 BLOCKS=0 DIM=32 EPOCHS=10 DATA=$D OUT=/data/lora/celebA OUT_NAME=celebA \
+  FP8=0 BLOCKS=0 DIM=32 EPOCHS=4 DATA=$D OUT=/data/lora/celebA OUT_NAME=celebA \
   bash train_lora/musubi_train.sh
-# → /data/lora/celebA/celebA.safetensors
+# → /data/lora/celebA/celebA.safetensors（4 epochs 足够；见 §14.9）
 ```
 
 ### 13.4 出图（触发词自动注入）
@@ -799,10 +801,13 @@ LoRA 重命名为 `<触发词>.safetensors`），然后：
 ### 14.2 收集数据（人工）
 | 项 | 要求 |
 |----|------|
-| 数量 | 20~50 张（质量优先，宁精勿滥） |
+| 数量 | **≥20 张可训；200+ 张更稳**。2026-10-31 实测 214–1685 张均用 **4 epochs** 足够，不必 8–12 |
 | 内容 | **同一个人**；角度（正/半侧/侧）、表情、光照、远近、换装换背景多样 |
 | 排除 | 他人、重滤镜/重磨皮、遮脸（口罩/手/大墨镜）、糊图、低清、多脸同框（会自动取最大脸，但尽量单人） |
 | 分辨率 | 越高越好（≥1024 更好，脚本会裁到 512 对齐脸） |
+
+> 数量不是越多越好：大目录里混入的他人/糊图/重滤镜会稀释身份；宁精勿滥。
+> 本机已按 `/dataset/<明星>/` 直接批量训练（≥200 张的 10 位，见 §14.8）。
 
 ### 14.3 制作对齐脸数据集（cpp/face）
 ```bash
@@ -810,10 +815,10 @@ LoRA 重命名为 `<触发词>.safetensors`），然后：
 bash train_lora/make_face_dataset.sh /path/to/star_photos celebA
 # → /dataset/celebA_face/{images/*.png(512对齐脸), *.txt, dataset.toml}
 ```
-> caption 形如 `celebA, A woman with long black hair wearing a red dress.`——描述服装/背景，身份留给触发词，
-> 正是身份 LoRA 需要的"解耦"。
+> caption 形如 `celebA, A woman with long black hair wearing a red dress.`——描述服装/背景，表情/光照，
+> 身份留给触发词，正是身份 LoRA 需要的"解耦"。
 
-### 14.4 预缓存 + 训练（身份建议 rank32~64、步数偏多）
+### 14.4 预缓存 + 训练（4 epochs 定稿）
 ```bash
 D=/dataset/celebA_face
 PY=/data/venv-musubi/bin; M=/opt/musubi-tuner/src/musubi_tuner
@@ -823,45 +828,100 @@ $PY/python $M/zimage_cache_text_encoder_outputs.py --dataset_config $D/dataset.t
   --text_encoder /data/models/z-image-te-qwen3.safetensors --batch_size 8 --device cuda
 
 DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002.safetensors \
-  FP8=0 BLOCKS=0 DIM=32 EPOCHS=12 OUT_NAME=celebA DATA=$D OUT=/data/lora/celebA \
+  FP8=0 BLOCKS=0 DIM=32 EPOCHS=4 OUT_NAME=celebA DATA=$D OUT=/data/lora/celebA \
   bash train_lora/musubi_train.sh
-# → /data/lora/celebA/celebA.safetensors（512 + BLOCKS=0，约 29 分钟，见 §16）
+# → celebA.safetensors + celebA.gguf；确认 gguf 后可删 safetensors
 ```
-| 超参 | 身份 LoRA 建议 |
+| 超参 | 身份 LoRA 定稿 |
 |------|----------------|
-| rank/alpha | 32（不够像 → 64） |
-| epochs | 10~16（每 epoch 存 checkpoint，横向对比选最优） |
-| 分辨率 | 512（对齐脸原生） |
+| rank/alpha | **32**（不够像再 64） |
+| epochs | **4**（不必 8–12；数据很少/相似度不足先 6） |
+| 分辨率 | **512**（对齐脸原生） |
 | lr | 1e-4 |
 | fp8 | 关 |
 | blocks_to_swap | **0**（512 显存充裕，比 12 快约 4 倍；见 §16） |
 
-### 14.5 触发词映射
-`/data/lora/lora_triggers.conf` 加一行：
+实测速度 **1.1–1.25s/步**（512 / BLOCKS=0）：
+100 张 / 4 epochs ≈ **8–10 分钟**；200 张 ≈ **18–22 分钟**；500 张 ≈ **45–50 分钟**；1000 张 ≈ **1.5 小时**。
+（含预缓存的整星耗时见 §14.8。）
+
+### 14.5 触发词映射与存放
+产出建议放 `/dataset/<明星>/lora/`，并在 `/data/lora/lora_triggers.conf` 加一行（`backup.sh` 只看文件名）：
 ```
-celebA.safetensors = celebA
+celebA.gguf = celebA
 ```
+`train_faces_batch.sh` 会自动写入映射；同名 `.safetensors` 不需要保留。
 
 ### 14.6 出图
 ```bash
-# 单独：只出这张脸
-./cpp/sd/backup.sh 2560 1440 --lora /data/lora/celebA/celebA.safetensors:0.7
-
-# 叠加风格 LoRA（脸 × 风格）
+# 只出这张脸：2560×1440
 ./cpp/sd/backup.sh 2560 1440 \
-  --lora /data/lora/celebA/celebA.safetensors:0.7 \
-  --lora /data/lora/mystyle_base/mystyle.safetensors:0.6
+  --lora /dataset/田曦薇/lora/tianxiwei.gguf:0.7
+
+# 朋友圈 2048×2048
+./cpp/sd/backup.sh 2048 2048 \
+  --lora /dataset/田曦薇/lora/tianxiwei.gguf:0.7
 ```
+- 默认提示词即可；触发词由 `lora_triggers.conf` 自动前置。
+- **只用身份 LoRA** = 不加风格 LoRA；需要风格时再叠加 `--lora /data/lora/style2000_v5/mystyle.gguf:1.2`。
+- 权重 **0.7 起**；不够像优先提到 0.8–0.9，而不是继续加 epoch。
 
 ### 14.7 相似度不够时的调法
-1. **rank 32→64**、epochs 12→16；多存 checkpoint 挑最像但不崩的。
-2. 数据里**脸部特写占比提高**（或 `--max-side` 更小、脸更满）。
-3. **出图权重** 0.7~0.9 上调。
-4. **剔除重滤镜样本**（磨皮会让身份特征丢失）。
+1. **出图权重 0.8–0.9**（先动推理侧）。
+2. **提高数据质量**：去重、去他人/糊图/重磨皮；正脸/半侧占比提高。
+3. epochs **4→6**（仅数据少或身份弱时）；不要回到 10–16，收益低且易过拟合。
+4. rank **32→64**；多存 checkpoint 对比。
 5. 加**人脸区域精修**（ADetailer 式局部重绘，待做）让 2560 下的脸更锐、更像。
-6. 数据不足（<15）时先补图，别硬训。
+6. 数据不足（<15）先补图，别硬训。
 
-### 14.8 合规
+### 14.8 批量训练：≥200 张的 10 位（2026-10-31 实测）
+
+`train_lora/train_faces_batch.sh` 顺序处理 `/dataset/<明星>/`：
+扣脸 512 → Florence 打标 → 缓存 latent/TE → **4 epochs / rank32 / BLOCKS=0** → 转 GGUF →
+删 checkpoint 和 safetensors（只留 `.gguf`）→ 清理临时数据集。
+
+```bash
+# 默认就是这 10 位；EPOCHS/DIM/CLEAN 可覆盖
+nohup bash train_lora/train_faces_batch.sh > /dataset/_face/batch.log 2>&1 &
+```
+
+| 明星 | 源图 | 触发词 | 整星耗时（含扣脸/打标/缓存） | 产出 |
+|---|---:|---|---:|---|
+| 田曦薇 | 1685 | `tianxiwei` | 2h57m | `/dataset/田曦薇/lora/tianxiwei.gguf` |
+| 杨幂 | 458 | `yangmi` | 50m | `/dataset/杨幂/lora/yangmi.gguf` |
+| 娜扎 | 429 | `naza` | 46m | `/dataset/娜扎/lora/naza.gguf` |
+| 陈都灵 | 351 | `chenduling` | 36m | `/dataset/陈都灵/lora/chenduling.gguf` |
+| 迪丽热巴 | 289 | `dilireba` | 30m | `/dataset/迪丽热巴/lora/dilireba.gguf` |
+| 白鹿 | 271 | `bailu` | 28m | `/dataset/白鹿/lora/bailu.gguf` |
+| 王楚然 | 235 | `wangchuran` | 24m | `/dataset/王楚然/lora/wangchuran.gguf` |
+| 程潇 | 231 | `chengxiao` | 24m | `/dataset/程潇/lora/chengxiao.gguf` |
+| 杨超越 | 215 | `yangchaoyue` | 22m | `/dataset/杨超越/lora/yangchaoyue.gguf` |
+| 鞠婧祎 | 214 | `jujingyi` | 22m | `/dataset/鞠婧祎/lora/jujingyi.gguf` |
+
+合计 **4,378 张 / 7h38m**。状态：`/dataset/_face/status.tsv`；日志：`/dataset/_face/latest.log`。
+每星产出 268M safetensors + 140M gguf；本机最终只保留 **gguf**（约 140M/人）。
+
+### 14.9 高清出图验证（2560 / pyq）
+
+`cpp/sd/gen_faces_2560.sh` 按人只挂身份 LoRA，默认提示词，**一人一张**：
+自动检测人脸数；双人/多人会用防重复负面词重试（最多 3 次）。
+
+```bash
+# 2560×1440
+OUTDIR=$HOME/face_2560 GEN_W=2560 GEN_H=1440 GEN_TAG=2560x1440 WEIGHT=0.7 \
+  bash cpp/sd/gen_faces_2560.sh
+
+# pyq 2048×2048
+OUTDIR=$HOME/face_pyq GEN_W=2048 GEN_H=2048 GEN_TAG=pyq2048 WEIGHT=0.7 \
+  bash cpp/sd/gen_faces_2560.sh
+```
+
+- 2026-10-31 两套各 10 张全部单人通过；2560 每张约 **4m10s–4m20s**，pyq 约 **5m–5m10s**。
+- 输出目录：`~/face_2560/`、`~/face_pyq/`；状态 `status.tsv`。
+- pyq 的田曦薇首张曾出双人，自动重试后单人。
+- **结论**：高清大图的人像迁移用身份 LoRA 训练解决；参考图/IPAdapter 路线在 2560 下容易漂。
+
+### 14.10 合规
 真实人物肖像权与用途由使用者自负。
 
 ---
@@ -874,25 +934,31 @@ celebA.safetensors = celebA
 | `/opt/StaticPy` | **StaticPy 编译的图像处理二进制工具集**（`tools/`、`imgproc/pil`、`upscale/up`、`align_head` 等，见 §4.1） |
 | `cpp/face/facecli` | 检测/对齐裁剪/解析 CLI |
 | `train_lora/make_face_dataset.sh` | 人物图片目录 → 对齐脸数据集 |
+| `train_lora/train_faces_batch.sh` | **批量身份 LoRA**：按明星目录扣脸→打标→缓存→4 epochs 训练→只留 gguf（§14.8） |
+| `cpp/sd/gen_faces_2560.sh` | **批量出图**：一人一张身份 LoRA，自动重试双人（§14.9） |
 | `train_lora/musubi_train.sh` | LoRA 训练（`OUT_NAME` 命名，自动转 sd.cpp 命名） |
-| `/data/lora/lora_triggers.conf` | LoRA→触发词映射（backup.sh 自动注入） |
-| `/data/lora/<name>/<OUT_NAME>.safetensors` | 训练产出（sd.cpp 可直接加载） |
+| `/data/lora/lora_triggers.conf` | LoRA→触发词映射（backup.sh 自动注入；只保留 `.gguf` 行） |
+| `/dataset/<明星>/lora/<trigger>.gguf` | 身份 LoRA 产出（sd.cpp 直接加载） |
+| `/data/lora/<name>/<OUT_NAME>.gguf` | 风格/通用 LoRA 产出 |
 
 ---
 
 ## 16. 速度调优（2026-10 实测，512 人脸数据集）
 
-> **结论：512 人脸/身份 LoRA 用 `BLOCKS=0`（不换出），约 29 分钟训完，
-> 比旧配方 `BLOCKS=12` 快约 4 倍。** 旧参数一直要 ~50 分钟。
+> **结论：512 人脸/身份 LoRA 用 `BLOCKS=0`（不换出），实测 **1.1–1.25s/步**，
+> 比旧配方 `BLOCKS=12` 快约 4 倍。**
+> **epochs 定稿 4**：100 张≈8–10min，200 张≈18–22min，500 张≈45–50min，1000 张≈1.5h。
+> 12 epochs（98 张≈29min）只作历史对照，不再默认。
 
-测试环境：RTX 3080 20G；98 张 512 对齐脸；Z-Image Base bf16；rank32；
-12 epochs（1176 步）；`--gradient_checkpointing` 开；fp8 关。
+测试环境：RTX 3080 20G；512 对齐脸；Z-Image Base bf16；rank32；
+`--gradient_checkpointing` 开；fp8 关。下表是早期 **12 epochs / 98 张** 的对比；
+定稿为 **4 epochs**，速度按 1.1–1.25s/步 × 图片数 × 4 估算。
 
 | `BLOCKS` | 显存 | 步速 | 12 epochs 预计 |
 |----------|------|------|----------------|
 | 12（旧默认） | ~10.3G | 6.15 s/步 | ~2h |
 | 4 | ~13.1G | 2.47 s/步 | ~47min |
-| **0（新推荐）** | **~14.5G** | **1.57 s/步** | **~29min** |
+| **0（推荐）** | **~14.5G** | **1.1–1.25 s/步** | **~29min** |
 
 原理：
 1. **block swap 是主要瓶颈**：每次前向/反向都要把换出的 block 在 CPU↔GPU 间搬运。
@@ -907,8 +973,8 @@ celebA.safetensors = celebA
 命令（身份 LoRA，见 §14.4）：
 ```bash
 DIT=/data/models/z-image-base/transformer/diffusion_pytorch_model-00001-of-00002.safetensors \
-  FP8=0 BLOCKS=0 DIM=32 EPOCHS=12 OUT_NAME=<trigger> \
-  DATA=/dataset/<name>_face OUT=/data/lora/<trigger> \
+  FP8=0 BLOCKS=0 DIM=32 EPOCHS=4 OUT_NAME=<trigger> \
+  DATA=/dataset/<name>_face OUT=/dataset/<明星>/lora \
   bash train_lora/musubi_train.sh
 ```
 
